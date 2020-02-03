@@ -1,0 +1,25 @@
+{
+    "remotePath": "/private/home/jgu/work/neuralrendering",
+    "host": "localhost",
+    "username": "jgu",
+    "password": "GGty1234",
+    "port": 20000,
+    "secure": false,
+    "protocol": "sftp",
+    "uploadOnSave": true,
+    "passive": true,
+    "debug": false,
+    "privateKeyPath": null,
+    "passphrase": null,
+    "ignore": [
+        "\\.vscode",
+        "\\.git",
+        "\\.DS_Store",
+        "\\__pycache__"
+    ],
+    "generatedFiles": {
+        "uploadOnSave": false,
+        "extensionsToInclude": [],
+        "path": ""
+    }
+}
