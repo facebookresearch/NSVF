@@ -1,7 +1,9 @@
 # Download blender 2.79 first
 BLENDER=/private/home/jgu/tools/blender-2.79b-linux-glibc219-x86_64/blender
-OBJ=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/1a6f615e8b1b5ae4dbbc9440457e303e/models/model_normalized.obj
-VIEWS=20
-OUTPUT=./tmp
+TARGET=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627
+VIEWS=100
+OUTPUT=$TARGET
 
-$BLENDER --background --verbose 4 --python render.py -- --output_folder $OUTPUT --views $VIEWS --camera_trace 'sphere_random' $OBJ # > nul 2>&1
+find /private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/  -name *.obj -print0 | \
+    xargs -0 -n1 -P40 -I {} \
+    $BLENDER --background --python render.py -- --output_folder $TARGET --views $VIEWS --camera_trace 'sphere_random' {}  > nul 2>&1
