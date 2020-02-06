@@ -17,7 +17,7 @@ class SingleObjRenderingTask(FairseqTask):
         """Add task-specific arguments to the parser"""
         parser.add_argument("data", help='data-path or data-directoy')
         parser.add_argument("--train-view", type=int, default=50, 
-                            help='number of views sampled for each shape')
+                            help="number of views sampled for training, can be unlimited if set -1")
 
     def __init__(self, args):
         super().__init__(args)
@@ -39,8 +39,13 @@ class SingleObjRenderingTask(FairseqTask):
             train=(split == 'train'))
 
     @property
+    def source_dictionary(self):
+        """Return the :class:`~fairseq.data.Dictionary` for the language
+        model."""
+        return None
+    
+    @property
     def target_dictionary(self):
         """Return the :class:`~fairseq.data.Dictionary` for the language
         model."""
         return None
-        

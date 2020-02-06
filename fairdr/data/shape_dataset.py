@@ -25,5 +25,12 @@ class RenderedImageDataset(FairseqDataset):
         self.train = train
         self.train_view = train_view
 
+    def ordered_indices(self):
+        return np.arange(len(self.paths))
+
+    def __getitem__(self, index):
+        
+
+
         from fairseq.pdb import set_trace
         set_trace()
