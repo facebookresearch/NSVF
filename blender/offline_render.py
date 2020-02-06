@@ -7,6 +7,10 @@
 
 import argparse, sys, os
 import numpy as np
+import bpy
+
+from math import radians
+from utils import get_calibration_matrix_K_from_blender, get_3x4_RT_matrix_from_blender, matrix2str
 
 parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
 parser.add_argument('--views', type=int, default=30,
@@ -33,24 +37,6 @@ parser.add_argument('--camera_trace', choices=['sphere_random', 'fixed', 'circle
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 args = parser.parse_args(argv)
-
-import bpy
-from utils import get_calibration_matrix_K_from_blender, get_3x4_RT_matrix_from_blender, matrix2str
-
-# bpy.context.scene.cycles.device = 'GPU'
-# prefs = bpy.context.user_preferences.addons['cycles'].preferences
-# print(prefs.compute_device_type)
-
-# for d in prefs.devices:
-#     print(d.name)
-#2.76-
-#bpy.context.user_preferences.system.compute_device_type = 'CUDA'
-#bpy.context.user_preferences.system.compute_device = 'CUDA_1'
-#2.77+
-# bpy.context.user_preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
-# bpy.context.user_preferences.addons['cycles'].preferences.compute_device = 'CUDA_1'
-#bpy.context.user_preferences.system.compute_device = 'CUDA_MU
-
 
 # Set up rendering of depth map.
 bpy.context.scene.use_nodes = True
@@ -80,6 +66,7 @@ links.new(render_layers.outputs['Normal'], scale_normal.inputs[1])
 bias_normal = tree.nodes.new(type="CompositorNodeMixRGB")
 bias_normal.blend_type = 'ADD'
 # bias_normal.use_alpha = True
+
 bias_normal.inputs[2].default_value = (0.5, 0.5, 0.5, 0)
 links.new(scale_normal.outputs[0], bias_normal.inputs[1])
 
@@ -176,7 +163,6 @@ os.makedirs(os.path.join(args.output_folder, model_identifier, 'extrinsic'))
 with open(os.path.join(args.output_folder, model_identifier, 'intrinsic.txt'), 'w') as fk:
     print(matrix2str(get_calibration_matrix_K_from_blender(cam.data)), file=fk)
 
-from math import radians
 normal_file_output.base_path = ''
 
 for i in range(0, args.views):
