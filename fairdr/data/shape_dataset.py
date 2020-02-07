@@ -28,6 +28,9 @@ class RenderedImageDataset(FairseqDataset):
     def ordered_indices(self):
         return np.arange(len(self.paths))
 
+    def num_tokens(self, index):
+        return 1  # useless for now...
+
     def __getitem__(self, index):
         
 
