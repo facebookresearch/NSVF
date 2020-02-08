@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from fairseq.tasks import FairseqTask, register_task
-from fairdr.data import RenderedImageDataset
+from fairdr.data import RenderedImageDataset, SampledPixelDataset, WorldCoordDataset
 
 
 @register_task("single_object_rendering")
@@ -45,6 +45,15 @@ class SingleObjRenderingTask(FairseqTask):
             self.args.view_per_batch,
             self.args.view_resolution,
             train=(split == 'train'))
+        
+        if split != 'test':
+            self.datasets[split] = SampledPixelDataset(
+                self.datasets[split],
+                self.args.pixel_per_view)
+                
+        self.datasets[split] = WorldCoordDataset(
+            self.datasets[split]
+        )
 
     @property
     def source_dictionary(self):

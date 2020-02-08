@@ -5,9 +5,10 @@
 
 import os, glob
 import numpy as np
+import torch
 
 from fairseq.data import FairseqDataset, BaseWrapperDataset
-from . import data_utils
+from . import data_utils, geometry
 
 # from .collaters import Seq2SeqCollater
 
@@ -57,10 +58,10 @@ class RenderedImageDataset(FairseqDataset):
     def __getitem__(self, index):
     
         def load_data(packed_data, img_idx):
-            image = data_utils.load_rgb(packed_data[img_idx][0], resolution=self.resolution)
-            pose = data_utils.load_matrix(packed_data[img_idx][1])
+            image, uv = data_utils.load_rgb(packed_data[img_idx][0], resolution=self.resolution)
+            extrinsics = data_utils.load_matrix(packed_data[img_idx][1])
             rgb, alpha = image[:3], image[3]  # C x H x W for RGB
-            return {'rgb': rgb, 'alpha': alpha, 'pose': pose}
+            return {'uv': uv, 'rgb': rgb, 'alpha': alpha, 'extrinsics': extrinsics}
 
         return [
             load_data(self.data[index][0], next(self.data_index[index])) 
@@ -68,17 +69,19 @@ class RenderedImageDataset(FairseqDataset):
         ], data_utils.load_matrix(self.data[index][1])
 
     def collater(self, samples):
+        uv =  np.array([[data['uv'] for data in sample[0]] for sample in samples])
         rgb = np.array([[data['rgb'] for data in sample[0]] for sample in samples])
         alpha = np.array([[data['alpha'] for data in sample[0]] for sample in samples])
-        pose = np.array([[data['pose'] for data in sample[0]] for sample in samples])
+        extrinsics = np.array([[data['extrinsics'] for data in sample[0]] for sample in samples])
         intrinsics = np.array([sample[1] for sample in samples])
 
         # from fairseq import pdb; pdb.set_trace()
         # transform to tensor
         return {
+            'uv': torch.from_numpy(uv),                # BV2HW
             'rgb': torch.from_numpy(rgb),              # BVCHW
             'alpha': torch.from_numpy(alpha),          # BVHW
-            'extrinsic': torch.from_numpy(pose),       # BV34
+            'extrinsic': torch.from_numpy(extrinsics),       # BV34
             'intrinsic': torch.from_numpy(intrinsics)  # B33
         }
 
@@ -90,5 +93,64 @@ class SampledPixelDataset(BaseWrapperDataset):
 
     def __init__(self, dataset, num_sample=None):
         super().__init__(dataset)
-
         self.num_sample = num_sample
+
+    def __getitem__(self, index):
+        packed_data, intrinsics = self.dataset[index]
+
+        # sample pixels from the original images
+        sample_index = [
+            data_utils.sample_pixel_from_image(
+                data['alpha'], self.num_sample)
+            for data in packed_data
+        ]
+        packed_data = [
+            {
+                'uv': data['uv'].reshape(2, -1)[:, sample_index[i]],
+                'rgb': data['rgb'].reshape(3, -1)[:, sample_index[i]],
+                'alpha': data['alpha'].reshape(-1)[sample_index[i]],
+                'extrinsics': data['extrinsics']
+            }
+            for i, data in enumerate(packed_data)
+        ]
+        return packed_data, intrinsics
+
+
+class WorldCoordDataset(BaseWrapperDataset):
+    """
+    A wrapper dataset. transform UV space into World space
+    """
+    def __getitem__(self, index):
+        packed_data, intrinsics = self.dataset[index]
+
+        def camera2world(data):
+            RT = np.vstack([data['extrinsics'], np.array([[0, 0, 0, 1.0]])])
+            inv_RT = np.linalg.inv(RT)
+
+            # get camera center (XYZ)
+            r0 = inv_RT[:3, 3]
+
+            # get points at a random depth (=1)
+            rt_cam = geometry.uv2cam(data['uv'], 1, intrinsics, True)
+            rt = geometry.cam2world(rt_cam, inv_RT)
+            
+            # get the ray direction
+            w = geometry.normalize(rt - r0[:, None], axis=0)
+            
+            return {'r0': r0, 'w': w, 'rgb': data['rgb'], 'alpha': data['alpha']}
+
+        return [camera2world(data) for data in packed_data]
+        
+    def collater(self, samples):
+        r0 =  np.array([[data['r0'] for data in sample] for sample in samples])
+        w = np.array([[data['w'] for data in sample] for sample in samples])
+        rgb = np.array([[data['rgb'] for data in sample] for sample in samples])
+        alpha = np.array([[data['alpha'] for data in sample] for sample in samples])
+
+        # transform to tensor
+        return {
+            'r0': torch.from_numpy(r0),       # BV3
+            'w': torch.from_numpy(w),         # BV3N
+            'rgb': torch.from_numpy(rgb),     # BV3N
+            'alpha': torch.from_numpy(alpha), # BVN
+        }

@@ -23,14 +23,19 @@ def load_rgb(path, resolution=None, with_alpha=True):
 
     img = skimage.img_as_float32(img)
     img = square_crop_img(img)
+    img_size = img.shape[0]
+
+    # uv coordinates
+    uv = np.flip(np.mgrid[0: img_size, 0: img_size], axis=0).astype(np.float32)
 
     if resolution is not None:
         img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_AREA)
+        uv = uv[:, ::img_size//resolution, ::img_size//resolution]
 
     img[:, :, :3] -= 0.5
     img[:, :, :3] *= 2.
     img = img.transpose(2, 0, 1)
-    return img
+    return img, uv
 
 
 def load_matrix(path):
@@ -47,6 +52,11 @@ def square_crop_img(img):
           center_coord[1] - min_dim // 2:center_coord[1] + min_dim // 2]
     return img
 
+
+def sample_pixel_from_image(alpha, num_sample):
+    noise = np.random.uniform(size=alpha.shape)
+    noise = noise.reshape(-1)
+    return np.argsort(noise)[:num_sample]
 
 
 class InfIndex(object):
