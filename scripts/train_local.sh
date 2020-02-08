@@ -13,7 +13,7 @@ fairseq-train $DATASET \
     --user-dir fairdr/ \
     --save-dir $MODEL_PATH \
     --max-epoch 80 \
-    --max-sentences 16 \
+    --max-sentences 2 \
     --task single_object_rendering \
     --arch $ARCH \
     --log-format json \
