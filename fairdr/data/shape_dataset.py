@@ -56,32 +56,30 @@ class RenderedImageDataset(FairseqDataset):
 
     def __getitem__(self, index):
     
-        def load_data(data, img_idx):
-            packed_data, ixt = data
+        def load_data(packed_data, img_idx):
             image = data_utils.load_rgb(packed_data[img_idx][0], resolution=self.resolution)
             pose = data_utils.load_matrix(packed_data[img_idx][1])
             rgb, alpha = image[:3], image[3]  # C x H x W for RGB
-
             return {'rgb': rgb, 'alpha': alpha, 'pose': pose}
 
         return [
-            load_data(self.data[index], next(self.data_index[index])) 
+            load_data(self.data[index][0], next(self.data_index[index])) 
             for _ in range(self.num_view)
-        ]
+        ], data_utils.load_matrix(self.data[index][1])
 
     def collater(self, samples):
-        
-        # gather
-        rgb = np.array([[data['rgb'] for data in sample] for sample in samples])
-        alpha = np.array([[data['alpha'] for data in sample] for sample in samples])
-        pose = np.array([[data['pose'] for data in sample] for sample in samples])
-        
-        from fairseq import pdb; pdb.set_trace()
+        rgb = np.array([[data['rgb'] for data in sample[0]] for sample in samples])
+        alpha = np.array([[data['alpha'] for data in sample[0]] for sample in samples])
+        pose = np.array([[data['pose'] for data in sample[0]] for sample in samples])
+        intrinsics = np.array([sample[1] for sample in samples])
+
+        # from fairseq import pdb; pdb.set_trace()
         # transform to tensor
         return {
-            'rgb': torch.from_numpy(rgb),      # BVCHW
-            'alpha': torch.from_numpy(alpha),  # BVHW
-            'pose': torch.from_numpy(pose)     # BV34
+            'rgb': torch.from_numpy(rgb),              # BVCHW
+            'alpha': torch.from_numpy(alpha),          # BVHW
+            'extrinsic': torch.from_numpy(pose),       # BV34
+            'intrinsic': torch.from_numpy(intrinsics)  # B33
         }
 
 
