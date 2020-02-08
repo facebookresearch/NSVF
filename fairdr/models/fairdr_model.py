@@ -33,11 +33,11 @@ class BaseFairDRModel(BaseFairseqModel):
         assert isinstance(self.encoder, FairDREncoder)
         assert isinstance(self.decoder, FairDRDecoder)
 
-    def forward(self, uv, ray):
-        # ray-marching
-        xyz = self.decoder(uv, ray, self.encoder)
+    def forward(self, **kwargs):
+        # ray-interection
+        xyz = self.decoder(**kwargs)
         
-        # return the representation color
+        # copy color
         return self.encoder(xyz)
 
 

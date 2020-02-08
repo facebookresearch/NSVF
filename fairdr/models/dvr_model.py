@@ -18,7 +18,8 @@ from fairseq.models import (
 )
 
 from fairdr.models.fairdr_model import BaseFairDRModel, FairDREncoder, FairDRDecoder
-
+from fairdr.modules.implicit import ImplicitField
+from fairdr.modules.raymarcher import UniformSearchRayMarcher
 
 @register_model('diffentiable_volumetric_rendering')
 class DVRModel(BaseFairDRModel):
@@ -37,7 +38,17 @@ class DVRModel(BaseFairDRModel):
     def add_args(parser):
         """Add model-specific arguments to the parser."""
         parser.add_argument('--ffn-embed-dim', type=int, metavar='N',
-                            help='encoder embedding dimension for FFN')
+                            help='encoder input dimension for FFN')
+        parser.add_argument('--ffn-hidden-dim', type=int, metavar='N',
+                            help='encoder hidden dimension for FFN')
+        parser.add_argument('--input-features', type=int, metavar='N',
+                            help='number of features for query')
+        parser.add_argument('--output-features', type=int, metavar='N',
+                            help='number of features the field returns')
+        parser.add_argument('--ffn-num-layers', type=int, metavar='N',
+                            help='number of FC layers used to encode')
+        parser.add_argument('--use-residual', action='store_true')
+
 
     @classmethod
     def build_encoder(cls, args):
@@ -45,7 +56,12 @@ class DVRModel(BaseFairDRModel):
 
     @classmethod
     def build_decoder(cls, args):
-        return FairDRDecoder(args)
+        return DVRDecoder(args)
+
+    def forward(self, ray_start, ray_dir, rgb, alpha, **kwargs):
+        from fairseq.pdb import set_trace; set_trace()
+
+        pass
 
 
 class DVREncoder(FairDREncoder):
@@ -53,10 +69,35 @@ class DVREncoder(FairDREncoder):
     def __init__(self, args):
         super().__init__(args)
 
-        self.fc = nn.Linear(args.ffn_embed_dim, args.ffn_embed_dim)
-        
+        self.args = args
+        self.field = ImplicitField(args)  
+
+    def occupancy(self, xyz):
+        return self.field(xyz)[1][:, :, :, -1]
+
+    def forward(self, xyz):
+        """
+        xyz: shape x view x pixel x world_coords
+        """
+        return self.field(xyz)[1][:, :, :, :3]  # rgb
+
+
+class DVRDecoder(FairDRDecoder):
+
+    def __init__(self, args):
+        super().__init__(args)
+
+        self.args = args
+        self.raymarcher = UniformSearchRayMarcher(args) 
+
+
 
 
 @register_model_architecture("diffentiable_volumetric_rendering", "dvr_base")
 def base_architecture(args):
-    args.ffn_embed_dim = getattr(args, "ffn_embed_dim", 256)
+    args.ffn_embed_dim = getattr(args, "ffn_embed_dim",    256)
+    args.ffn_hidden_dim = getattr(args, "ffn_hidden_dim",  256)
+    args.ffn_num_layers = getattr(args, "ffn_num_layers",  3)
+    args.input_features = getattr(args, "input_features",  3)   # xyz
+    args.output_features =getattr(args, "output_features", 4)  # texture (3) + Occupancy(1)
+    args.use_residual = getattr(args, "use_residual", True)

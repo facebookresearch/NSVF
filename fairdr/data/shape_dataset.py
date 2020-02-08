@@ -61,7 +61,12 @@ class RenderedImageDataset(FairseqDataset):
             image, uv = data_utils.load_rgb(packed_data[img_idx][0], resolution=self.resolution)
             extrinsics = data_utils.load_matrix(packed_data[img_idx][1])
             rgb, alpha = image[:3], image[3]  # C x H x W for RGB
-            return {'uv': uv, 'rgb': rgb, 'alpha': alpha, 'extrinsics': extrinsics}
+            return {
+                'uv': uv.reshape(2, -1), 
+                'rgb': rgb.reshape(3, -1), 
+                'alpha': alpha.reshape(-1), 
+                'extrinsics': extrinsics
+            }
 
         return [
             load_data(self.data[index][0], next(self.data_index[index])) 
@@ -78,11 +83,11 @@ class RenderedImageDataset(FairseqDataset):
         # from fairseq import pdb; pdb.set_trace()
         # transform to tensor
         return {
-            'uv': torch.from_numpy(uv),                # BV2HW
-            'rgb': torch.from_numpy(rgb),              # BVCHW
-            'alpha': torch.from_numpy(alpha),          # BVHW
-            'extrinsic': torch.from_numpy(extrinsics),       # BV34
-            'intrinsic': torch.from_numpy(intrinsics)  # B33
+            'uv': torch.from_numpy(uv),                 # BV2(HW)
+            'rgb': torch.from_numpy(rgb),               # BV3(HW)
+            'alpha': torch.from_numpy(alpha),           # BV(HW)
+            'extrinsic': torch.from_numpy(extrinsics),  # BV34
+            'intrinsic': torch.from_numpy(intrinsics)   # B33
         }
 
 
@@ -106,9 +111,9 @@ class SampledPixelDataset(BaseWrapperDataset):
         ]
         packed_data = [
             {
-                'uv': data['uv'].reshape(2, -1)[:, sample_index[i]],
-                'rgb': data['rgb'].reshape(3, -1)[:, sample_index[i]],
-                'alpha': data['alpha'].reshape(-1)[sample_index[i]],
+                'uv': data['uv'][:, sample_index[i]],
+                'rgb': data['rgb'][:, sample_index[i]],
+                'alpha': data['alpha'][sample_index[i]],
                 'extrinsics': data['extrinsics']
             }
             for i, data in enumerate(packed_data)
@@ -128,29 +133,29 @@ class WorldCoordDataset(BaseWrapperDataset):
             inv_RT = np.linalg.inv(RT)
 
             # get camera center (XYZ)
-            r0 = inv_RT[:3, 3]
+            ray_start = inv_RT[:3, 3]
 
             # get points at a random depth (=1)
             rt_cam = geometry.uv2cam(data['uv'], 1, intrinsics, True)
             rt = geometry.cam2world(rt_cam, inv_RT)
             
             # get the ray direction
-            w = geometry.normalize(rt - r0[:, None], axis=0)
+            ray_dir = geometry.normalize(rt - ray_start[:, None], axis=0)
             
-            return {'r0': r0, 'w': w, 'rgb': data['rgb'], 'alpha': data['alpha']}
+            return {'ray_start': ray_start, 'ray_dir': ray_dir, 'rgb': data['rgb'], 'alpha': data['alpha']}
 
         return [camera2world(data) for data in packed_data]
         
     def collater(self, samples):
-        r0 =  np.array([[data['r0'] for data in sample] for sample in samples])
-        w = np.array([[data['w'] for data in sample] for sample in samples])
+        ray_start =  np.array([[data['ray_start'] for data in sample] for sample in samples])
+        ray_dir = np.array([[data['ray_dir'] for data in sample] for sample in samples])
         rgb = np.array([[data['rgb'] for data in sample] for sample in samples])
         alpha = np.array([[data['alpha'] for data in sample] for sample in samples])
 
         # transform to tensor
         return {
-            'r0': torch.from_numpy(r0),       # BV3
-            'w': torch.from_numpy(w),         # BV3N
-            'rgb': torch.from_numpy(rgb),     # BV3N
-            'alpha': torch.from_numpy(alpha), # BVN
+            'ray_start': torch.from_numpy(ray_start),                   # BV3
+            'ray_dir': torch.from_numpy(ray_dir).transpose(2, 3),     # BVN3
+            'rgb': torch.from_numpy(rgb).transpose(2, 3), # BVN3
+            'alpha': torch.from_numpy(alpha),             # BVN
         }
