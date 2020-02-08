@@ -7,6 +7,10 @@
 
 import argparse, sys, os
 import numpy as np
+import bpy
+
+from math import radians
+from utils import get_calibration_matrix_K_from_blender, get_3x4_RT_matrix_from_blender, matrix2str
 
 parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
 parser.add_argument('--views', type=int, default=30,
@@ -33,23 +37,6 @@ parser.add_argument('--camera_trace', choices=['sphere_random', 'fixed', 'circle
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 args = parser.parse_args(argv)
-
-import bpy
-from utils import get_calibration_matrix_K_from_blender, get_3x4_RT_matrix_from_blender
-
-# bpy.context.scene.cycles.device = 'GPU'
-# prefs = bpy.context.user_preferences.addons['cycles'].preferences
-# print(prefs.compute_device_type)
-
-# for d in prefs.devices:
-#     print(d.name)
-#2.76-
-#bpy.context.user_preferences.system.compute_device_type = 'CUDA'
-#bpy.context.user_preferences.system.compute_device = 'CUDA_1'
-#2.77+
-# bpy.context.user_preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
-# bpy.context.user_preferences.addons['cycles'].preferences.compute_device = 'CUDA_1'
-#bpy.context.user_preferences.system.compute_device = 'CUDA_MU
 
 # Set up rendering of depth map.
 bpy.context.scene.use_nodes = True
@@ -79,6 +66,7 @@ links.new(render_layers.outputs['Normal'], scale_normal.inputs[1])
 bias_normal = tree.nodes.new(type="CompositorNodeMixRGB")
 bias_normal.blend_type = 'ADD'
 # bias_normal.use_alpha = True
+
 bias_normal.inputs[2].default_value = (0.5, 0.5, 0.5, 0)
 links.new(scale_normal.outputs[0], bias_normal.inputs[1])
 
@@ -153,8 +141,6 @@ scene.render.resolution_percentage = 100
 scene.render.alpha_mode = 'TRANSPARENT'
 cam = scene.objects['Camera']
 
-print(get_calibration_matrix_K_from_blender(cam.data))
-
 if args.camera_trace == 'fixed' or args.camera_trace == 'circle':
     assert args.views == 1 or args.camera_trace != 'fixed', 'fixed only support one position'
     cam.location = eval(args.camera_position)
@@ -162,20 +148,20 @@ if args.camera_trace == 'fixed' or args.camera_trace == 'circle':
 elif args.camera_trace == 'sphere_random':
     cam.location = sample_spherical(args.camera_radius)
 
-print(get_3x4_RT_matrix_from_blender(cam))
-
 cam_constraint = cam.constraints.new(type='TRACK_TO')
 cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
 cam_constraint.up_axis = 'UP_Y'
 b_empty = parent_obj_to_camera(cam)
 cam_constraint.target = b_empty
 
-model_identifier = os.path.split(os.path.split(args.obj)[0])[1]
-fp = os.path.join(args.output_folder, model_identifier, model_identifier)
+model_identifier = args.obj.split('/')[-3]
+
 scene.render.image_settings.file_format = 'PNG'  # set output format to .png
 
-from math import radians
-
+# make direc
+os.makedirs(os.path.join(args.output_folder, model_identifier, 'extrinsic'))
+with open(os.path.join(args.output_folder, model_identifier, 'intrinsic.txt'), 'w') as fk:
+    print(matrix2str(get_calibration_matrix_K_from_blender(cam.data)), file=fk)
 
 normal_file_output.base_path = ''
 
@@ -185,13 +171,17 @@ for i in range(0, args.views):
         stepsize = 360.0 / args.views
         rotation_mode = 'XYZ'
         print("Rotation {}, {}".format((stepsize * i), radians(stepsize * i)))
-        filename = '_r_{0:03d}'.format(int(i * stepsize))
         
+        filename = '_r_{0:03d}'.format(int(i * stepsize))
     else:
-        filename = '_r_{0:03d}'.format(int(i))
+        filename = '_{0:03d}'.format(int(i))
     
-    scene.render.filepath = fp + filename
-    normal_file_output.file_slots[0].path = fp + filename + "_normal"
+    scene.render.filepath = os.path.join(args.output_folder, model_identifier, 'rgb', 'model' + filename)
+    normal_file_output.file_slots[0].path = os.path.join(args.output_folder, model_identifier, 'normal', 'model' + filename + '.')
+
+    with open(os.path.join(args.output_folder, model_identifier, 'extrinsic', 'model' + filename + '.txt'), 'w') as frt:
+        print(matrix2str(get_3x4_RT_matrix_from_blender(cam)), file=frt)
+
     bpy.ops.render.render(write_still=True)  # render still
 
     if args.camera_trace == 'sphere_random':

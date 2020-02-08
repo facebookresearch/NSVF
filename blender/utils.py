@@ -110,3 +110,7 @@ def project_by_object_utils(cam, point):
             int(scene.render.resolution_y * render_scale),
             )
     return Vector((co_2d.x * render_size[0], render_size[1] - co_2d.y * render_size[1]))
+
+
+def matrix2str(m):
+    return '\n'.join([' '.join(['{:.4f}'.format(mii) for mii in list(mi)]) for mi in list(m)])
