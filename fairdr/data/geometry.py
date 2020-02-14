@@ -7,6 +7,15 @@ import numpy as np
 import torch
 
 
+# ----- numpy functions ------ #
+def parse_extrinsics(extrinsics, world2camera=True):
+    if extrinsics.shape[0] == 3 and extrinsics.shape[1] == 4:
+        extrinsics = np.vstack([extrinsics, np.array([[0, 0, 0, 1.0]])])
+    if world2camera:
+        extrinsics = np.linalg.inv(extrinsics).astype(np.float32)
+    return extrinsics
+    
+
 def parse_intrinsics(intrinsics):
     fx = intrinsics[0, 0]
     fy = intrinsics[1, 1]
@@ -34,4 +43,14 @@ def cam2world(xyz_cam, inv_RT):
 def normalize(a, axis=-1, order=2):
     l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
     l2[l2==0] = 1
-    return a / np.expand_dims(l2, axis)
+    return a / np.expand_dims(l2, axis), l2
+
+
+# ----- pytorch functions ------ #
+
+def ray(ray_start, ray_dir, depths):
+    if ray_start.dim() + 1 == ray_dir.dim():
+        ray_start = ray_start.unsqueeze(-2)
+    if depths.dim() + 1 == ray_dir.dim():
+        depths = depths.unsqueeze(-1)
+    return ray_start + ray_dir * depths

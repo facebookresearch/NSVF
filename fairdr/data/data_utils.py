@@ -29,7 +29,7 @@ def load_rgb(path, resolution=None, with_alpha=True):
     uv = np.flip(np.mgrid[0: img_size, 0: img_size], axis=0).astype(np.float32)
 
     if resolution is not None:
-        img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_AREA)
+        img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_NEAREST)
         uv = uv[:, ::img_size//resolution, ::img_size//resolution]
 
     img[:, :, :3] -= 0.5
@@ -38,8 +38,67 @@ def load_rgb(path, resolution=None, with_alpha=True):
     return img, uv
 
 
+def load_depth(path, resolution=None, depth_plane=5):
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+
+    ret,img = cv2.threshold(img, depth_plane, depth_plane, cv2.THRESH_TRUNC)
+    if resolution is not None:
+        h, w = img.shape[:2]
+        w, h = resolution, int(h/float(w)*resolution)
+        img  = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
+        #img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
+    #img *= 1e-4
+    if len(img.shape) ==3:
+        img = img[:,:,:1]
+        img = img.transpose(2,0,1)
+    else:
+        img = img[None,:,:]
+    return img
+
+
 def load_matrix(path):
-    return np.array([[float(w) for w in line.strip().split()] for line in open(path)])
+    return np.array([[float(w) for w in line.strip().split()] for line in open(path)]).astype(np.float32)
+
+
+def load_intrinsics(filepath, resized_width=None, invert_y=False):
+    # Get camera intrinsics
+    with open(filepath, 'r') as file:
+        f, cx, cy, _ = map(float, file.readline().split())
+        grid_barycenter = torch.Tensor(list(map(float, file.readline().split())))
+        scale = float(file.readline())
+        #print(file.readline())
+        file.readline()#what's this ? skip
+        height, width = map(float, file.readline().split())
+
+        try:
+            world2cam_poses = int(file.readline())
+        except ValueError:
+            world2cam_poses = None
+
+    if world2cam_poses is None:
+        world2cam_poses = False
+
+    world2cam_poses = bool(world2cam_poses)
+    
+    if resized_width is not None:
+        resized_height = int(height/float(width)*resized_width)
+
+        cx = cx/width * resized_width
+        cy = cy/height * resized_height
+        f = resized_width / width * f
+
+    fx = f
+    if invert_y:
+        fy = -f
+    else:
+        fy = f
+
+    # Build the intrinsic matrices
+    full_intrinsic = np.array([[fx, 0., cx, 0.],
+                               [0., fy, cy, 0],
+                               [0., 0, 1, 0],
+                               [0, 0, 0, 1]])
+    return full_intrinsic, grid_barycenter, scale, world2cam_poses
 
 
 def square_crop_img(img):
@@ -53,10 +112,24 @@ def square_crop_img(img):
     return img
 
 
-def sample_pixel_from_image(alpha, num_sample):
+def sample_pixel_from_image(alpha, num_sample, ignore_mask=1.0):
     noise = np.random.uniform(size=alpha.shape)
+    # if ignore_mask < 1:
+    #     _mask = alpha.astype(np.float32)
+    #     _mask = _mask + (1 - _mask) * ignore_mask
+    #     noise = noise * _mask
     noise = noise.reshape(-1)
-    return np.argsort(noise)[:num_sample]
+    return np.argsort(noise)[-num_sample:]
+
+
+def write_images(writer, images): 
+    from fairseq import metrics
+    for tag in images:
+        img = images[tag]
+        tag, dataform = tag.split(':')
+        writer.add_image(tag, img, 
+            metrics.get_meter('default', 'num_updates').val,
+            dataformats=dataform)
 
 
 class InfIndex(object):
