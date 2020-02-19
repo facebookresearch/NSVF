@@ -10,10 +10,12 @@ import torch.nn.functional as F
 import torch
 from torch import Tensor
 
-from fairseq import metrics, utils
+from fairseq import metrics
+from fairseq.utils import item
 from fairseq.criterions import FairseqCriterion, register_criterion
 
 import fairdr.criterions.utils as utils
+
 
 @register_criterion('dvr_loss')
 class DVRLossCriterion(FairseqCriterion):
@@ -58,20 +60,22 @@ class DVRLossCriterion(FairseqCriterion):
 
         alpha  = (sample['alpha'] > 0.5)
         missed = net_output['missed']
-
+        
         rgb_loss = utils.rgb_loss(
             net_output['predicts'], sample['rgb'], 
-            (~missed) & alpha, self.args.L1)
+            (~missed) & alpha, self.args.L1, True)
+        
         space_loss = utils.space_loss(
             net_output['occupancy'],
-            ~alpha)
+            ~alpha, True)
         occupancy_loss = utils.occupancy_loss(
             net_output['occupancy'],
-            missed & alpha)
+            missed & alpha, True)
         
         loss = self.args.rgb_weight * rgb_loss + \
                self.args.space_weight * space_loss + \
                self.args.occupancy_weight * occupancy_loss
+        loss = loss / float(alpha.numel())
 
         return loss, {
             'rgb_loss': rgb_loss.item(), 
@@ -108,6 +112,12 @@ class DVRLossCriterion(FairseqCriterion):
 @register_criterion('srn_loss')
 class SRNLossCriterion(DVRLossCriterion):
 
+    def __init__(self, args, task):
+        super().__init__(args, task)
+        if args.vgg_weight > 0:
+            from fairdr.criterions.perceptual_loss import VGGPerceptualLoss
+            self.vgg = VGGPerceptualLoss(resize=True)
+
     @staticmethod
     def add_args(parser):
         """Add criterion-specific arguments to the parser."""
@@ -116,16 +126,17 @@ class SRNLossCriterion(DVRLossCriterion):
         parser.add_argument('--rgb-weight', type=float, default=200.0)
         parser.add_argument('--reg-weight', type=float, default=1e-3)
         parser.add_argument('--depth-weight', type=float, default=0.0)
+        parser.add_argument('--gp-weight', type=float, default=0.0)
+        parser.add_argument('--vgg-weight', type=float, default=0.0)
 
     def compute_loss(self, model, net_output, sample, reduce=True):
 
         alpha  = (sample['alpha'] > 0.5)
-        target = sample['rgb'] * alpha.type_as(sample['rgb']).unsqueeze(-1)
         masks  = torch.ones_like(alpha)
-
+        
         losses = {}
         rgb_loss = utils.rgb_loss(
-            net_output['predicts'], target, 
+            net_output['predicts'], sample['rgb'], 
             masks, self.args.L1)
         losses['rgb_loss'] = (rgb_loss, self.args.rgb_weight)
 
@@ -138,9 +149,15 @@ class SRNLossCriterion(DVRLossCriterion):
             depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], masks)
             losses['depth_loss'] = (depth_loss, self.args.depth_weight)
 
-        # from fairseq.pdb import set_trace
-        # set_trace()
+        if self.args.gp_weight > 0:
+            losses['grd_loss'] = (net_output['grad_penalty'], self.args.gp_weight)
+
+        if self.args.vgg_weight > 0:
+            losses['vgg_loss'] = (self.vgg(
+                net_output['predicts'].view(-1, 3) / 2 + 0.5,
+                sample['rgb'].view(-1, 3)) / 2 + 0.5, 
+                self.args.vgg_weight)
 
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
         
-        return loss, {key: losses[key][0].item() for key in losses}
+        return loss, {key: item(losses[key][0]) for key in losses}

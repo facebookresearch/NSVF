@@ -10,31 +10,46 @@ import torch.nn.functional as F
 TINY = 1e-7
 
 
-def rgb_loss(predicts, rgbs, masks, L1=False):
+def rgb_loss(predicts, rgbs, masks, L1=False, sum=False):
     if masks.sum() == 0:
-        return predicts.new_zeros(1).sum()
+        loss = predicts.new_zeros(1)
+
     elif L1:
-        return torch.abs(predicts[masks] - rgbs[masks]).sum(-1).mean()
+        loss = torch.abs(predicts[masks] - rgbs[masks]).sum(-1)
+    
     else:
-        return ((predicts[masks] - rgbs[masks]) ** 2).sum(-1).mean()
+        loss = ((predicts[masks] - rgbs[masks]) ** 2).sum(-1)
+
+    return loss.mean() if not sum else loss.sum()
 
 
-def space_loss(occupancy, masks):
+def space_loss(occupancy, masks, sum=False):
     if masks.sum() == 0:
-        return occupancy.new_zeros(1).sum()
-    return F.binary_cross_entropy(occupancy[masks], torch.zeros_like(occupancy[masks]))
+        loss = occupancy.new_zeros(1)
+    else:
+        loss = F.binary_cross_entropy(occupancy[masks], torch.zeros_like(occupancy[masks]), reduction='none')
+
+    return loss.mean() if not sum else loss.sum()
 
 
-def occupancy_loss(occupancy, masks):
+def occupancy_loss(occupancy, masks, sum=False):
     if masks.sum() == 0:
-        return occupancy.new_zeros(1).sum()
-    return F.binary_cross_entropy(occupancy[masks], torch.ones_like(occupancy[masks]))
+        loss = occupancy.new_zeros(1)
+    else:
+        loss = F.binary_cross_entropy(occupancy[masks], torch.ones_like(occupancy[masks]), reduction='none')
+
+    return loss.mean() if not sum else loss.sum()
 
 
-def depth_regularization_loss(depths):
-    neg_penalty = (torch.min(depths, torch.zeros_like(depths)) ** 2)
-    return torch.mean(neg_penalty) * 10000.0
+def depth_regularization_loss(depths, sum=False):
+    loss = (torch.min(depths, torch.zeros_like(depths)) ** 2) * 10000.0
+    return loss.mean() if not sum else loss.sum()
 
 
-def depth_loss(depths, depth_gt, masks):
-    return ((depths[masks] - depth_gt[masks]) ** 2).mean()
+def depth_loss(depths, depth_gt, masks, sum=False):
+    if masks.sum() == 0:
+        loss = depths.new_zeros(1)
+    else:
+        loss = ((depths[masks] - depth_gt[masks]) ** 2)
+    
+    return loss.mean() if not sum else loss.sum()

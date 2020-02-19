@@ -39,8 +39,10 @@ def load_rgb(path, resolution=None, with_alpha=True):
 
 
 def load_depth(path, resolution=None, depth_plane=5):
+    if path is None:
+        return None
+    
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float32)
-
     ret,img = cv2.threshold(img, depth_plane, depth_plane, cv2.THRESH_TRUNC)
     if resolution is not None:
         h, w = img.shape[:2]
@@ -61,6 +63,12 @@ def load_matrix(path):
 
 
 def load_intrinsics(filepath, resized_width=None, invert_y=False):
+    try:
+        return load_matrix(filepath)
+    
+    except ValueError:
+        pass
+
     # Get camera intrinsics
     with open(filepath, 'r') as file:
         f, cx, cy, _ = map(float, file.readline().split())
@@ -122,6 +130,16 @@ def sample_pixel_from_image(alpha, num_sample, ignore_mask=1.0):
     return np.argsort(noise)[-num_sample:]
 
 
+def recover_image(img, min_val=-1, max_val=1):
+    sizes = img.size()
+    side_len = int(sizes[0]**0.5)
+    if len(sizes) == 1:
+        img = img.reshape(side_len, side_len)
+    else:
+        img = img.reshape(side_len, side_len, -1)
+    return ((img - min_val) / (max_val - min_val)).clamp(min=0, max=1).to('cpu')
+
+
 def write_images(writer, images): 
     from fairseq import metrics
     for tag in images:
@@ -140,10 +158,10 @@ class InfIndex(object):
         self.reset_permutation()
 
     def reset_permutation(self):
-        perm = self.size
         if self.shuffle:
-            perm = torch.randperm(perm)
-        self._perm = perm.tolist()
+            self._perm = torch.randperm(self.size).tolist()
+        else:
+            self._perm = list(range(self.size))
 
     def __iter__(self):
         return self

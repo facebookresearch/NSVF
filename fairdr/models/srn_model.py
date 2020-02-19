@@ -20,9 +20,11 @@ from fairseq.models import (
 )
 
 from fairdr.models.fairdr_model import BaseModel, Field, Raymarcher
-from fairdr.modules.implicit import ImplicitField, PixelRenderer
-from fairdr.modules.raymarcher import UniformSearchRayMarcher, SimpleSphereTracer, LSTMSphereTracer
+from fairdr.modules.implicit import ImplicitField, SignedDistanceField, TextureField
+from fairdr.modules.raymarcher import IterativeSphereTracer
 from fairdr.data.geometry import ray
+from fairdr.data.data_utils import recover_image
+from fairdr.modules.utils import gradient_bridage
 
 
 @register_model('scene_representation_networks')
@@ -47,43 +49,48 @@ class SRNModel(BaseModel):
     @staticmethod
     def add_args(parser):
         """Add model-specific arguments to the parser."""
-        parser.add_argument('--ffn-embed-dim', type=int, metavar='N',
-                            help='field input dimension for FFN')
-        parser.add_argument('--ffn-hidden-dim', type=int, metavar='N',
+        parser.add_argument('--hidden-features', type=int, metavar='N',
                             help='field hidden dimension for FFN')
         parser.add_argument('--input-features', type=int, metavar='N',
                             help='number of features for query')
         parser.add_argument('--output-features', type=int, metavar='N',
                             help='number of features the field returns')
-        parser.add_argument('--ffn-num-layers', type=int, metavar='N',
+        parser.add_argument('--num-layer-features', type=int, metavar='N',
                             help='number of FC layers used to encode')
-        parser.add_argument('--renderer-in-features', type=int, metavar='N',
+        parser.add_argument('--hidden-sdf', type=int, metavar='N', 
+                            help='hidden dimension of SDF'),
+        parser.add_argument('--lstm-sdf',  action='store_true', 
+                            help='model the raymarcher with LSTM cells.')
+        parser.add_argument('--hidden-textures', type=int, metavar='N',
                             help='renderer hidden dimension for FFN')
-        parser.add_argument('--renderer-hidden-dim', type=int, metavar='N',
-                            help='renderer hidden dimension for FFN')
-        parser.add_argument('--renderer-num-layers', type=int, metavar='N',
+        parser.add_argument('--num-layer-textures', type=int, metavar='N',
                             help='number of FC layers used to renderer')
         parser.add_argument('--raymarching-steps', type=int, metavar='N',
                             help='number of steps for ray-marching')
-        parser.add_argument('--lstm-raymarcher', action='store_true',
-                            help='model the raymarcher with LSTM cells.')
+        parser.add_argument('--gradient-penalty', action='store_true')
+        parser.add_argument('--implicit-gradient', action='store_true')
 
     def forward(self, ray_start, ray_dir, **kwargs):
         # ray intersection
         depths, _ = self.raymarcher(
-            self.field.field, 
+            self.field.get_sdf, 
             ray_start, ray_dir, 
             steps=self.args.raymarching_steps)
+        points = ray(ray_start, ray_dir, depths)
 
         # return color
-        predicts = self.field(ray(ray_start, ray_dir, depths))
+        predicts = self.field(points)
         
-        # # gradient penalty
-        # query_grad = grad()
+        # gradient penalty
+        if self.args.gradient_penalty and self.training:
+            grad_penalty = self.field.get_grad_penalty(points.view(-1, 3), random=True)
+        else:
+            grad_penalty = 0
 
         return {
             'predicts': predicts,
-            'depths': depths
+            'depths': depths,
+            'grad_penalty': grad_penalty
         }
 
     @torch.no_grad()
@@ -92,32 +99,23 @@ class SRNModel(BaseModel):
             sample['ray_start'][shape_id:shape_id+1, view_id:view_id+1], 
             sample['ray_dir'][shape_id:shape_id+1, view_id:view_id+1])
         
-        def reverse(img, min_val=-1, max_val=1):
-            sizes = img.size()
-            side_len = int(sizes[0]**0.5)
-            if len(sizes) == 1:
-                img = img.reshape(side_len, side_len)
-            else:
-                img = img.reshape(side_len, side_len, -1)
-            return ((img - min_val) / (max_val - min_val)).clamp(min=0, max=1).to('cpu')
-
-        #  * (sample['alpha'][shape_id, view_id][:, None])
         images = {
             'depth/{}_{}:HW'.format(
-                sample['shape'][shape_id, view_id], sample['view'][shape_id][view_id]):
+                sample['shape'][shape_id], sample['view'][shape_id][view_id]):
                 {'img': output['depths'][0, 0], 'min_val': 0.5, 'max_val': 5},
             'rgb/{}_{}:HWC'.format(
-                sample['shape'][shape_id, view_id], sample['view'][shape_id][view_id]):
+                sample['shape'][shape_id], sample['view'][shape_id][view_id]):
                 {'img': output['predicts'][0, 0]},
             'target/{}_{}:HWC'.format(
-                sample['shape'][shape_id, view_id], sample['view'][shape_id][view_id]):
+                sample['shape'][shape_id], sample['view'][shape_id][view_id]):
                 {'img': sample['rgb'][shape_id, view_id]},
             'target_depth/{}_{}:HW'.format(
-                sample['shape'][shape_id, view_id], sample['view'][shape_id][view_id]):
-                {'img': sample['depths'][shape_id, view_id], 'min_val': 0.5, 'max_val': 5},
+                sample['shape'][shape_id], sample['view'][shape_id][view_id]):
+                {'img': sample['depths'][shape_id, view_id], 'min_val': 0.5, 'max_val': 5}
+                if sample['depths'] is not None else None,
         }
         images = {
-            tag: reverse(**images[tag]) for tag in images
+            tag: recover_image(**images[tag]) for tag in images if images[tag] is not None
         }
         return images
 
@@ -126,45 +124,94 @@ class SRNField(Field):
 
     def __init__(self, args):
         super().__init__(args)
-        self.field = ImplicitField(args)
-        self.renderer = PixelRenderer(args)
+        self.feature_field = ImplicitField(
+            args, 
+            args.input_features, 
+            args.output_features, 
+            args.hidden_features, 
+            args.num_layer_features)
+        self.signed_distance_field = SignedDistanceField(
+            args,
+            args.output_features,
+            args.hidden_sdf,
+            args.lstm_sdf)
+        self.renderer = TextureField(
+            args,
+            args.output_features,
+            args.hidden_textures,
+            args.num_layer_textures)
 
-    def get_features(self, xyz):
-        return self.field(xyz)
+    def get_feature(self, xyz):
+        return self.feature_field(xyz)
+
+    def get_sdf(self, xyz, state=None):
+        return self.signed_distance_field(self.feature_field(xyz), state)
+
+    def get_texture(self, xyz):
+        return self.renderer(self.feature_field(xyz))
 
     def forward(self, xyz):
-        return self.renderer(self.get_features(xyz))
+        return self.get_texture(xyz)
+
+    def get_grad_penalty(self, xyz, min=-5, max=5, random=True):
+        if random:
+            xyz = torch.zeros_like(xyz).uniform_(min, max).requires_grad_()
+        else:
+            xyz = xyz.detach().requires_grad_()
+
+        delta = self.get_sdf(xyz, None)[0]
+        gradients = grad(outputs=delta.sum(), inputs=xyz,
+            create_graph=True, retain_graph=True, only_inputs=True)[0]
+        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+        return gradient_penalty
 
 
 class SRNRaymarcher(Raymarcher):
 
     def __init__(self, args):
         super().__init__(args)
-        if args.lstm_raymarcher:
-            self.raymarcher = LSTMSphereTracer(args) 
-        else:
-            self.raymarcher = SimpleSphereTracer(args)
+        self.raymarcher = IterativeSphereTracer(args)
+        self.implicit = args.implicit_gradient
 
-    def forward(self, feature_fn, ray_start, ray_dir, steps=4):
+    def _forward(self, sdf_fn, ray_start, ray_dir, steps=4):
         return self.raymarcher.search(
-            feature_fn,
+            sdf_fn,
             ray_start.unsqueeze(-2).expand_as(ray_dir),
             ray_dir, steps=steps, min=0.05)
+
+    def forward(self, sdf_fn, ray_start, ray_dir, steps=4):
+        if not self.implicit or not self.training:
+            return self._forward(sdf_fn, ray_start, ray_dir, steps)
+        
+        assert not self.args.lstm_sdf, "implicit gradient does not support LSTM."
+
+        with torch.no_grad():
+            # forward: search intersection
+            depths, states = self._forward(sdf_fn, ray_start, ray_dir, steps)
+        
+        depths = depths.detach().requires_grad_()
+        delta = sdf_fn(ray(ray_start, ray_dir, depths), None)[0]
+        grad_depth = grad(outputs=delta.sum(), inputs=depths, retain_graph=True)[0]
+        depths = gradient_bridage(depths, delta, -1.0 / (grad_depth + 1e-7))
+
+        return depths, states
 
 
 @register_model_architecture("scene_representation_networks", "srn_base")
 def base_architecture(args):
-    args.ffn_embed_dim = getattr(args,  "ffn_embed_dim", 256)
-    args.ffn_num_layers = getattr(args, "ffn_num_layers", 2)
+    args.num_layer_features = getattr(args, "num_layer_features", 2)
+    args.hidden_features = getattr(args,  "hidden_features", 256)
     args.input_features = getattr(args, "input_features", 3)
     args.output_features = getattr(args, "output_features", 256)
-    args.renderer_in_features = args.output_features
-    args.renderer_hidden_dim = getattr(args, "renderer_hidden_dim", 256)
-    args.renderer_num_layers = getattr(args, "renderer_num_layers", 3)
-    args.raymarching_steps = getattr(args, "raymarching_steps", 5)
-    args.lstm_raymarcher = getattr(args, "lstm_raymarcher", True)
+    args.hidden_sdf = getattr(args, "hidden_sdf", 16)
+    args.hidden_textures = getattr(args, "hidden_textures", 256)
+    args.num_layer_textures = getattr(args, "num_layer_textures", 3)
+    args.raymarching_steps = getattr(args, "raymarching_steps", 10)
+    args.lstm_sdf = getattr(args, "lstm_sdf", True)
+    args.gradient_penalty = getattr(args, "gradient_penalty", False)
+    args.implicit_gradient = getattr(args, "implicit_gradient", False)
 
 @register_model_architecture("scene_representation_networks", "srn_simple")
 def simple_architecture(args):
-    args.lstm_raymarcher = getattr(args, "lstm_raymarcher", False)
+    args.lstm_sdf = getattr(args, "lstm_sdf", False)
     base_architecture(args)

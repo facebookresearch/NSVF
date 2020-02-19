@@ -1,7 +1,7 @@
 # just for debugging
 # DATASET=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/61b984febe54b752d61420a53a0cb96d
 DATASET=/private/home/jgu/data/shapenet/maria
-MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn12
+MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn17
 ARCH=srn_simple
 CRITERION=srn_loss
 # FAIRSEQ=/private/home/jgu/work/fairseq-master/fairseq_cli
@@ -13,13 +13,15 @@ fairseq-train $DATASET \
     --user-dir fairdr/ \
     --save-dir $MODEL_PATH \
     --tensorboard-logdir $MODEL_PATH/tensorboard \
-    --load-depth \
+    --load-depth --load-voxel \
     --max-sentences 1 \
     --pixel-per-view -1 \
     --view-per-batch 5 \
     --view-resolution 128 \
-    --raymarching-steps 10 \
-    --rgb-weight 200 --reg-weight 1e-3 --depth-weight 0.1 \
+    --raymarching-steps 15 \
+    --gradient-penalty \
+    --load-depth \
+    --rgb-weight 200 --reg-weight 1e-3 --depth-weight 0.1 --vgg-weight 1.0 \
     --task single_object_rendering \
     --criterion $CRITERION \
     --arch $ARCH \
@@ -37,3 +39,4 @@ fairseq-train $DATASET \
     # --rgb-weight 1.0 --space-weight 100 --occupancy-weight 100
     # --min-lr '1e-09' --warmup-updates 1000 \
     # --warmup-init-lr '1e-07' \
+    # --implicit-gradient \
