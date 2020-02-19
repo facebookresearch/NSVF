@@ -27,7 +27,7 @@ class RenderedImageDataset(FairseqDataset):
                 num_view, 
                 resolution=None, 
                 load_depth=False,
-                load_voxel=False, 
+                load_point=False,
                 train=True,
                 preload=True,
                 repeat=1):
@@ -39,7 +39,7 @@ class RenderedImageDataset(FairseqDataset):
         
         self.train = train
         self.load_depth = load_depth
-        self.load_voxel = load_voxel
+        self.load_point = load_point
         self.max_train_view = max_train_view
         self.num_view = num_view
         self.total_num_shape = len(self.paths)
@@ -59,8 +59,8 @@ class RenderedImageDataset(FairseqDataset):
         # -- load per-shape data
         _data_per_shape = defaultdict(lambda: None)
         _data_per_shape['ixt'] = self.find_intrinsics()
-        if self.load_voxel:
-            _data_per_shape['voxel'] = self.find_voxel()
+        if self.load_point:
+            _data_per_shape['pts'] = self.find_point()
         _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
 
         # group the data..
@@ -112,7 +112,7 @@ class RenderedImageDataset(FairseqDataset):
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find estimateddepths images")
 
-    def find_voxel(self):
+    def find_point(self):
         vox_list = []
         for path in self.paths:
             if os.path.exists(path + '/sparse_voxel.txt'):
@@ -171,8 +171,14 @@ class RenderedImageDataset(FairseqDataset):
         }
     
     def _load_shape(self, packed_data):        
-        intrinsics = data_utils.load_intrinsics(packed_data['ixt'])[0]
-        return {'intrinsics': intrinsics}
+        intrinsics = data_utils.load_intrinsics(packed_data['ixt'])
+        if packed_data['pts'] is not None:
+            voxels = data_utils.load_matrix(packed_data['pts'])
+            voxels, points = voxels[:, :3].astype('int32'), voxels[:, 3:]
+        else:
+            voxels, points = None, None
+
+        return {'intrinsics': intrinsics, 'voxels': voxels, 'points': points}
 
     def _load_batch(self, data, index, view_ids=None):
         if view_ids is None:
@@ -182,19 +188,48 @@ class RenderedImageDataset(FairseqDataset):
 
     def __getitem__(self, index):
         if self.cache is not None:
-            index = index // self.repeat
             view_ids = [next(self.data_index[index]) for _ in range(self.num_view)]
-            return self.cache[index][0], self.cache[index][1], [self.cache[index][2][i] for i in view_ids]
+            return self.cache[index % self.total_num_shape][0], \
+                   self.cache[index % self.total_num_shape][1], \
+                  [self.cache[index % self.total_num_shape][2][i] for i in view_ids]
         return self._load_batch(self.data, index)
 
     def collater(self, samples):
         results = {}
         
         results['shape'] = torch.from_numpy(np.array([s[0] for s in samples]))
+    
         for key in samples[0][1]:
-            results[key] = torch.from_numpy(
-                np.array([s[1][key] for s in samples])
-            ) if samples[0][1][key] is not None else None
+            if samples[0][1][key] is not None:
+                if key == 'voxels':
+                    # save for sparse-conv
+                    batch_voxels = np.concatenate(
+                        [
+                            np.concatenate(
+                                [s[1][key], j * np.ones((s[1][key].shape[0], 1))], 1) 
+                            for j, s in enumerate(samples)
+                        ],
+                        axis=0
+                    )
+                    results[key] = torch.from_numpy(batch_voxels).int()
+                
+                elif key == "points":
+                    # save for pointnet++, handling dynamic number of points by duplicating points.
+                    max_num = max(s[1][key].shape[0] for s in samples)
+                    batch_points = np.array([
+                        np.concatenate(
+                            [s[1][key], s[1][key][:(max_num - s[1][key].shape[0])]], 0)
+                            if s[1][key].shape[0] < max_num
+                            else s[1][key]
+                        for s in samples])
+                    results[key] = torch.from_numpy(batch_points)
+                
+                else:
+                    results[key] = torch.from_numpy(
+                        np.array([s[1][key] for s in samples]))
+            else:
+                results[key] = None
+
         for key in samples[0][2][0]:
             results[key] = torch.from_numpy(
                 np.array([[d[key] for d in s[2]] for s in samples])
@@ -238,6 +273,7 @@ class SampledPixelDataset(BaseWrapperDataset):
 
     def num_tokens(self, index):
         return self.dataset.num_view * self.num_sample 
+
 
 class WorldCoordDataset(BaseWrapperDataset):
     """

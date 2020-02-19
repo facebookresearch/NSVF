@@ -67,8 +67,11 @@ class SRNModel(BaseModel):
                             help='number of FC layers used to renderer')
         parser.add_argument('--raymarching-steps', type=int, metavar='N',
                             help='number of steps for ray-marching')
+        parser.add_argument('--jump-to-max-depth', type=float, metavar='D',
+                            help='give up ray-marching and directly predict maximum. controlled by gater')
         parser.add_argument('--gradient-penalty', action='store_true')
         parser.add_argument('--implicit-gradient', action='store_true')
+
 
     def forward(self, ray_start, ray_dir, **kwargs):
         # ray intersection
@@ -184,7 +187,6 @@ class SRNRaymarcher(Raymarcher):
             return self._forward(sdf_fn, ray_start, ray_dir, steps)
         
         assert not self.args.lstm_sdf, "implicit gradient does not support LSTM."
-
         with torch.no_grad():
             # forward: search intersection
             depths, states = self._forward(sdf_fn, ray_start, ray_dir, steps)

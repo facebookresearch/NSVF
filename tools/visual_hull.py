@@ -6,6 +6,10 @@ import cv2
 
 from fairdr.data import RenderedImageDataset, WorldCoordDataset
 
+from fairdr.models.pointnet2.pointnet2_utils import furthest_point_sample
+
+
+from fairseq.pdb import set_trace; set_trace()
 # multi-view images
 DIR = "/private/home/jgu/data/shapenet/maria"
 dataset = RenderedImageDataset(DIR, 50, 50)
@@ -39,7 +43,8 @@ points = np.vstack((points.T, np.ones((1, nb_points_init))))
 # space carving
 print('build data ok.')
 occupancy = np.zeros(points.shape[1]).astype(np.int)
-packed_data, intrinsics = next(iter(dataset))
+index, u_data, packed_data = next(iter(dataset))
+intrinsics = u_data['intrinsics']
 
 for i, data in enumerate(packed_data):
     print('process view: {}'.format(i))
@@ -82,36 +87,37 @@ ox, oy, oz = (occupancy >= th).nonzero()          # sparse voxel indexs
 ovoxels = points[:3, ox * s * s + oy * s + oz].T  # sparse voxel coords
 
 # save data
-fname = os.path.join(DIR, 'sparse_voxel.txt')
-with open(fname, 'w') as f:
-    for i in range(ox.shape[0]):
-        print('{} {} {} {} {} {}'.format(
-            ox[i], oy[i], oz[i], 
-            ovoxels[i, 0], ovoxels[i, 1], ovoxels[i, 2]), 
-        file=f)
+# fname = os.path.join(DIR, 'sparse_voxel.txt')
+# with open(fname, 'w') as f:
+#     for i in range(ox.shape[0]):
+#         print('{} {} {} {} {} {}'.format(
+#             ox[i], oy[i], oz[i], 
+#             ovoxels[i, 0], ovoxels[i, 1], ovoxels[i, 2]), 
+#         file=f)
 
 # from sklearn.neighbors import KDTree
-# tree = KDTree(ovoxels)
+from scipy.spatial import cKDTree as KDTree
+tree = KDTree(ovoxels)
 # ray-casting: find the intersection voxels
-# coord_dataset = WorldCoordDataset(dataset)
-# for data in next(iter(coord_dataset)):
-#     not_done = np.ones_like(data['alpha'])
-#     hits, deps = np.ones_like(not_done) * -1, np.zeros_like(not_done)
-#     min_depth, max_depth = 2.2, 4.5
-#     ray_start, ray_dir = data['ray_start'], data['ray_dir'].T
-#     not_done = not_done.astype('bool')
-#     deps = deps + min_depth
-#     while not_done.any():
-#         deps[not_done] += voxw
-#         if deps.max() > max_depth:
-#             break
-#         print('raymarching depth: {}, not done: {}'.format(deps.max(), not_done.sum()))
-#         ray = ray_start[None, :] + ray_dir[not_done] * deps[not_done][:, None]
-#         idx, dis = tree.query_radius(ray, r=voxw, return_distance=True, sort_results=True)
-#         done = np.array([len(i) > 0 for i in idx]).astype('bool')
-#         hits[np.where(not_done)[0][done]] = np.array([i[0] for i in idx if len(i) > 0])
-#         not_done[np.where(not_done)[0][done]] = False
-#     cv2.imwrite("/private/home/jgu/work/Notebooks/test.png", 255 * (1 - deps.reshape(imgH, imgW) / max_depth))
-#     from fairseq.pdb import set_trace; set_trace()
-# # save(occupancy, fname='/checkpoint/jgu/space/out128.mhd')
-# print('done')
+coord_dataset = WorldCoordDataset(dataset)
+for data in next(iter(coord_dataset))[2]:
+    not_done = np.ones_like(data['alpha'])
+    hits, deps = np.ones_like(not_done) * -1, np.zeros_like(not_done)
+    min_depth, max_depth = 2.2, 4.5
+    ray_start, ray_dir = data['ray_start'], data['ray_dir'].T
+    not_done = not_done.astype('bool')
+    deps = deps + min_depth
+    while not_done.any():
+        deps[not_done] += voxw
+        if deps.max() > max_depth:
+            break
+        print('raymarching depth: {}, not done: {}'.format(deps.max(), not_done.sum()))
+        ray = ray_start[None, :] + ray_dir[not_done] * deps[not_done][:, None]
+        idx = tree.query_ball_point(ray, r=voxw)
+        done = np.array([len(i) > 0 for i in idx]).astype('bool')
+        hits[np.where(not_done)[0][done]] = np.array([i[0] for i in idx if len(i) > 0])
+        not_done[np.where(not_done)[0][done]] = False
+    cv2.imwrite("/private/home/jgu/work/Notebooks/test.png", 255 * (1 - deps.reshape(imgH, imgW) / max_depth))
+    from fairseq.pdb import set_trace; set_trace()
+# save(occupancy, fname='/checkpoint/jgu/space/out128.mhd')
+print('done')

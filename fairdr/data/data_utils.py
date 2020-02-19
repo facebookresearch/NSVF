@@ -106,7 +106,7 @@ def load_intrinsics(filepath, resized_width=None, invert_y=False):
                                [0., fy, cy, 0],
                                [0., 0, 1, 0],
                                [0, 0, 0, 1]])
-    return full_intrinsic, grid_barycenter, scale, world2cam_poses
+    return full_intrinsic
 
 
 def square_crop_img(img):
@@ -155,10 +155,10 @@ class InfIndex(object):
     def __init__(self, size, shuffle=False):
         self.size = size
         self.shuffle = shuffle
-        self.reset_permutation()
+        self.reset_permutation(True)
 
-    def reset_permutation(self):
-        if self.shuffle:
+    def reset_permutation(self, shuffle=False):
+        if self.shuffle or shuffle:
             self._perm = torch.randperm(self.size).tolist()
         else:
             self._perm = list(range(self.size))
