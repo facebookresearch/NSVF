@@ -1,7 +1,7 @@
 # just for debugging
 # DATASET=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/61b984febe54b752d61420a53a0cb96d
 DATASET=/private/home/jgu/data/shapenet/maria
-MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn_ref18
+MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn_ref19
 ARCH=srn_base
 CRITERION=srn_loss
 # FAIRSEQ=/private/home/jgu/work/fairseq-master/fairseq_cli

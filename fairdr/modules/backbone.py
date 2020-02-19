@@ -10,7 +10,7 @@ import numpy as np
 import sys
 import os
 
-from fairdr.models.pointnet2.pointnet2_modules import (
+from fairdr.modules.pointnet2.pointnet2_modules import (
     PointnetSAModuleVotes, PointnetFPModule
 )
 

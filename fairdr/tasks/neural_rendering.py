@@ -6,7 +6,7 @@ import torch
 import numpy as np
 
 from fairseq.tasks import FairseqTask, register_task
-from fairdr.data import RenderedImageDataset, SampledPixelDataset, WorldCoordDataset
+from fairdr.data import ShapeViewDataset, SampledPixelDataset, WorldCoordDataset
 from fairdr.data.data_utils import write_images
 
 
@@ -34,8 +34,8 @@ class SingleObjRenderingTask(FairseqTask):
 
     def __init__(self, args):
         super().__init__(args)
-
-        if args.distributed_rank == 0:
+        
+        if getattr(args, "distributed_rank", -1) == 0:
             from tensorboardX import SummaryWriter
             self.writer = SummaryWriter(self.args.tensorboard_logdir)
         else:
@@ -57,7 +57,7 @@ class SingleObjRenderingTask(FairseqTask):
                         self.args.distributed_world_size
                         ) * self.args.distributed_world_size)
 
-        self.datasets[split] = RenderedImageDataset(
+        self.datasets[split] = ShapeViewDataset(
             self.args.data,
             self.args.max_train_view,
             self.args.view_per_batch,
