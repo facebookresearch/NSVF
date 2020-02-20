@@ -6,8 +6,11 @@ import torch
 import numpy as np
 
 from fairseq.tasks import FairseqTask, register_task
-from fairdr.data import ShapeViewDataset, SampledPixelDataset, WorldCoordDataset
+from fairdr.data import (
+    ShapeViewDataset, SampledPixelDataset, WorldCoordDataset, ShapeDataset
+)
 from fairdr.data.data_utils import write_images
+from fairdr.renderer import NeuralRenderer
 
 
 @register_task("single_object_rendering")
@@ -52,30 +55,43 @@ class SingleObjRenderingTask(FairseqTask):
         """
         Load a given dataset split (train, valid, test)
         """
-        repeats = int(np.ceil(self.args.max_train_view / 
-                        self.args.view_per_batch / 
-                        self.args.distributed_world_size
-                        ) * self.args.distributed_world_size)
 
-        self.datasets[split] = ShapeViewDataset(
-            self.args.data,
-            self.args.max_train_view,
-            self.args.view_per_batch,
-            self.args.view_resolution,
-            train=(split == 'train'),
-            load_depth=self.args.load_depth,
-            load_point=self.args.load_point,
-            repeat=repeats)
-        
-        if split == 'train' and (self.args.pixel_per_view > 0):
-            self.datasets[split] = SampledPixelDataset(
-                self.datasets[split],
-                self.args.pixel_per_view)
+        if split != 'test':
+            repeats = int(np.ceil(self.args.max_train_view / 
+                            self.args.view_per_batch / 
+                            self.args.distributed_world_size
+                            ) * self.args.distributed_world_size)
 
-        self.datasets[split] = WorldCoordDataset(
-            self.datasets[split]
-        )
+            self.datasets[split] = ShapeViewDataset(
+                self.args.data,
+                self.args.max_train_view,
+                self.args.view_per_batch,
+                self.args.view_resolution,
+                train=(split == 'train'),
+                load_depth=self.args.load_depth,
+                load_point=self.args.load_point,
+                repeat=repeats)
+            
+            if split == 'train' and (self.args.pixel_per_view > 0):
+                self.datasets[split] = SampledPixelDataset(
+                    self.datasets[split],
+                    self.args.pixel_per_view)
 
+            self.datasets[split] = WorldCoordDataset(
+                self.datasets[split]
+            )
+        else:
+            self.datasets[split] = ShapeDataset(
+                self.args.data,
+                load_point=self.args.load_point)
+
+    def build_generator(self, args):
+        """
+        build a neural renderer for visualization
+        """
+        return NeuralRenderer()
+
+    
     @property
     def source_dictionary(self):
         """Return the :class:`~fairseq.data.Dictionary` for the language

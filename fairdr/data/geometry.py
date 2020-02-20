@@ -46,6 +46,21 @@ def normalize(a, axis=-1, order=2):
     return a / np.expand_dims(l2, axis), l2
 
 
+def look_at_rotation(camera_position, at=((0, 0, 0),), up=((0, 1, 0),)):
+    """
+    This function takes a vector 'camera_position' which specifies the location
+    of the camera in world coordinates and two vectors `at` and `up` which
+    indicate the position of the object and the up directions of the world
+    coordinate system respectively. The object is assumed to be centered at
+    the origin.
+
+    The output is a rotation matrix representing the transformation
+    from world coordinates -> view coordinates.
+    """
+
+    
+
+
 # ----- pytorch functions ------ #
 
 def ray(ray_start, ray_dir, depths):

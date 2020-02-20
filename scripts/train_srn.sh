@@ -9,7 +9,7 @@ CRITERION=srn_loss
 mkdir -p $MODEL_PATH
 
 CUDA_VISIBLE_DEVICES=0 \
-fairseq-train $DATASET \
+fairdr-train $DATASET \
     --user-dir fairdr/ \
     --save-dir $MODEL_PATH \
     --tensorboard-logdir $MODEL_PATH/tensorboard \

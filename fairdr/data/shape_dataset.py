@@ -58,7 +58,7 @@ class ShapeDataset(FairseqDataset):
                 data_list.append(element)
 
                 if r == 0 and preload:
-                    self.cache += [self._load_batch(data_list, id, np.arange(total_num_view))]
+                    self.cache += [self._load_batch(data_list, id)]
 
         # group the data together
         self.data = data_list
@@ -91,7 +91,7 @@ class ShapeDataset(FairseqDataset):
 
         return {'intrinsics': intrinsics, 'voxels': voxels, 'points': points}
 
-    def _load_batch(self, data, index, view_ids=None):
+    def _load_batch(self, data, index):
         return index, self._load_shape(data[index])
 
     def __getitem__(self, index):
@@ -335,7 +335,7 @@ class WorldCoordDataset(BaseWrapperDataset):
 
             # get camera center (XYZ)
             ray_start = inv_RT[:3, 3]
-            
+
             # get points at a random depth (=1)
             # OR transform depths to world coordinates (optional)
             if data.get('depths', None) is None:
@@ -364,18 +364,3 @@ class WorldCoordDataset(BaseWrapperDataset):
         results['rgb'] = results['rgb'].transpose(2, 3)
         return results
 
-
-class WorldCoordRenderingDataset(BaseWrapperDataset):
-    """
-    A dataset with only object(s) as input, and rotate it to render
-    """
-    def __init__(self, dataset, path_generator=None, frames=300):
-        super().__init__(dataset)
-        self.path_generator = path_generator
-        if path_generator is None:
-            self.path_generator = trajectory.circle(3.5, 0)
-    
-    def __getitem__(self, index):
-
-        from fairseq import pdb; pdb.set_trace()
-        pass

@@ -29,5 +29,11 @@ setup(
     ],
     cmdclass={
         'build_ext': BuildExtension
-    }
+    },
+    entry_points={
+        'console_scripts': [
+            'fairdr-render = fairdr_cli.render:cli_main',
+            'fairdr-train = fairseq_cli.train:cli_main'
+        ],
+    },
 )
