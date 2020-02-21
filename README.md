@@ -2,7 +2,7 @@
 -----
 Experimental code.
 
-Based on the master fairseq-py library.
+Based on the master [fairseq-py](https://github.com/pytorch/fairseq) library.
 Make sure you install and run code in fairseq environment.
 
 For installation, run
