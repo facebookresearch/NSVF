@@ -28,6 +28,7 @@ class BaseModel(BaseFairseqModel):
         self.args = args
         self.field = field
         self.raymarcher = raymarcher
+        self.cache = None
     
         assert isinstance(self.field, Field)
         assert isinstance(self.raymarcher, Raymarcher)

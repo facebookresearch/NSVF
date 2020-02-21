@@ -105,17 +105,13 @@ class SingleObjRenderingTask(FairseqTask):
         return None
 
     def valid_step(self, sample, model, criterion):
-        # from fairseq.pdb import set_trace
         # set_trace()
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
         
         # visualize in tensorboard
-        for i in [0]:
-            if i >= sample['alpha'].size(1):
-                continue
-            images = model.visualize(sample, 0, i)
-            if images is not None and self.args.distributed_rank == 0:
-                write_images(self.writer, images)
+        images = model.visualize(sample)
+        if images is not None and self.args.distributed_rank == 0:
+            write_images(self.writer, images)
 
         return loss, sample_size, logging_output
     

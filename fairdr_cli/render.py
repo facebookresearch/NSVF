@@ -103,12 +103,11 @@ def _main(args, output_file):
             
             gen_timer.start()
             hypos = task.inference_step(generator, models, sample)
-            num_generated_tokens = sum(len(h[0]['tokens']) for h in hypos)
-            gen_timer.stop(num_generated_tokens)
-            
-            wps_meter.update(num_generated_tokens)
+            # num_generated_tokens = sum(len(h[0]['tokens']) for h in hypos)
+            gen_timer.stop(500)
+            wps_meter.update(500)
             t.log({'wps': round(wps_meter.avg)})
-            num_sentences += sample['nsentences']
+            # num_sentences += sample['nsentences']
 
 
 def cli_main():

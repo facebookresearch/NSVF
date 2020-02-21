@@ -17,8 +17,7 @@ from fairseq.criterions import FairseqCriterion, register_criterion
 import fairdr.criterions.utils as utils
 
 
-@register_criterion('dvr_loss')
-class DVRLossCriterion(FairseqCriterion):
+class RenderingCriterion(FairseqCriterion):
 
     def __init__(self, args, task):
         super().__init__(args, task)
@@ -26,11 +25,7 @@ class DVRLossCriterion(FairseqCriterion):
     @staticmethod
     def add_args(parser):
         """Add criterion-specific arguments to the parser."""
-        parser.add_argument('--L1', action='store_true',
-                            help='if enabled, use L1 instead of L2 for RGB loss')
-        parser.add_argument('--rgb-weight', type=float, default=1.0)
-        parser.add_argument('--space-weight', type=float, default=1.0)
-        parser.add_argument('--occupancy-weight', type=float, default=1.0)
+        pass
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -57,31 +52,7 @@ class DVRLossCriterion(FairseqCriterion):
         return loss, sample_size, logging_output
 
     def compute_loss(self, model, net_output, sample, reduce=True):
-
-        alpha  = (sample['alpha'] > 0.5)
-        missed = net_output['missed']
-        
-        rgb_loss = utils.rgb_loss(
-            net_output['predicts'], sample['rgb'], 
-            (~missed) & alpha, self.args.L1, True)
-        
-        space_loss = utils.space_loss(
-            net_output['occupancy'],
-            ~alpha, True)
-        occupancy_loss = utils.occupancy_loss(
-            net_output['occupancy'],
-            missed & alpha, True)
-        
-        loss = self.args.rgb_weight * rgb_loss + \
-               self.args.space_weight * space_loss + \
-               self.args.occupancy_weight * occupancy_loss
-        loss = loss / float(alpha.numel())
-
-        return loss, {
-            'rgb_loss': rgb_loss.item(), 
-            'space_loss': space_loss.item(), 
-            'occupancy_loss': occupancy_loss.item(),
-        }
+        raise NotImplementedError
 
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:
@@ -110,7 +81,7 @@ class DVRLossCriterion(FairseqCriterion):
 
 
 @register_criterion('srn_loss')
-class SRNLossCriterion(DVRLossCriterion):
+class SRNLossCriterion(RenderingCriterion):
 
     def __init__(self, args, task):
         super().__init__(args, task)
@@ -128,6 +99,7 @@ class SRNLossCriterion(DVRLossCriterion):
         parser.add_argument('--depth-weight', type=float, default=0.0)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
+        parser.add_argument('--error-map', action='store_true')
 
     def compute_loss(self, model, net_output, sample, reduce=True):
 
@@ -153,11 +125,22 @@ class SRNLossCriterion(DVRLossCriterion):
             losses['grd_loss'] = (net_output['grad_penalty'], self.args.gp_weight)
 
         if self.args.vgg_weight > 0:
-            losses['vgg_loss'] = (self.vgg(
-                net_output['predicts'].view(-1, 3) / 2 + 0.5,
-                sample['rgb'].view(-1, 3)) / 2 + 0.5, 
-                self.args.vgg_weight)
+            if sample.get('full_rgb', None) is None:
+                target = sample['rgb'] 
+                inputs = net_output['predicts']
+            else:
+                target = sample['full_rgb']
+                inputs = target.scatter(
+                    2, sample['index'].unsqueeze(-1).expand_as(net_output['predicts']),
+                    net_output['predicts'])
 
-        loss = sum(losses[key][0] * losses[key][1] for key in losses)
+            def transform(x):
+                S, V, D, _ = x.size()
+                L = int(math.sqrt(D))
+                x = x.transpose(2, 3).view(S * V, 3, L, L)
+                return x / 2 + 0.5
+
+            losses['vgg_loss'] = (self.vgg(transform(inputs), transform(target)), self.args.vgg_weight)
         
+        loss = sum(losses[key][0] * losses[key][1] for key in losses)
         return loss, {key: item(losses[key][0]) for key in losses}

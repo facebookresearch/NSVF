@@ -120,14 +120,8 @@ def square_crop_img(img):
     return img
 
 
-def sample_pixel_from_image(alpha, num_sample, ignore_mask=1.0):
-    noise = np.random.uniform(size=alpha.shape)
-    # if ignore_mask < 1:
-    #     _mask = alpha.astype(np.float32)
-    #     _mask = _mask + (1 - _mask) * ignore_mask
-    #     noise = noise * _mask
-    noise = noise.reshape(-1)
-    return np.argsort(noise)[-num_sample:]
+def sample_pixel_from_image(num_pixel, num_sample, ignore_mask=1.0):
+    return np.random.choice(num_pixel, num_sample)
 
 
 def recover_image(img, min_val=-1, max_val=1):

@@ -1,14 +1,14 @@
 # just for debugging
 # DATASET=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/61b984febe54b752d61420a53a0cb96d
 DATASET=/private/home/jgu/data/shapenet/maria
-MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn_ref20
+MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn_ref21
 ARCH=srn_base
 CRITERION=srn_loss
 # FAIRSEQ=/private/home/jgu/work/fairseq-master/fairseq_cli
 
 mkdir -p $MODEL_PATH
 
-
+CUDA_VISIBLE_DEVICES=0 \
 fairdr-train $DATASET \
     --user-dir fairdr/ \
     --save-dir $MODEL_PATH \
@@ -20,13 +20,14 @@ fairdr-train $DATASET \
     --raymarching-steps 10 \
     --load-depth \
     --rgb-weight 200 --reg-weight 1e-3 --depth-weight 0.08 \
+    --error-map \
     --task single_object_rendering \
     --criterion $CRITERION \
     --arch $ARCH \
     --optimizer adam --adam-betas '(0.9, 0.999)' \
     --clip-norm 0.0 \
     --lr 0.001 --lr-scheduler fixed \
-    --save-interval-updates 500 \
+    --save-interval-updates 3000 \
     --validate-interval 100 \
     --save-interval 100000 \
     --max-update 300000 \

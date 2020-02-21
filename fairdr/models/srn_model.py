@@ -79,7 +79,7 @@ class SRNModel(BaseModel):
             self.field.get_sdf, 
             ray_start, ray_dir, 
             steps=self.args.raymarching_steps)
-        points = ray(ray_start, ray_dir, depths)
+        points = ray(ray_start, ray_dir, depths.unsqueeze(-1))
 
         # return color
         predicts = self.field(points)
@@ -97,25 +97,34 @@ class SRNModel(BaseModel):
         }
 
     @torch.no_grad()
-    def visualize(self, sample, shape_id=0, view_id=0):
-        output = self.forward(
-            sample['ray_start'][shape_id:shape_id+1, view_id:view_id+1], 
-            sample['ray_dir'][shape_id:shape_id+1, view_id:view_id+1])
-        
+    def visualize(self, sample, i=0):
+        # only visualize one
+        if i > -1:
+            _sample = {
+                    key: sample[key][0:1, i:i+1]
+                    for key in sample
+                        if sample[key] is not None and  
+                            key in ('ray_start', 'ray_dir', 'view', 'rgb', 'depths')
+            }
+            _sample['shape'] = sample['shape'][0:1]
+            sample = _sample
+
+        output = self.forward(sample['ray_start'], sample['ray_dir'])
         images = {
             'depth/{}_{}:HW'.format(
-                sample['shape'][shape_id], sample['view'][shape_id][view_id]):
+                sample['shape'][0], sample['view'][0][0]):
                 {'img': output['depths'][0, 0], 'min_val': 0.5, 'max_val': 5},
             'rgb/{}_{}:HWC'.format(
-                sample['shape'][shape_id], sample['view'][shape_id][view_id]):
+                sample['shape'][0], sample['view'][0][0]):
                 {'img': output['predicts'][0, 0]},
             'target/{}_{}:HWC'.format(
-                sample['shape'][shape_id], sample['view'][shape_id][view_id]):
-                {'img': sample['rgb'][shape_id, view_id]},
+                sample['shape'][0], sample['view'][0][0]):
+                {'img': sample['rgb'][0, 0]}
+                if sample.get('rgb', None) is not None else None,
             'target_depth/{}_{}:HW'.format(
-                sample['shape'][shape_id], sample['view'][shape_id][view_id]):
-                {'img': sample['depths'][shape_id, view_id], 'min_val': 0.5, 'max_val': 5}
-                if sample['depths'] is not None else None,
+                sample['shape'][0], sample['view'][0][0]):
+                {'img': sample['depths'][0, 0], 'min_val': 0.5, 'max_val': 5}
+                if sample.get('depths', None) is not None else None,
         }
         images = {
             tag: recover_image(**images[tag]) for tag in images if images[tag] is not None
@@ -179,7 +188,7 @@ class SRNRaymarcher(Raymarcher):
     def _forward(self, sdf_fn, ray_start, ray_dir, steps=4):
         return self.raymarcher.search(
             sdf_fn,
-            ray_start.unsqueeze(-2).expand_as(ray_dir),
+            ray_start.expand_as(ray_dir),
             ray_dir, steps=steps, min=0.05)
 
     def forward(self, sdf_fn, ray_start, ray_dir, steps=4):
@@ -192,7 +201,7 @@ class SRNRaymarcher(Raymarcher):
             depths, states = self._forward(sdf_fn, ray_start, ray_dir, steps)
         
         depths = depths.detach().requires_grad_()
-        delta = sdf_fn(ray(ray_start, ray_dir, depths), None)[0]
+        delta = sdf_fn(ray(ray_start, ray_dir, depths.unsqueeze(-1)), None)[0]
         grad_depth = grad(outputs=delta.sum(), inputs=depths, retain_graph=True)[0]
         depths = gradient_bridage(depths, delta, -1.0 / (grad_depth + 1e-7))
 

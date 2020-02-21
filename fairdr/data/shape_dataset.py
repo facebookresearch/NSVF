@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import os, glob
+import copy
 import numpy as np
 import torch
 import logging
@@ -37,7 +38,7 @@ class ShapeDataset(FairseqDataset):
         self.repeat = repeat
 
         # -- load per-shape data
-        _data_per_shape = defaultdict(lambda: None)
+        _data_per_shape = {}
         _data_per_shape['ixt'] = self.find_intrinsics()
         if self.load_point:
             _data_per_shape['pts'] = self.find_point()
@@ -52,7 +53,7 @@ class ShapeDataset(FairseqDataset):
                 logger.info('pre-load the dataset into memory.')
 
             for id in range(self.total_num_shape): 
-                element = defaultdict(lambda: None)
+                element = {}
                 for key in _data_per_shape:
                     element[key] = _data_per_shape[key][id]
                 data_list.append(element)
@@ -82,8 +83,8 @@ class ShapeDataset(FairseqDataset):
         return ixt_list
 
     def _load_shape(self, packed_data):        
-        intrinsics = data_utils.load_intrinsics(packed_data['ixt'])
-        if packed_data['pts'] is not None:
+        intrinsics = data_utils.load_intrinsics(packed_data['ixt']).astype('float32')
+        if packed_data.get('pts', None) is not None:
             voxels = data_utils.load_matrix(packed_data['pts'])
             voxels, points = voxels[:, :3].astype('int32'), voxels[:, 3:]
         else:
@@ -171,7 +172,7 @@ class ShapeViewDataset(ShapeDataset):
         self.cache_view = None
 
         # -- load per-view data
-        _data_per_view = defaultdict(lambda: None)
+        _data_per_view = {}
         _data_per_view['rgb'] = self.find_rgb()  
         _data_per_view['ext'] = self.find_extrinsics()
         if self.load_depth:
@@ -188,7 +189,7 @@ class ShapeViewDataset(ShapeDataset):
                 logger.info('pre-load the dataset into memory.')
 
             for id in range(self.total_num_shape): 
-                element = defaultdict(lambda: None)
+                element = {}
                 total_num_view = len(_data_per_view['rgb'][id])
                 perm_ids = np.random.permutation(total_num_view)
                 for key in _data_per_view:
@@ -250,9 +251,9 @@ class ShapeViewDataset(ShapeDataset):
         image, uv = data_utils.load_rgb(packed_data['rgb'][view_idx], resolution=self.resolution)
         rgb, alpha = image[:3], image[3]  # C x H x W for RGB
         extrinsics = data_utils.load_matrix(packed_data['ext'][view_idx])
-        extrinsics = geometry.parse_extrinsics(extrinsics, self.world2camera)
+        extrinsics = geometry.parse_extrinsics(extrinsics, self.world2camera).astype('float32')
         z = data_utils.load_depth(packed_data['dep'][view_idx], resolution=self.resolution) \
-            if packed_data['dep'] is not None else None
+            if packed_data.get('dep', None) is not None else None
 
         return {
             'view': view_idx,
@@ -271,9 +272,9 @@ class ShapeViewDataset(ShapeDataset):
     def __getitem__(self, index):
         if self.cache is not None:
             view_ids = [next(self.data_index[index]) for _ in range(self.num_view)]
-            return self.cache[index % self.total_num_shape][0], \
-                   self.cache[index % self.total_num_shape][1], \
-                  [self.cache[index % self.total_num_shape][2][i] for i in view_ids]
+            return copy.deepcopy(self.cache[index % self.total_num_shape][0]), \
+                   copy.deepcopy(self.cache[index % self.total_num_shape][1]), \
+                  [copy.deepcopy(self.cache[index % self.total_num_shape][2][i]) for i in view_ids]
         return self._load_batch(self.data, index)
 
     def collater(self, samples):
@@ -281,7 +282,7 @@ class ShapeViewDataset(ShapeDataset):
         for key in samples[0][2][0]:
             results[key] = torch.from_numpy(
                 np.array([[d[key] for d in s[2]] for s in samples])
-            ) if samples[0][2][0][key] is not None else None
+            ) if samples[0][2][0].get(key, None) is not None else None
         return results
 
 
@@ -301,21 +302,23 @@ class SampledPixelDataset(BaseWrapperDataset):
         # sample pixels from the original images
         sample_index = [
             data_utils.sample_pixel_from_image(
-                data['alpha'], self.num_sample, 
+                data['alpha'].shape[-1], self.num_sample, 
                 ignore_mask=self.ignore_mask)
             for data in data_per_view
         ]
 
         for i, data in enumerate(data_per_view):
-            data_per_view[i]['full_rgb'] = data['rgb']
+            data_per_view[i]['full_rgb'] = copy.deepcopy(data['rgb'])
             for key in data:
                 if data[key] is not None \
-                    and len(data[key].shape) == 2 \
-                    and data[key].shape[1] > self.num_sample \
-                    and key != 'full_rgb':
+                    and (key != 'extrinsics' and key != 'view' and key != 'full_rgb') \
+                    and data[key].shape[-1] > self.num_sample:
 
-                    data_per_view[i][key] = data[key][:, sample_index[i]] 
-        
+                    if len(data[key].shape) == 2:
+                        data_per_view[i][key] = data[key][:, sample_index[i]] 
+                    else:
+                        data_per_view[i][key] = data[key][sample_index[i]]
+            data_per_view[i]['index'] = sample_index[i]
         return index, data_per_shape, data_per_view
 
     def num_tokens(self, index):
@@ -337,18 +340,10 @@ class WorldCoordDataset(BaseWrapperDataset):
             ray_start = inv_RT[:3, 3]
 
             # get points at a random depth (=1)
-            # OR transform depths to world coordinates (optional)
-            if data.get('depths', None) is None:
-                rt_cam = geometry.uv2cam(data['uv'], 1, intrinsics, True)
-            else:
-                rt_cam = geometry.uv2cam(data['uv'], data['depths'], intrinsics, True)
-                
-            rt = geometry.cam2world(rt_cam, inv_RT)
+            ray_dir = geometry.get_ray_direction(
+                ray_start, data['uv'], intrinsics, inv_RT, 1
+            )
             
-            # get the ray direction
-            # ray_dir, depth = geometry.normalize(rt - ray_start[:, None], axis=0)
-            ray_dir, _ = geometry.normalize(rt - ray_start[:, None], axis=0)
-
             # here we still keep the original data for tracking purpose
             data.update({
                 'ray_start': ray_start,
@@ -360,7 +355,10 @@ class WorldCoordDataset(BaseWrapperDataset):
         
     def collater(self, samples):
         results = self.dataset.collater(samples)
+        results['ray_start'] = results['ray_start'].unsqueeze(-2)
         results['ray_dir'] = results['ray_dir'].transpose(2, 3)
         results['rgb'] = results['rgb'].transpose(2, 3)
+        if results.get('full_rgb', None) is not None:
+            results['full_rgb'] = results['full_rgb'].transpose(2, 3)
         return results
 

@@ -48,11 +48,11 @@ class IterativeSphereTracer(nn.Module):
         self.args = args
 
     def search(self, signed_distance_fn, start, ray_dir, min=0.05, max=None, steps=4):
-        depths = ray_dir.new_ones(*ray_dir.size()[:3], requires_grad=True) * min
+        depths = ray_dir.new_ones(*ray_dir.size()[:-1], requires_grad=True) * min
         states, state = [], None
 
         for _ in range(steps):
-            query = ray(start, ray_dir, depths)
+            query = ray(start, ray_dir, depths.unsqueeze(-1))
             delta, state = signed_distance_fn(query, state)
             depths = depths + delta
             states.append((query, delta))

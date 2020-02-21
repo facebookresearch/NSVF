@@ -7,8 +7,45 @@ import numpy as np
 import torch
 
 
-# ----- numpy functions ------ #
+def ones_like(x):
+    T = torch if isinstance(x, torch.Tensor) else np
+    return T.ones_like(x)
+
+
+def stack(x):
+    T = torch if isinstance(x[0], torch.Tensor) else np
+    return T.stack(x)
+
+
+def matmul(x, y):
+    T = torch if isinstance(x, torch.Tensor) else np
+    return T.matmul(x, y)
+
+
+def cross(x, y):
+    T = torch if isinstance(x, torch.Tensor) else np
+    return T.cross(x, y)
+
+
+def cat(x, axis=1):
+    if isinstance(x[0], torch.Tensor):
+        return torch.cat(x, dim=axis)
+    return np.concatenate(x, axis=axis)
+
+
+def normalize(x, axis=-1, order=2):
+    if isinstance(x, torch.Tensor):
+        l2 = x.norm(p=order, dim=axis, keepdim=True)        
+    else:
+        l2 = np.linalg.norm(x, order, axis)
+        l2 = np.expand_dims(l2, axis)
+
+    l2[l2==0] = 1
+    return x / l2, l2
+
+
 def parse_extrinsics(extrinsics, world2camera=True):
+    """ this function is only for numpy for now"""
     if extrinsics.shape[0] == 3 and extrinsics.shape[1] == 4:
         extrinsics = np.vstack([extrinsics, np.array([[0, 0, 0, 1.0]])])
     if world2camera:
@@ -28,25 +65,29 @@ def uv2cam(uv, z, intrinsics, homogeneous=False):
     fx, fy, cx, cy = parse_intrinsics(intrinsics)
     x_lift = (uv[0] - cx) / fx * z
     y_lift = (uv[1] - cy) / fy * z
-    z_lift = np.ones_like(x_lift) * z
+    z_lift = ones_like(x_lift) * z
 
     if homogeneous:
-        return np.stack([x_lift, y_lift, z_lift, np.ones_like(z_lift)])
+        return stack([x_lift, y_lift, z_lift, ones_like(z_lift)])
     else:
-        return np.stack([x_lift, y_lift, z_lift])
+        return stack([x_lift, y_lift, z_lift])
 
 
 def cam2world(xyz_cam, inv_RT):
-    return np.matmul(inv_RT, xyz_cam)[:3]
+    return matmul(inv_RT, xyz_cam)[:3]
 
 
-def normalize(a, axis=-1, order=2):
-    l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
-    l2[l2==0] = 1
-    return a / np.expand_dims(l2, axis), l2
+def get_ray_direction(ray_start, uv, intrinsics, inv_RT, depths=None):
+    if depths is None:
+        depths = 1
+    rt_cam = uv2cam(uv, depths, intrinsics, True)       
+    rt = cam2world(rt_cam, inv_RT)
+    # from fairseq.pdb import set_trace; set_trace()
+    ray_dir, _ = normalize(rt - ray_start[:, None], axis=0)
+    return ray_dir
 
 
-def look_at_rotation(camera_position, at=((0, 0, 0),), up=((0, 1, 0),)):
+def look_at_rotation(camera_position, at=None, up=None, inverse=False, cv=False):
     """
     This function takes a vector 'camera_position' which specifies the location
     of the camera in world coordinates and two vectors `at` and `up` which
@@ -56,16 +97,31 @@ def look_at_rotation(camera_position, at=((0, 0, 0),), up=((0, 1, 0),)):
 
     The output is a rotation matrix representing the transformation
     from world coordinates -> view coordinates.
+
+    Input:
+        camera_position: 3
+        at: 1 x 3 or N x 3  (0, 0, 0) in default
+        up: 1 x 3 or N x 3  (0, 1, 0) in default
     """
+    if at is None:
+        at = torch.zeros_like(camera_position)
 
-    
+    if up is None:
+        up = torch.zeros_like(camera_position)
+        up[1] = 1
 
+    z_axis = normalize(camera_position - at)[0]
+    x_axis = normalize(cross(-z_axis, up))[0]
+    y_axis = normalize(cross(x_axis, -z_axis))[0]
+    R = cat([x_axis[None, :], -y_axis[None, :], -z_axis[None, :]], axis=0)
+    R = R.transpose(0, 1)      # world --> camera
 
-# ----- pytorch functions ------ #
+    # if cv:
+    #     R_cam2cv = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], 
+    #                     device=R.device, dtype=R.dtype)
+    #     R = R_cam2cv @ R    # world --> view
+    return R.inverse()
+
 
 def ray(ray_start, ray_dir, depths):
-    if ray_start.dim() + 1 == ray_dir.dim():
-        ray_start = ray_start.unsqueeze(-2)
-    if depths.dim() + 1 == ray_dir.dim():
-        depths = depths.unsqueeze(-1)
     return ray_start + ray_dir * depths
