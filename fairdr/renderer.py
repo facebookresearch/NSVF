@@ -15,7 +15,7 @@ from fairdr.data import trajectory, geometry, data_utils
 
 class NeuralRenderer(object):
     
-    def __init__(self, resolution=1024, frames=300, speed=5, path_gen=None):
+    def __init__(self, resolution=512, frames=300, speed=5, path_gen=None):
         self.frames = frames
         self.speed = speed
         self.path_gen = path_gen
@@ -55,22 +55,23 @@ class NeuralRenderer(object):
         model = models[0]
         rgb_path = "/private/home/jgu/data/test_images"
         for shape in range(sample['shape'].size(0)):
-            for step in range(self.frames):
-                print(step)
-                ray_start, ray_dir = self.generate_rays(step, sample['intrinsics'][shape])
-                _sample = {
-                    'ray_start': ray_start[None, None, :, :],
-                    'ray_dir': ray_dir[None, None, :, :],
-                    'shape': sample['shape'][0:1], 
-                    'view': torch.ones_like(sample['shape'][None, 0:1]) * step
-                }
-                images = model.visualize(_sample, i=-1)
+            # for step in range(self.frames):
+            #     print(step)
+            #     ray_start, ray_dir = self.generate_rays(step, sample['intrinsics'][shape])
+            #     _sample = {
+            #         'ray_start': ray_start[None, None, :, :],
+            #         'ray_dir': ray_dir[None, None, :, :],
+            #         'shape': sample['shape'][0:1], 
+            #         'view': torch.ones_like(sample['shape'][None, 0:1]) * step
+            #     }
+            #     images = model.visualize(_sample, i=-1)
                 
-                for key in images:
-                    if 'rgb' in key:
+            #     for key in images:
+            #         if 'rgb' in key:
                         
-                        rgb_name = "{}_{:04d}".format(shape, step)
-                        save_image(images[key].permute(2, 0, 1), "{}/rgb/{}.png".format(rgb_path, rgb_name), format=None)
+            #             rgb_name = "{}_{:04d}".format(shape, step)
+            #             save_image(images[key].permute(2, 0, 1), "{}/rgb/{}.png".format(rgb_path, rgb_name), format=None)
             
-            os.system("ffmpeg -framerate 24 -i {}/rgb/{}_%04d.png -y {}/rgb.avi".format(rgb_path, shape, rgb_path))
+            # os.system("ffmpeg -framerate 24 -i {}/rgb/{}_%04d.png -y {}/rgb_512.avi".format(rgb_path, shape, rgb_path))
+            os.system("ffmpeg -framerate 24 -i {}/rgb/{}_%04d.png -y {}/rgb_512.gif".format(rgb_path, shape, rgb_path))
             # os.system("ffmpeg -r 1/5 -i {}/rgb/{}_%04d.png -c:v libx264 -vf fps=25 -pix_fmt yuv420p {}/rgb.mp4".format(rgb_path, shape, rgb_path))
