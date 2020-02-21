@@ -7,8 +7,19 @@ Make sure you install and run code in fairseq environment.
 
 For installation, run
 ```
-    pip install -e .
+pip install -e .
 ```
 
+To train a new model,
+```
+fairdr-train $DATATSET --user-dir fairdr --save-dir $MODEL_PATH 
+```
+
+To rendering a trained mode,
+```
+fairdr-render $DATASET --user-dir fairdr --path $MODEL_PATH/checkpoint_best.pt
+```
+
+More details, please follow the ```scripts``` folder.
 
 ![SingleShapeRendering](images/rgb_512.gif)
