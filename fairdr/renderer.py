@@ -64,13 +64,13 @@ class NeuralRenderer(object):
                     'shape': sample['shape'][0:1], 
                     'view': torch.ones_like(sample['shape'][None, 0:1]) * step
                 }
-                images = model.visualize(_sample, i=-1)
+                images = model.visualize(_sample, model(**_sample), 0, 0, 
+                                        target_map=False, depth_map=False)
                 
                 for key in images:
-                    if 'rgb' in key:
-                        
-                        rgb_name = "{}_{:04d}".format(shape, step)
-                        save_image(images[key].permute(2, 0, 1), "{}/rgb/{}.png".format(rgb_path, rgb_name), format=None)
-            
+                    
+                    rgb_name = "{}x_{:04d}".format(shape, step)
+                    save_image(images[key].permute(2, 0, 1), "{}/rgb/{}.png".format(rgb_path, rgb_name), format=None)
+        
             # save as gif
-            os.system("ffmpeg -framerate 24 -i {}/rgb/{}_%04d.png -y {}/rgb_512.gif".format(rgb_path, shape, rgb_path))
+            os.system("ffmpeg -framerate 24 -i {}/rgb/{}x_%04d.png -y {}/rgb_slurm.gif".format(rgb_path, shape, rgb_path))

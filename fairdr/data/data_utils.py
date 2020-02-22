@@ -6,6 +6,7 @@
 import torch
 import functools
 import cv2
+import math
 import numpy as np
 import imageio
 from glob import glob
@@ -120,6 +121,12 @@ def load_intrinsics(filepath, resized_width=None, invert_y=False):
                                [0., 0, 1, 0],
                                [0, 0, 0, 1]])
     return full_intrinsic
+
+
+def unflatten_img(img):
+    sizes = img.size()
+    side_len = int(math.sqrt(sizes[-1]))
+    return img.reshape(*sizes[:-1], side_len, side_len)
 
 
 def square_crop_img(img):

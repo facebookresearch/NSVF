@@ -6,6 +6,8 @@
 import numpy as np
 import torch
 
+from fairdr.data import data_utils as D
+
 
 def ones_like(x):
     T = torch if isinstance(x, torch.Tensor) else np
@@ -22,9 +24,9 @@ def matmul(x, y):
     return T.matmul(x, y)
 
 
-def cross(x, y):
+def cross(x, y, axis=0):
     T = torch if isinstance(x, torch.Tensor) else np
-    return T.cross(x, y)
+    return T.cross(x, y, axis)
 
 
 def cat(x, axis=1):
@@ -125,3 +127,21 @@ def look_at_rotation(camera_position, at=None, up=None, inverse=False, cv=False)
 
 def ray(ray_start, ray_dir, depths):
     return ray_start + ray_dir * depths
+
+
+def compute_normal_map(ray_start, ray_dir, depths, RT):
+    # TODO:
+    # this function is pytorch-only (for not)
+    wld_coords = ray(ray_start, ray_dir, depths.unsqueeze(-1)).transpose(0, 1)
+    cam_coords = matmul(RT[:3, :3], wld_coords) + RT[:3, 3].unsqueeze(-1)
+    cam_coords = D.unflatten_img(cam_coords)
+
+    # estimate local normal
+    shift_l = cam_coords[:, 2:,  :]
+    shift_r = cam_coords[:, :-2, :]
+    shift_u = cam_coords[:, :, 2: ]
+    shift_d = cam_coords[:, :, :-2]
+    diff_hor = normalize(shift_r - shift_l, axis=0)[0][:, :, 1:-1]
+    diff_ver = normalize(shift_u - shift_d, axis=0)[0][:, 1:-1, :]
+    normal = cross(diff_hor, diff_ver).reshape(3, -1).transpose(0, 1)
+    return normal

@@ -1,18 +1,21 @@
 # just for debugging
 # DATASET=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/61b984febe54b752d61420a53a0cb96d
 DATASET=/private/home/jgu/data/shapenet/maria
-MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn_ref22
+MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn_ref24
+SLURM_MODEL=/checkpoint/jgu/space/neuralrendering/slurm_srn/maria.no_c10d.single.512x512.s1.v5.p16384.mask0.75.march10.rgb200.dep0.08.vgg1.0.srn_base.adam.lr_fixed.lr0.001.clip0.0.wd0.0.seed2.ngpu8/
 ARCH=srn_base
 CRITERION=srn_loss
 # FAIRSEQ=/private/home/jgu/work/fairseq-master/fairseq_cli
-
+# --restore-file $SLURM_MODEL/checkpoint_last.pt \
 mkdir -p $MODEL_PATH
 
 CUDA_VISIBLE_DEVICES=0 \
-fairdr-train $DATASET \
+python train.py $DATASET \
+    --ddp-backend no_c10d \
     --user-dir fairdr/ \
     --save-dir $MODEL_PATH \
     --tensorboard-logdir $MODEL_PATH/tensorboard \
+    --restore-file $SLURM_MODEL/checkpoint_last.pt \
     --max-sentences 1 \
     --pixel-per-view 16384 \
     --sampling-on-mask 0.75 \
@@ -20,7 +23,7 @@ fairdr-train $DATASET \
     --view-resolution 512 \
     --raymarching-steps 10 \
     --load-depth --load-mask \
-    --rgb-weight 200 --reg-weight 1e-3 --depth-weight 0.08 \
+    --rgb-weight 200 --reg-weight 1e-3 --depth-weight 0.08 --vgg-weight 1.0 \
     --task single_object_rendering \
     --criterion $CRITERION \
     --arch $ARCH \
@@ -28,7 +31,7 @@ fairdr-train $DATASET \
     --clip-norm 0.0 \
     --lr 0.001 --lr-scheduler fixed \
     --save-interval-updates 3000 \
-    --validate-interval 100 \
+    --validate-interval 1 \
     --save-interval 100000 \
     --max-update 300000 \
     --no-epoch-checkpoints \

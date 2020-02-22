@@ -12,6 +12,7 @@ https://vsitzmann.github.io/srns/
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.autograd import grad
 
 from fairseq.models import (
@@ -22,7 +23,7 @@ from fairseq.models import (
 from fairdr.models.fairdr_model import BaseModel, Field, Raymarcher
 from fairdr.modules.implicit import ImplicitField, SignedDistanceField, TextureField
 from fairdr.modules.raymarcher import IterativeSphereTracer
-from fairdr.data.geometry import ray
+from fairdr.data.geometry import ray, compute_normal_map
 from fairdr.data.data_utils import recover_image
 from fairdr.modules.utils import gradient_bridage
 
@@ -69,9 +70,9 @@ class SRNModel(BaseModel):
                             help='number of steps for ray-marching')
         parser.add_argument('--jump-to-max-depth', type=float, metavar='D',
                             help='give up ray-marching and directly predict maximum. controlled by gater')
-        parser.add_argument('--gradient-penalty', action='store_true')
+        parser.add_argument('--gradient-penalty', action='store_true',
+                            help="additional gradient penalty to make ray marching close to sphere-tracing")
         parser.add_argument('--implicit-gradient', action='store_true')
-
 
     def forward(self, ray_start, ray_dir, **kwargs):
         # ray intersection
@@ -90,45 +91,76 @@ class SRNModel(BaseModel):
         else:
             grad_penalty = 0
 
-        return {
+        # model's output
+        results = {
             'predicts': predicts,
             'depths': depths,
             'grad_penalty': grad_penalty
         }
 
-    @torch.no_grad()
-    def visualize(self, sample, i=0):
-        # only visualize one
-        if i > -1:
-            _sample = {
-                    key: sample[key][0:1, i:i+1]
-                    for key in sample
-                        if sample[key] is not None and  
-                            key in ('ray_start', 'ray_dir', 'view', 'rgb', 'depths')
-            }
-            _sample['shape'] = sample['shape'][0:1]
-            sample = _sample
-
-        output = self.forward(sample['ray_start'], sample['ray_dir'])
-        images = {
-            'depth/{}_{}:HW'.format(
-                sample['shape'][0], sample['view'][0][0]):
-                {'img': output['depths'][0, 0], 'min_val': 0.5, 'max_val': 5},
-            'rgb/{}_{}:HWC'.format(
-                sample['shape'][0], sample['view'][0][0]):
-                {'img': output['predicts'][0, 0]},
-            'target/{}_{}:HWC'.format(
-                sample['shape'][0], sample['view'][0][0]):
-                {'img': sample['rgb'][0, 0]}
-                if sample.get('rgb', None) is not None else None,
-            'target_depth/{}_{}:HW'.format(
-                sample['shape'][0], sample['view'][0][0]):
-                {'img': sample['depths'][0, 0], 'min_val': 0.5, 'max_val': 5}
-                if sample.get('depths', None) is not None else None,
+        # caching the prediction
+        self.cache = {
+            w: results[w].detach() 
+                if isinstance(w, torch.Tensor) 
+                else results[w] 
+            for w in results
         }
+        return results
+
+    @torch.no_grad()
+    def visualize(self, 
+            sample,
+            output=None, 
+            shape=0, view=0, 
+            target_map=True, 
+            depth_map=True,
+            error_map=False, 
+            normal_map=False, 
+            **kwargs):
+        
+        if output is None:
+            assert self.cache is not None, "need to run forward-pass"
+            output = self.cache  # make sure to run forward-pass.
+        
+        img_id = '{}_{}'.format(sample['shape'][shape], sample['view'][shape, view])
+        images = {
+            'rgb/{}:HWC'.format(img_id):
+                {'img': output['predicts'][shape, view]},
+        }
+        if depth_map:
+            images['depth/{}:HW'.format(img_id)] = {
+                'img': output['depths'][shape, view], 'min_val': 0.5, 'max_val': 5}
+
+        if target_map:
+            images.update({
+                'target/{}:HWC'.format(img_id):
+                    {'img': sample['rgb'][shape, view]}
+                    if sample.get('rgb', None) is not None else None,
+                'target_depth/{}:HW'.format(img_id):
+                    {'img': sample['depths'][shape, view], 'min_val': 0.5, 'max_val': 5}
+                    if sample.get('depths', None) is not None else None,
+            })
+
+        if normal_map:
+            normals = compute_normal_map(
+                sample['ray_start'][shape, view],
+                sample['ray_dir'][shape, view],
+                output['depths'][shape, view],
+                sample['extrinsics'][shape, view].inverse())
+            images['normal/{}:HWC'.format(img_id)] = {
+                'img': normals, 'min_val': -1, 'max_val': 1}
+
+        if error_map:
+            errors = F.mse_loss(
+                output['predicts'][shape, view], sample['rgb'][shape, view], 
+                reduction='none').sum(-1)
+            images['errors/{}:HW'.format(img_id)] = {
+                'img': errors, 'min_val': errors.min(), 'max_val': errors.max()}
+
         images = {
             tag: recover_image(**images[tag]) for tag in images if images[tag] is not None
         }
+
         return images
 
 

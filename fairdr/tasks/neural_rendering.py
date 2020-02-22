@@ -76,7 +76,7 @@ class SingleObjRenderingTask(FairseqTask):
                 load_mask=self.args.load_mask,
                 load_point=self.args.load_point,
                 repeat=repeats)
-                
+
             if split == 'train' and (self.args.pixel_per_view is not None):
                 self.datasets[split] = SampledPixelDataset(
                     self.datasets[split],
@@ -111,11 +111,13 @@ class SingleObjRenderingTask(FairseqTask):
         return None
 
     def valid_step(self, sample, model, criterion):
-        # set_trace()
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
-        
-        # visualize in tensorboard
-        images = model.visualize(sample)
+        images = model.visualize(
+            sample,
+            target_map=True,
+            depth_map=True, 
+            normal_map=True, 
+            error_map=False)
         if images is not None and self.args.distributed_rank == 0:
             write_images(self.writer, images)
 

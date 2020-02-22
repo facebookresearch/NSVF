@@ -99,6 +99,7 @@ class SRNLossCriterion(RenderingCriterion):
         parser.add_argument('--depth-weight', type=float, default=0.0)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
+        parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
         parser.add_argument('--error-map', action='store_true')
 
     def compute_loss(self, model, net_output, sample, reduce=True):
@@ -140,7 +141,7 @@ class SRNLossCriterion(RenderingCriterion):
                 x = x.transpose(2, 3).view(S * V, 3, L, L)
                 return x / 2 + 0.5
 
-            losses['vgg_loss'] = (self.vgg(transform(inputs), transform(target)), self.args.vgg_weight)
-        
+            # vgg_ratio = target.numel() / net_output['predicts'].numel()
+            losses['vgg_loss'] = (self.vgg(transform(inputs), transform(target), self.args.vgg_level), self.args.vgg_weight)
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
         return loss, {key: item(losses[key][0]) for key in losses}
