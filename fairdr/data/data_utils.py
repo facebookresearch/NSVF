@@ -58,6 +58,19 @@ def load_depth(path, resolution=None, depth_plane=5):
     return img
 
 
+def load_mask(path, resolution=None):
+    if path is None:
+        return None
+    
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE).astype(np.float32)
+    if resolution is not None:
+        h, w = img.shape[:2]
+        w, h = resolution, int(h/float(w)*resolution)
+        img  = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
+    img = img / img.max()
+    return img
+
+
 def load_matrix(path):
     return np.array([[float(w) for w in line.strip().split()] for line in open(path)]).astype(np.float32)
 
@@ -120,8 +133,13 @@ def square_crop_img(img):
     return img
 
 
-def sample_pixel_from_image(num_pixel, num_sample, ignore_mask=1.0):
-    return np.random.choice(num_pixel, num_sample)
+def sample_pixel_from_image(num_pixel, num_sample, mask=None, ratio=1.0):
+    if mask is None:
+        return np.random.choice(num_pixel, num_sample)
+    
+    probs = mask * ratio / mask.sum() + (1 - mask) / (num_pixel - mask.sum()) * (1 - ratio)
+    # x = np.random.choice(num_pixel, num_sample, True, p=probs)
+    return np.random.choice(num_pixel, num_sample, False, p=probs)
 
 
 def recover_image(img, min_val=-1, max_val=1):

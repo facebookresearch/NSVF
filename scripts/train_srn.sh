@@ -8,7 +8,6 @@ CRITERION=srn_loss
 
 mkdir -p $MODEL_PATH
 
-
 fairdr-train $DATASET \
     --user-dir fairdr/ \
     --save-dir $MODEL_PATH \

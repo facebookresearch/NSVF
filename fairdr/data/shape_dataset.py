@@ -156,6 +156,7 @@ class ShapeViewDataset(ShapeDataset):
                 num_view, 
                 resolution=None, 
                 load_depth=False,
+                load_mask=False,
                 load_point=False,
                 train=True,
                 preload=True,
@@ -165,6 +166,7 @@ class ShapeViewDataset(ShapeDataset):
 
         self.train = train
         self.load_depth = load_depth
+        self.load_mask = load_mask
         self.max_train_view = max_train_view
         self.num_view = num_view
         self.resolution = resolution
@@ -175,8 +177,12 @@ class ShapeViewDataset(ShapeDataset):
         _data_per_view = {}
         _data_per_view['rgb'] = self.find_rgb()  
         _data_per_view['ext'] = self.find_extrinsics()
+
         if self.load_depth:
             _data_per_view['dep'] = self.find_depth()
+        if self.load_mask:
+            _data_per_view['mask'] = self.find_mask()
+        
         _data_per_view['view'] = self.summary_view_data(_data_per_view)
 
 
@@ -225,7 +231,13 @@ class ShapeViewDataset(ShapeDataset):
         try:
             return self.cutoff([sorted(glob.glob(path + '/depth/*.exr')) for path in self.paths])
         except FileNotFoundError:
-            raise FileNotFoundError("CANNOT find estimateddepths images") 
+            raise FileNotFoundError("CANNOT find estimated depths images") 
+
+    def find_mask(self):
+        try:
+            return self.cutoff([sorted(glob.glob(path + '/mask/*.png')) for path in self.paths])
+        except FileNotFoundError:
+            raise FileNotFoundError("CANNOT find precomputed mask images")
 
     def find_extrinsics(self):
         try:
@@ -252,8 +264,11 @@ class ShapeViewDataset(ShapeDataset):
         rgb, alpha = image[:3], image[3]  # C x H x W for RGB
         extrinsics = data_utils.load_matrix(packed_data['ext'][view_idx])
         extrinsics = geometry.parse_extrinsics(extrinsics, self.world2camera).astype('float32')
-        z = data_utils.load_depth(packed_data['dep'][view_idx], resolution=self.resolution) \
-            if packed_data.get('dep', None) is not None else None
+        z, mask = None, None
+        if packed_data.get('dep', None) is not None:
+            z = data_utils.load_depth(packed_data['dep'][view_idx], resolution=self.resolution)
+        if packed_data.get('mask', None) is not None:
+            mask = data_utils.load_mask(packed_data['mask'][view_idx], resolution=self.resolution)
 
         return {
             'view': view_idx,
@@ -261,7 +276,8 @@ class ShapeViewDataset(ShapeDataset):
             'rgb': rgb.reshape(3, -1), 
             'alpha': alpha.reshape(-1), 
             'extrinsics': extrinsics,
-            'depths': z.reshape(-1) if z is not None else None
+            'depths': z.reshape(-1) if z is not None else None,
+            'mask': mask.reshape(-1) if mask is not None else None,
         }
 
     def _load_batch(self, data, index, view_ids=None):
@@ -291,19 +307,21 @@ class SampledPixelDataset(BaseWrapperDataset):
     A wrapper dataset, which split rendered images into pixels
     """
 
-    def __init__(self, dataset, num_sample=None):
+    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0):
         super().__init__(dataset)
         self.num_sample = num_sample
-        self.ignore_mask = 1.1
+        self.sampling_on_mask = sampling_on_mask
 
     def __getitem__(self, index):
         index, data_per_shape, data_per_view = self.dataset[index]
-
+        
         # sample pixels from the original images
         sample_index = [
             data_utils.sample_pixel_from_image(
-                data['alpha'].shape[-1], self.num_sample, 
-                ignore_mask=self.ignore_mask)
+                data['alpha'].shape[-1], 
+                self.num_sample, 
+                data.get('mask', None),
+                self.sampling_on_mask)
             for data in data_per_view
         ]
 

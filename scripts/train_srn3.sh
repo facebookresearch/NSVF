@@ -8,19 +8,19 @@ CRITERION=srn_loss
 
 mkdir -p $MODEL_PATH
 
-CUDA_VISIBLE_DEVICES=0 \
+# CUDA_VISIBLE_DEVICES=0 \
 fairdr-train $DATASET \
     --user-dir fairdr/ \
     --save-dir $MODEL_PATH \
     --tensorboard-logdir $MODEL_PATH/tensorboard \
     --max-sentences 1 \
     --pixel-per-view 16384 \
+    --sampling-on-mask 0.75 \
     --view-per-batch 5 \
     --view-resolution 512 \
     --raymarching-steps 10 \
-    --load-depth \
+    --load-depth --load-mask \
     --rgb-weight 200 --reg-weight 1e-3 --depth-weight 0.08 \
-    --error-map \
     --task single_object_rendering \
     --criterion $CRITERION \
     --arch $ARCH \

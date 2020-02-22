@@ -32,8 +32,10 @@ class SingleObjRenderingTask(FairseqTask):
                             help="number of views sampled for training, can be unlimited if set -1")
         parser.add_argument("--view-per-batch", type=int, default=6,
                             help="number of views training each batch (each GPU)")
-        parser.add_argument("--pixel-per-view", type=int, default=1024,
-                            help="how many pixels to sample from each view")
+        parser.add_argument("--pixel-per-view", default=None, nargs='?', const=16384, type=int,
+                            help="how many pixels to sample from each view. -1 means using all pixels")
+        parser.add_argument("--sampling-on-mask", default=1.0, nargs='?', const=0.9, type=float,
+                            help="this value determined the probability of sampling rays on masks")
         parser.add_argument("--view-resolution", type=int, default=64,
                             help="height/width for the squared image. downsampled from the original.")
 
@@ -71,13 +73,15 @@ class SingleObjRenderingTask(FairseqTask):
                 self.args.view_resolution,
                 train=(split == 'train'),
                 load_depth=self.args.load_depth,
+                load_mask=self.args.load_mask,
                 load_point=self.args.load_point,
                 repeat=repeats)
-            
-            if split == 'train' and (self.args.pixel_per_view > 0):
+                
+            if split == 'train' and (self.args.pixel_per_view is not None):
                 self.datasets[split] = SampledPixelDataset(
                     self.datasets[split],
-                    self.args.pixel_per_view)
+                    self.args.pixel_per_view,
+                    self.args.sampling_on_mask)
 
             self.datasets[split] = WorldCoordDataset(
                 self.datasets[split]

@@ -14,7 +14,6 @@ fairseq-train $DATASET \
     --save-dir $MODEL_PATH \
     --tensorboard-logdir $MODEL_PATH/tensorboard \
     --max-sentences 1 \
-    --pixel-per-view -1 \
     --view-per-batch 1 \
     --view-resolution 256 \
     --raymarching-steps 10 \
