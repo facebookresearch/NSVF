@@ -15,15 +15,14 @@ from fairdr.data import trajectory, geometry, data_utils
 
 class NeuralRenderer(object):
     
-    def __init__(self, resolution=512, frames=300, speed=5, path_gen=None):
+    def __init__(self, resolution=512, frames=501, speed=5, path_gen=None, batch_size=5):
         self.frames = frames
         self.speed = speed
         self.path_gen = path_gen
         self.resolution = resolution
+        self.batch_size = batch_size
         if self.path_gen is None:
             self.path_gen = trajectory.circle()
-
-        
 
     def generate_rays(self, t, intrinsics):
         # cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
@@ -34,7 +33,8 @@ class NeuralRenderer(object):
         # inv_RT[:3, :3] = cam_rot
         # inv_RT[:3, 3] = cam_pos
         # inv_RT[3, 3] = 1
-        
+
+        # generate ray from a fixed trajectory, for now.        
         RT = data_utils.load_matrix("/private/home/jgu/work/tsrn-master/test_trajs/maria/{}.txt".format(t))
         inv_RT = torch.from_numpy(RT).to(intrinsics.device, intrinsics.dtype).inverse()
         
@@ -44,8 +44,7 @@ class NeuralRenderer(object):
         uv = torch.stack([u, v], 0).type_as(intrinsics)
         uv = uv[:, ::2*cy//self.resolution, ::2*cx//self.resolution]
         uv = uv.reshape(2, -1)
-        # from fairseq.pdb import set_trace; set_trace()
-
+    
         ray_start = inv_RT[:3, 3]
         ray_dir = geometry.get_ray_direction(ray_start, uv, intrinsics, inv_RT)
         return ray_start[None, :], ray_dir.transpose(0, 1)
@@ -55,22 +54,31 @@ class NeuralRenderer(object):
         model = models[0]
         rgb_path = "/private/home/jgu/data/test_images"
         for shape in range(sample['shape'].size(0)):
-            for step in range(self.frames):
-                print(step)
-                ray_start, ray_dir = self.generate_rays(step, sample['intrinsics'][shape])
+            for step in range(0, self.frames, self.batch_size):
+                ray_start, ray_dir = zip(*[
+                    self.generate_rays(k, sample['intrinsics'][shape])
+                    for k in range(step, min(self.frames, step + self.batch_size))
+                ])
+
                 _sample = {
-                    'ray_start': ray_start[None, None, :, :],
-                    'ray_dir': ray_dir[None, None, :, :],
-                    'shape': sample['shape'][0:1], 
-                    'view': torch.ones_like(sample['shape'][None, 0:1]) * step
+                    'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
+                    'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
+                    'shape': sample['shape'],
+                    'view': torch.arange(
+                        step, min(step + self.batch_size, self.frames), 
+                        device=sample['shape'].device).unsqueeze(0)
                 }
-                images = model.visualize(_sample, model(**_sample), 0, 0, 
-                                        target_map=False, depth_map=False)
                 
-                for key in images:
-                    
-                    rgb_name = "{}x_{:04d}".format(shape, step)
-                    save_image(images[key].permute(2, 0, 1), "{}/rgb/{}.png".format(rgb_path, rgb_name), format=None)
+                _ = model(**_sample)
+
+                for k in range(step, min(self.frames, step + self.batch_size)):
+                    print(k)
+                    images = model.visualize(_sample, None, shape, k-step, 
+                                        target_map=False, depth_map=False)
+                    rgb_name = "{}y_{:04d}".format(shape, k)
+                    for key in images:
+                        if 'rgb' in key:
+                            save_image(images[key].permute(2, 0, 1), "{}/rgb/{}.png".format(rgb_path, rgb_name), format=None)
         
             # save as gif
-            os.system("ffmpeg -framerate 24 -i {}/rgb/{}x_%04d.png -y {}/rgb_slurm.gif".format(rgb_path, shape, rgb_path))
+            os.system("ffmpeg -framerate 40 -i {}/rgb/{}x_%04d.png -y {}/rgb_slurm.gif".format(rgb_path, shape, rgb_path))

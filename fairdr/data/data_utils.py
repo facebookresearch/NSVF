@@ -140,10 +140,17 @@ def square_crop_img(img):
     return img
 
 
-def sample_pixel_from_image(num_pixel, num_sample, mask=None, ratio=1.0):
+def sample_pixel_from_image(num_pixel, num_sample, mask=None, ratio=1.0, use_bbox=False):
     if mask is None:
         return np.random.choice(num_pixel, num_sample)
-    
+
+    if use_bbox:
+        mask = mask.reshape(-1, int(math.sqrt(mask.shape[0])))
+        x, y = np.where(mask == 1)
+        mask = np.zeros_like(mask)
+        mask[x.min(): x.max()+1, y.min(): y.max()+1] = 1.0
+        mask = mask.reshape(-1)
+
     probs = mask * ratio / mask.sum() + (1 - mask) / (num_pixel - mask.sum()) * (1 - ratio)
     # x = np.random.choice(num_pixel, num_sample, True, p=probs)
     return np.random.choice(num_pixel, num_sample, False, p=probs)

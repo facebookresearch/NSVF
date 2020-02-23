@@ -307,10 +307,11 @@ class SampledPixelDataset(BaseWrapperDataset):
     A wrapper dataset, which split rendered images into pixels
     """
 
-    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0):
+    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0, sampling_on_bbox=False):
         super().__init__(dataset)
         self.num_sample = num_sample
         self.sampling_on_mask = sampling_on_mask
+        self.sampling_on_bbox = sampling_on_bbox
 
     def __getitem__(self, index):
         index, data_per_shape, data_per_view = self.dataset[index]
@@ -321,7 +322,8 @@ class SampledPixelDataset(BaseWrapperDataset):
                 data['alpha'].shape[-1], 
                 self.num_sample, 
                 data.get('mask', None),
-                self.sampling_on_mask)
+                self.sampling_on_mask,
+                self.sampling_on_bbox)
             for data in data_per_view
         ]
 

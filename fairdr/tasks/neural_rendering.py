@@ -36,6 +36,7 @@ class SingleObjRenderingTask(FairseqTask):
                             help="how many pixels to sample from each view. -1 means using all pixels")
         parser.add_argument("--sampling-on-mask", default=1.0, nargs='?', const=0.9, type=float,
                             help="this value determined the probability of sampling rays on masks")
+        parser.add_argument("--sampling-on-bbox", action='store_true')
         parser.add_argument("--view-resolution", type=int, default=64,
                             help="height/width for the squared image. downsampled from the original.")
 
@@ -81,7 +82,8 @@ class SingleObjRenderingTask(FairseqTask):
                 self.datasets[split] = SampledPixelDataset(
                     self.datasets[split],
                     self.args.pixel_per_view,
-                    self.args.sampling_on_mask)
+                    self.args.sampling_on_mask,
+                    self.args.sampling_on_bbox)
 
             self.datasets[split] = WorldCoordDataset(
                 self.datasets[split]
