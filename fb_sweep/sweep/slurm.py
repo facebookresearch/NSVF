@@ -42,7 +42,7 @@ def main(get_grid, postprocess_hyperparams, args):
         if i == args.num_trials - 1:
             break
 
-def copy_all_python_files(source, snapshot_main_dir, code_snapshot_hash):
+def copy_all_python_files(source, snapshot_main_dir, code_snapshot_hash, user_dir=None):
     """
     Copies following files from source to destination:
         a) all *.py files at direct source location.
@@ -57,6 +57,9 @@ def copy_all_python_files(source, snapshot_main_dir, code_snapshot_hash):
             glob(os.path.join(source, 'fairseq/**/*.so'), recursive=True) + \
             glob(os.path.join(source, '*.py'))
 
+    if user_dir is not None:
+        all_pys += glob(os.path.join(user_dir, '**/*.py'), recursive=True) + \
+                glob(os.path.join(user_dir, '**/*.so'), recursive=True)
     for filepath in all_pys:
         directory, filename = os.path.split(filepath)
         if directory:
@@ -75,7 +78,8 @@ def launch_train(args, config):
         # Currently hash is just the current time in ISO format.
         code_snapshot_hash = datetime.datetime.now().isoformat()
         destination = copy_all_python_files(
-            '.', os.path.join(args.snapshot_root, 'slurm_snapshot_code'), code_snapshot_hash)
+            '.', os.path.join(args.snapshot_root, 'slurm_snapshot_code'), 
+            code_snapshot_hash, args.user_dir)
 
     # compute save_dir
     save_dir_key = '.'.join(filter(
@@ -86,7 +90,8 @@ def launch_train(args, config):
     num_total_gpus = args.num_nodes * args.num_gpus
     save_dir = os.path.join(args.checkpoints_dir, f'{args.prefix}.{save_dir_key}.ngpu{num_total_gpus}')
     tensorboard_logdir = os.path.join(args.tensorboard_logdir, f'{args.prefix}.{save_dir_key}.ngpu{num_total_gpus}')
-
+    user_dir = args.user_dir if not args.snapshot_code else os.path.join(destination, args.user_dir)
+    
     # create save directory if it doesn't exist
     if not os.path.exists(save_dir):
         if not dry_run(f'create directory: {save_dir}'):
@@ -129,6 +134,8 @@ def launch_train(args, config):
     train_cmd.extend(['--save-dir', save_dir])
     if not args.no_tensorboard:
         train_cmd.extend(['--tensorboard-logdir', tensorboard_logdir])
+    if user_dir is not None:
+        train_cmd.extend(['--user-dir', user_dir])
     for hp in config.values():
         train_cmd.extend(map(str, hp.get_cli_args()))
 

@@ -4,10 +4,22 @@ import fb_sweep.sweep as sweep
 from fb_sweep.sweep import hyperparam
 
 
+GRID_REGISTRY = {}
+
+
+def register_grid(name):
+    def register_grid_cls(cls):
+        if name in GRID_REGISTRY:
+            raise ValueError('Cannot register duplicate grid ({})'.format(name))
+        GRID_REGISTRY[name] = cls
+        return cls
+    return register_grid_cls
+
+
+@register_grid("srn")
 def get_grid(args):
     return [
         # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
-        hyperparam('--user-dir', 'fairdr/'),
         hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
 
@@ -15,7 +27,8 @@ def get_grid(args):
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 5, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p{val}'),
-        hyperparam('--sampling-on-mask', 0.75, save_dir_key=lambda val: f'mask{val}'),
+        hyperparam('--sampling-on-mask', 0.5, save_dir_key=lambda val: f'mask{val}'),
+        hyperparam('--sampling-on-bbox', binary_flag=True, save_dir_key=lambda val: 'bbox'),
         hyperparam('--raymarching-steps', 10, save_dir_key=lambda val: f'march{val}'),
 
         hyperparam('--load-depth', binary_flag=True),
@@ -52,4 +65,4 @@ def postprocess_hyperparams(args, config):
 
 
 if __name__ == '__main__':
-    sweep.main(get_grid, postprocess_hyperparams)
+    sweep.main(GRID_REGISTRY, postprocess_hyperparams)

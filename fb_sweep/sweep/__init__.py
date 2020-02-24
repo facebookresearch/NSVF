@@ -82,6 +82,8 @@ def get_args():
                         help='save tensorboard logs in <tensorboard-logdir>/<prefix>.<save_dir_key>')
     parser.add_argument('--no-tensorboard', action='store_true',
                         help='disable tensorboard logging')
+    parser.add_argument('--user-dir', type=str, default=None, 
+                        help='path to modules for custom extensions')
     parser.add_argument('--post-steps', nargs='+',
                         help='additional steps to execute after the primary job is complete. '
                             'this can be a file with the steps, or a string. some placeholders such as '

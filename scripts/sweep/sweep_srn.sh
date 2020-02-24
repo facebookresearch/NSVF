@@ -1,6 +1,6 @@
 ROOT=/private/home/jgu/data/shapenet/
 DATA=maria
-WORK=/checkpoint/jgu/space/neuralrendering/slurm_srn/
+WORK=/checkpoint/jgu/space/neuralrendering/slurm_srn
 mkdir -p ${WORK}
 
 ENGINE=~jgu/work/neuralrendering
@@ -8,8 +8,12 @@ pushd $ENGINE
 
 python fb_sweep/sweep_neural_rendering.py \
     --data ${ROOT}/${DATA} \
+    --grid "srn" \
+    --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
+    --snapshot-code \
+    --snapshot-root ${WORK}/snapshot \
     --prefix ${DATA} \
     --num-trials 1 \
     --num-gpus 8 \
@@ -20,7 +24,7 @@ python fb_sweep/sweep_neural_rendering.py \
     --comment "ECCV paper deadline." \
     --partition priority \
     --resume-failed \
-    # --local
+    # --local \
     # --dry-run
 
 popd
