@@ -67,7 +67,9 @@ class RenderingCriterion(FairseqCriterion):
         for w in summed_logging_outputs:
             if '_loss' in w:
                 metrics.log_scalar(w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
-            if w == 'loss':
+            elif '_weight' in w:
+                metrics.log_scalar('w_' + w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
+            elif w == 'loss':
                 metrics.log_scalar('loss', summed_logging_outputs['loss'] / sample_size, sample_size, round=3)
 
     @staticmethod
@@ -97,17 +99,20 @@ class SRNLossCriterion(RenderingCriterion):
         parser.add_argument('--rgb-weight', type=float, default=200.0)
         parser.add_argument('--reg-weight', type=float, default=1e-3)
         parser.add_argument('--depth-weight', type=float, default=0.0)
+        parser.add_argument('--depth-weight-decay', type=str, default=None,
+                            help="""if set, use tuple to set (final_ratio, steps).
+                                    For instance, (0, 30000)    
+                                """)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
         parser.add_argument('--error-map', action='store_true')
 
     def compute_loss(self, model, net_output, sample, reduce=True):
-
         alpha  = (sample['alpha'] > 0.5)
         masks  = torch.ones_like(alpha)
         
-        losses = {}
+        losses, other_logs = {}, {}
         rgb_loss = utils.rgb_loss(
             net_output['predicts'], sample['rgb'], 
             masks, self.args.L1)
@@ -120,7 +125,13 @@ class SRNLossCriterion(RenderingCriterion):
 
         if self.args.depth_weight > 0 and sample['depths'] is not None:
             depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], masks)
-            losses['depth_loss'] = (depth_loss, self.args.depth_weight)
+            depth_weight = self.args.depth_weight
+            if self.args.depth_weight_decay is not None:
+                final_factor, final_steps = eval(self.args.depth_weight_decay)
+                depth_weight *= 1 - (1 - final_factor) * self.task._num_updates / final_steps
+                other_logs['depth_weight'] = depth_weight
+
+            losses['depth_loss'] = (depth_loss, depth_weight)
 
         if self.args.gp_weight > 0:
             losses['grd_loss'] = (net_output['grad_penalty'], self.args.gp_weight)
@@ -144,4 +155,7 @@ class SRNLossCriterion(RenderingCriterion):
             # vgg_ratio = target.numel() / net_output['predicts'].numel()
             losses['vgg_loss'] = (self.vgg(transform(inputs), transform(target), self.args.vgg_level), self.args.vgg_weight)
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
-        return loss, {key: item(losses[key][0]) for key in losses}
+        logging_outputs = {key: item(losses[key][0]) for key in losses}
+        logging_outputs.update(other_logs)
+        # from fairseq import pdb; pdb.set_trace()
+        return loss, logging_outputs

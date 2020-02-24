@@ -43,7 +43,7 @@ class SingleObjRenderingTask(FairseqTask):
     def __init__(self, args):
         super().__init__(args)
         
-        if getattr(args, "distributed_rank", -1) == 0:
+        if len(self.args.tensorboard_logdir) > 0 and getattr(args, "distributed_rank", -1) == 0:
             from tensorboardX import SummaryWriter
             self.writer = SummaryWriter(self.args.tensorboard_logdir + '/images')
         else:
@@ -120,6 +120,9 @@ class SingleObjRenderingTask(FairseqTask):
         update at each iteration.
         """
         self._num_updates = num_updates
+
+    def train_step(self, sample, model, criterion, optimizer, ignore_grad=False):
+        return super().train_step(sample, model, criterion, optimizer, ignore_grad)
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
