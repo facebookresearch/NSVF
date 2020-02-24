@@ -116,7 +116,7 @@ class SRNLossCriterion(RenderingCriterion):
         if self.args.reg_weight > 0:
             reg_loss = utils.depth_regularization_loss(
                 net_output['depths'])
-            losses['reg_loss'] = (reg_loss, self.args.reg_weight)
+            losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
 
         if self.args.depth_weight > 0 and sample['depths'] is not None:
             depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], masks)

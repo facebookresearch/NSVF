@@ -10,12 +10,17 @@ This file is to simulate "generator" in fairseq
 import os
 import torch
 import numpy as np
+import logging
 from torchvision.utils import save_image
 from fairdr.data import trajectory, geometry, data_utils
 
+
+logger = logging.getLogger(__name__)
+
+
 class NeuralRenderer(object):
     
-    def __init__(self, resolution=512, frames=501, speed=5, path_gen=None, batch_size=5):
+    def __init__(self, resolution=512, frames=501, speed=5, path_gen=None, batch_size=10):
         self.frames = frames
         self.speed = speed
         self.path_gen = path_gen
@@ -55,6 +60,7 @@ class NeuralRenderer(object):
         rgb_path = "/private/home/jgu/data/test_images"
         for shape in range(sample['shape'].size(0)):
             for step in range(0, self.frames, self.batch_size):
+                logger.info("rendering frames: {}".format(step))
                 ray_start, ray_dir = zip(*[
                     self.generate_rays(k, sample['intrinsics'][shape])
                     for k in range(step, min(self.frames, step + self.batch_size))
@@ -72,13 +78,12 @@ class NeuralRenderer(object):
                 _ = model(**_sample)
 
                 for k in range(step, min(self.frames, step + self.batch_size)):
-                    print(k)
                     images = model.visualize(_sample, None, shape, k-step, 
                                         target_map=False, depth_map=False)
                     rgb_name = "{}y_{:04d}".format(shape, k)
                     for key in images:
                         if 'rgb' in key:
                             save_image(images[key].permute(2, 0, 1), "{}/rgb/{}.png".format(rgb_path, rgb_name), format=None)
-        
+                
             # save as gif
-            os.system("ffmpeg -framerate 40 -i {}/rgb/{}x_%04d.png -y {}/rgb_slurm.gif".format(rgb_path, shape, rgb_path))
+            os.system("ffmpeg -framerate 60 -i {}/rgb/{}y_%04d.png -y {}/rgb_slurm3.gif".format(rgb_path, shape, rgb_path))

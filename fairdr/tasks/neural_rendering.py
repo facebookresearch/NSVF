@@ -45,9 +45,11 @@ class SingleObjRenderingTask(FairseqTask):
         
         if getattr(args, "distributed_rank", -1) == 0:
             from tensorboardX import SummaryWriter
-            self.writer = SummaryWriter(self.args.tensorboard_logdir)
+            self.writer = SummaryWriter(self.args.tensorboard_logdir + '/images')
         else:
             self.writer = None
+
+        self._num_updates = 0
 
     @classmethod
     def setup_task(cls, args, **kwargs):
@@ -99,7 +101,6 @@ class SingleObjRenderingTask(FairseqTask):
         """
         return NeuralRenderer()
 
-    
     @property
     def source_dictionary(self):
         """Return the :class:`~fairseq.data.Dictionary` for the language
@@ -112,16 +113,26 @@ class SingleObjRenderingTask(FairseqTask):
         model."""
         return None
 
+    def update_step(self, num_updates):
+        """Task level update when number of updates increases.
+
+        This is called after the optimization step and learning rate
+        update at each iteration.
+        """
+        self._num_updates = num_updates
+
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
         images = model.visualize(
             sample,
+            shape=0, view=0,
             target_map=True,
             depth_map=True, 
             normal_map=True, 
             error_map=False)
+
         if images is not None and self.args.distributed_rank == 0:
-            write_images(self.writer, images)
+            write_images(self.writer, images, self._num_updates)
 
         return loss, sample_size, logging_output
     

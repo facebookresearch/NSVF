@@ -42,7 +42,7 @@ def occupancy_loss(occupancy, masks, sum=False):
 
 
 def depth_regularization_loss(depths, sum=False):
-    loss = (torch.min(depths, torch.zeros_like(depths)) ** 2) * 10000.0
+    loss = torch.min(depths, torch.zeros_like(depths)) ** 2
     return loss.mean() if not sum else loss.sum()
 
 

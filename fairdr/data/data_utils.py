@@ -166,14 +166,11 @@ def recover_image(img, min_val=-1, max_val=1):
     return ((img - min_val) / (max_val - min_val)).clamp(min=0, max=1).to('cpu')
 
 
-def write_images(writer, images): 
-    from fairseq import metrics
+def write_images(writer, images, updates): 
     for tag in images:
         img = images[tag]
         tag, dataform = tag.split(':')
-        writer.add_image(tag, img, 
-            metrics.get_meter('default', 'num_updates').val,
-            dataformats=dataform)
+        writer.add_image(tag, img, updates, dataformats=dataform)
 
 
 class InfIndex(object):

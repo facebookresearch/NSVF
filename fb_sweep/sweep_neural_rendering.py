@@ -22,7 +22,7 @@ def get_grid(args):
         # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
         hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
-
+        
         hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 5, save_dir_key=lambda val: f'v{val}'),
@@ -48,7 +48,7 @@ def get_grid(args):
         # hyperparam('--dropout', 0.3, save_dir_key=lambda val: f'drop{val}'),
         hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),
         hyperparam('--criterion', 'srn_loss'),
-
+        hyperparam('--num-workers', 0),
         hyperparam('--seed', [2], save_dir_key=lambda val: f'seed{val}'),
         hyperparam('--save-interval-updates', 500),
         hyperparam('--validate-interval', 100),
@@ -58,6 +58,17 @@ def get_grid(args):
         hyperparam('--log-format', 'simple'),
         hyperparam('--log-interval', 20 if not args.local else 10),
     ]
+
+@register_grid("srn_debug")
+def get_debug_grid(args):
+    param = get_grid(args)
+    # param += [
+    #     hyperparam('--fp16-init-scale', 4, save_dir_key=lambda val: f'scale{val}'),
+    #     hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+    #     hyperparam('--reg-weight', 1e-1),
+    # ]
+    return param
+
 
 def postprocess_hyperparams(args, config):
     """Postprocess a given hyperparameter configuration."""
