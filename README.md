@@ -22,4 +22,4 @@ fairdr-render $DATASET --user-dir fairdr --path $MODEL_PATH/checkpoint_best.pt
 
 More details, please follow the ```scripts``` folder.
 
-![SingleShapeRendering](http://dl.fbaipublicfiles.com/fairdr/images/rgb_512.gif = 256x256)
+<img src="http://dl.fbaipublicfiles.com/fairdr/images/rgb_512.gif" width="256" height="256">
