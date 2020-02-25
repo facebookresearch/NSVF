@@ -101,8 +101,8 @@ class ShapeDataset(FairseqDataset):
                    self.cache[index % self.total_num_shape][1]
         return self._load_batch(self.data, index)
 
-    def ordered_indices(self):
-        return np.arange(len(self.data))
+    def __len__(self):
+        return len(self.data)
 
     def num_tokens(self, index):
         return 1
@@ -394,3 +394,22 @@ class WorldCoordDataset(BaseWrapperDataset):
             results['full_rgb'] = results['full_rgb'].transpose(2, 3)
         return results
 
+
+class InfiniteDataset(BaseWrapperDataset):
+    """
+    A wrapper dataset which supports infnite sampling from a dataset.
+    No epochs in this case.
+    """
+    def __init__(self, dataset, max_len=1000000):
+        super().__init__(dataset)
+        self.MAXLEN = max_len
+
+    def __len__(self):
+        return self.MAXLEN
+
+    def ordered_indices(self):
+        return np.arange(self.MAXLEN)
+
+    def __getitem__(self, index):
+        actual_length = len(self.dataset)
+        return self.dataset[index % actual_length]

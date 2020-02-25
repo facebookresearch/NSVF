@@ -50,21 +50,22 @@ def get_grid(args):
         hyperparam('--criterion', 'srn_loss'),
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [2], save_dir_key=lambda val: f'seed{val}'),
-        hyperparam('--save-interval-updates', 500),
-        hyperparam('--validate-interval', 100),
+        hyperparam('--save-interval-updates', 200),
         hyperparam('--save-interval', 100000),
         hyperparam('--max-update', 100000),
         hyperparam('--no-epoch-checkpoints'),
+        hyperparam('--keep-interval-updates', 2),
         hyperparam('--log-format', 'simple'),
-        hyperparam('--log-interval', 20 if not args.local else 10),
+        hyperparam('--log-interval', 10 if not args.local else 1),
     ]
 
 @register_grid("srn_debug")
 def get_debug_grid(args):
     param = get_grid(args)
     param += [
-        hyperparam('--depth-weight-decay', "(0,30000)", save_dir_key=lambda val: 'decay'),
-    #     hyperparam('--reg-weight', 1e-1),
+        hyperparam('--depth-weight-decay', "(0,30000)", save_dir_key=lambda val: 'dwd'),
+        hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: 'poly'),
+        hyperparam('--total-num-update', 100000),
     ]
     return param
 

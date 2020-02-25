@@ -7,7 +7,8 @@ import numpy as np
 
 from fairseq.tasks import FairseqTask, register_task
 from fairdr.data import (
-    ShapeViewDataset, SampledPixelDataset, WorldCoordDataset, ShapeDataset
+    ShapeViewDataset, SampledPixelDataset, 
+    WorldCoordDataset, ShapeDataset, InfiniteDataset
 )
 from fairdr.data.data_utils import write_images
 from fairdr.renderer import NeuralRenderer
@@ -86,10 +87,15 @@ class SingleObjRenderingTask(FairseqTask):
                     self.args.pixel_per_view,
                     self.args.sampling_on_mask,
                     self.args.sampling_on_bbox)
-
             self.datasets[split] = WorldCoordDataset(
                 self.datasets[split]
             )
+
+            if split == 'train':   # infinite sampler
+                total_num_models = self.args.max_update * self.args.distributed_world_size
+                self.datasets[split] = InfiniteDataset(
+                    self.datasets[split], total_num_models)
+
         else:
             self.datasets[split] = ShapeDataset(
                 self.args.data,

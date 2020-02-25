@@ -70,7 +70,7 @@ class RenderingCriterion(FairseqCriterion):
             elif '_weight' in w:
                 metrics.log_scalar('w_' + w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
             elif w == 'loss':
-                metrics.log_scalar('loss', summed_logging_outputs['loss'] / sample_size, sample_size, round=3)
+                metrics.log_scalar('loss', summed_logging_outputs['loss'] / sample_size, sample_size, priority=0, round=3)
 
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:
@@ -128,7 +128,7 @@ class SRNLossCriterion(RenderingCriterion):
             depth_weight = self.args.depth_weight
             if self.args.depth_weight_decay is not None:
                 final_factor, final_steps = eval(self.args.depth_weight_decay)
-                depth_weight *= 1 - (1 - final_factor) * self.task._num_updates / final_steps
+                depth_weight *= max(0, 1 - (1 - final_factor) * self.task._num_updates / final_steps)
                 other_logs['depth_weight'] = depth_weight
 
             losses['depth_loss'] = (depth_loss, depth_weight)
