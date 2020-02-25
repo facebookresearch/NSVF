@@ -10,7 +10,7 @@ For installation, run
 pip install -e .
 ```
 
-To train a new model,
+To train a new model for multi-view reconstruction,
 ```
 fairdr-train $DATATSET --user-dir fairdr --save-dir $MODEL_PATH 
 ```
@@ -22,4 +22,5 @@ fairdr-render $DATASET --user-dir fairdr --path $MODEL_PATH/checkpoint_best.pt
 
 More details, please follow the ```scripts``` folder.
 
-<img src="http://dl.fbaipublicfiles.com/fairdr/images/rgb_512.gif">
+
+# <img src="http://dl.fbaipublicfiles.com/fairdr/images/rgb_512.gif">
