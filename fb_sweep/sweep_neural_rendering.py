@@ -64,7 +64,6 @@ def get_debug_grid(args):
     param = get_grid(args)
     param += [
         hyperparam('--depth-weight-decay', "(0,30000)", save_dir_key=lambda val: 'decay'),
-    #     hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
     #     hyperparam('--reg-weight', 1e-1),
     ]
     return param

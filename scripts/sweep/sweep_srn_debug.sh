@@ -11,7 +11,7 @@ python fb_sweep/sweep_neural_rendering.py \
     --grid "srn_debug" \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
-    --no-tensorboard \
+    --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
     --prefix ${DATA} \

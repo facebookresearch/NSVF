@@ -126,16 +126,17 @@ class SingleObjRenderingTask(FairseqTask):
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
-        images = model.visualize(
-            sample,
-            shape=0, view=0,
-            target_map=True,
-            depth_map=True, 
-            normal_map=True, 
-            error_map=False)
+        if self.writer is not None:
+            images = model.visualize(
+                sample,
+                shape=0, view=0,
+                target_map=True,
+                depth_map=True, 
+                normal_map=True, 
+                error_map=False)
 
-        if images is not None and self.args.distributed_rank == 0:
-            write_images(self.writer, images, self._num_updates)
+            if images is not None:
+                write_images(self.writer, images, self._num_updates)
 
         return loss, sample_size, logging_output
     

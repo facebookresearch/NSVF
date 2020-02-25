@@ -11,6 +11,7 @@ import numpy as np
 import imageio
 from glob import glob
 import os
+import copy
 import shutil
 import skimage
 import pandas as pd
@@ -179,20 +180,20 @@ class InfIndex(object):
         self.index_list = index_list
         self.size = len(index_list)
         self.shuffle = shuffle
-        self.reset_permutation(True)
+        self.reset_permutation()
 
-    def reset_permutation(self, shuffle=False):
-        if self.shuffle or shuffle:
-            self._perm = np.random.permutation(self.index_list)
+    def reset_permutation(self):
+        if self.shuffle:
+            self._perm = np.random.permutation(self.index_list).tolist()
         else:
-            self._perm = self.index_list
+            self._perm = copy.deepcopy(self.index_list)
 
     def __iter__(self):
         return self
 
     def __next__(self):
         if len(self._perm) == 0:
-            self.reset_permutation(self.shuffle)
+            self.reset_permutation()
         return self._perm.pop()
 
     def __len__(self):
