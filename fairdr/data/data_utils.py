@@ -175,23 +175,24 @@ def write_images(writer, images, updates):
 
 class InfIndex(object):
 
-    def __init__(self, size, shuffle=False):
-        self.size = size
+    def __init__(self, index_list, shuffle=False):
+        self.index_list = index_list
+        self.size = len(index_list)
         self.shuffle = shuffle
         self.reset_permutation(True)
 
     def reset_permutation(self, shuffle=False):
         if self.shuffle or shuffle:
-            self._perm = torch.randperm(self.size).tolist()
+            self._perm = np.random.permutation(self.index_list)
         else:
-            self._perm = list(range(self.size))
+            self._perm = self.index_list
 
     def __iter__(self):
         return self
 
     def __next__(self):
         if len(self._perm) == 0:
-            self.reset_permutation()
+            self.reset_permutation(self.shuffle)
         return self._perm.pop()
 
     def __len__(self):

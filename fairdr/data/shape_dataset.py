@@ -207,9 +207,21 @@ class ShapeViewDataset(ShapeDataset):
                 _index += 1
 
         # group the data together
-        self.data_index = [
-            data_utils.InfIndex(len(d['rgb']), shuffle=self.train) 
-        for d in self.data]
+        self.data_index = []
+        for i, d in enumerate(self.data):
+            if self.train:
+                index_list = list(range(len(d['rgb'])))
+                self.data_index.append(
+                    data_utils.InfIndex(index_list, shuffle=True)
+                )
+            else:
+                copy_id = i // self.total_num_shape
+                index_list = []
+                for j in range(copy_id * num_view, copy_id * num_view + num_view):
+                    index_list.append(j % len(d['rgb']))
+                self.data_index.append(
+                    data_utils.InfIndex(index_list, shuffle=False)
+                )
 
     def cutoff(self, file_list):
 
