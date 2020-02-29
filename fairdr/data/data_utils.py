@@ -29,13 +29,15 @@ def load_rgb(path, resolution=None, with_alpha=True):
 
     # uv coordinates
     uv = np.flip(np.mgrid[0: img_size, 0: img_size], axis=0).astype(np.float32)
-
     if resolution is not None:
         img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_NEAREST)
         uv = uv[:, ::img_size//resolution, ::img_size//resolution]
 
     img[:, :, :3] -= 0.5
     img[:, :, :3] *= 2.
+
+    # if alpha == 0, make it white (chair)
+    img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + 1.0 * (1 - img[:, :, 3:])    
     img = img.transpose(2, 0, 1)
     return img, uv
 
@@ -142,7 +144,7 @@ def square_crop_img(img):
 
 
 def sample_pixel_from_image(num_pixel, num_sample, mask=None, ratio=1.0, use_bbox=False):
-    if mask is None:
+    if mask is None or ratio <= 0.0 or mask.sum() == 0 or (1 - mask).sum() == 0:
         return np.random.choice(num_pixel, num_sample)
 
     if use_bbox:
@@ -154,7 +156,7 @@ def sample_pixel_from_image(num_pixel, num_sample, mask=None, ratio=1.0, use_bbo
 
     probs = mask * ratio / mask.sum() + (1 - mask) / (num_pixel - mask.sum()) * (1 - ratio)
     # x = np.random.choice(num_pixel, num_sample, True, p=probs)
-    return np.random.choice(num_pixel, num_sample, False, p=probs)
+    return np.random.choice(num_pixel, num_sample, True, p=probs)
 
 
 def recover_image(img, min_val=-1, max_val=1):

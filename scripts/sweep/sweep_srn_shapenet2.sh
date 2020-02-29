@@ -1,5 +1,5 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=maria
+ROOT=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug
+DATA=debug
 WORK=/checkpoint/jgu/space/neuralrendering/debug_srn
 mkdir -p ${WORK}
 
@@ -8,15 +8,15 @@ pushd $ENGINE
 
 python fb_sweep/sweep_neural_rendering.py \
     --data ${ROOT}/${DATA} \
-    --grid "srn_debug" \
+    --grid "srn_shapenet" \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_inf \
+    --prefix ${DATA}_inf2 \
     --num-trials 1 \
-    --num-gpus 1 \
+    --num-gpus 8 \
     --num-nodes 1 \
     --mem 500gb \
     --constraint volta32gb \

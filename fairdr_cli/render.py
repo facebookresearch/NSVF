@@ -15,8 +15,10 @@ import sys
 
 import torch
 
-from fairseq import checkpoint_utils, options, progress_bar, tasks, utils
+from fairseq import checkpoint_utils, progress_bar, tasks, utils
 from fairseq.meters import StopwatchMeter, TimeMeter
+
+from fairdr import options
 
 
 def main(args):
@@ -63,10 +65,6 @@ def _main(args, output_file):
 
     # Optimize ensemble for generation
     for model in models:
-        model.make_generation_fast_(
-            beamable_mm_beam_size=None if args.no_beamable_mm else args.beam,
-            need_attn=args.print_alignment,
-        )
         if args.fp16:
             model.half()
         if use_cuda:
@@ -93,8 +91,6 @@ def _main(args, output_file):
     gen_timer = StopwatchMeter()
     generator = task.build_generator(args)
 
-    num_sentences = 0
-    has_target = True
     with progress_bar.build_progress_bar(args, itr) as t:
         wps_meter = TimeMeter()
         for sample in t:
@@ -111,7 +107,7 @@ def _main(args, output_file):
 
 
 def cli_main():
-    parser = options.get_generation_parser()
+    parser = options.get_rendering_parser()
     args = options.parse_args_and_arch(parser)
     main(args)
 

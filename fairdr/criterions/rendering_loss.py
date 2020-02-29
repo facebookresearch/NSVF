@@ -98,6 +98,7 @@ class SRNLossCriterion(RenderingCriterion):
                             help='if enabled, use L1 instead of L2 for RGB loss')
         parser.add_argument('--rgb-weight', type=float, default=200.0)
         parser.add_argument('--reg-weight', type=float, default=1e-3)
+        parser.add_argument('--max-depth', type=float, default=5)
         parser.add_argument('--depth-weight', type=float, default=0.0)
         parser.add_argument('--depth-weight-decay', type=str, default=None,
                             help="""if set, use tuple to set (final_ratio, steps).
@@ -123,8 +124,17 @@ class SRNLossCriterion(RenderingCriterion):
                 net_output['depths'])
             losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
 
-        if self.args.depth_weight > 0 and sample['depths'] is not None:
-            depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], masks)
+        if self.args.depth_weight > 0:
+            if sample['depths'] is not None:
+                depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], masks)
+            else:
+                # no depth map is provided. depth loss only applied on background.
+                max_depth_target = self.args.max_depth * torch.ones_like(net_output['depths'])
+                if sample['mask'] is not None:        
+                    depth_loss = utils.depth_loss(net_output['depths'], max_depth_target, (1 - sample['mask']).bool())
+                else:
+                    depth_loss = utils.depth_loss(net_output['depths'], max_depth_target, ~alpha)
+            
             depth_weight = self.args.depth_weight
             if self.args.depth_weight_decay is not None:
                 final_factor, final_steps = eval(self.args.depth_weight_decay)

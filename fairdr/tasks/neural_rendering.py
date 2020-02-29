@@ -12,6 +12,7 @@ from fairdr.data import (
 )
 from fairdr.data.data_utils import write_images
 from fairdr.renderer import NeuralRenderer
+from fairdr.data.trajectory import get_trajectory
 
 
 @register_task("single_object_rendering")
@@ -105,7 +106,15 @@ class SingleObjRenderingTask(FairseqTask):
         """
         build a neural renderer for visualization
         """
-        return NeuralRenderer()
+        return NeuralRenderer(
+            beam=args.render_beam,
+            resolution=args.render_resolution,
+            frames=args.render_num_frames,
+            speed=args.render_angular_speed,
+            path_gen=get_trajectory(args.render_path_style)(
+                **eval(args.render_path_args)
+            ),
+        )
 
     @property
     def source_dictionary(self):

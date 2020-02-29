@@ -333,7 +333,9 @@ class SampledPixelDataset(BaseWrapperDataset):
             data_utils.sample_pixel_from_image(
                 data['alpha'].shape[-1], 
                 self.num_sample, 
-                data.get('mask', None),
+                data.get('mask', None) 
+                    if data.get('mask', None) is not None 
+                    else data.get('alpha', None),
                 self.sampling_on_mask,
                 self.sampling_on_bbox)
             for data in data_per_view

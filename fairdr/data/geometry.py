@@ -110,19 +110,21 @@ def look_at_rotation(camera_position, at=None, up=None, inverse=False, cv=False)
 
     if up is None:
         up = torch.zeros_like(camera_position)
-        up[1] = 1
+        up[2] = -1
 
-    z_axis = normalize(camera_position - at)[0]
-    x_axis = normalize(cross(-z_axis, up))[0]
-    y_axis = normalize(cross(x_axis, -z_axis))[0]
-    R = cat([x_axis[None, :], -y_axis[None, :], -z_axis[None, :]], axis=0)
-    R = R.transpose(0, 1)      # world --> camera
+    z_axis = normalize(at - camera_position)[0]
+    x_axis = normalize(cross(up, z_axis))[0]
+    y_axis = normalize(cross(z_axis, x_axis))[0]
+
+    R = cat([x_axis[:, None], y_axis[:, None], z_axis[:, None]], axis=1)
+    return R
+    # R = R.transpose(0, 1)      # world --> camera
 
     # if cv:
-    #     R_cam2cv = torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, -1]], 
+    #     R_cam2cv = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, -1]], 
     #                     device=R.device, dtype=R.dtype)
     #     R = R_cam2cv @ R    # world --> view
-    return R.inverse()
+    # return R.inverse()
 
 
 def ray(ray_start, ray_dir, depths):
