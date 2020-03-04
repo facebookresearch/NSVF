@@ -34,4 +34,4 @@ def add_rendering_args(parser):
     group.add_argument("--render-path-style", default="circle", choices=["circle"], type=str)
     group.add_argument("--render-path-args", default="{'radius': 2.5, 'y': 0.0}",
                        help="specialized arguments for rendering paths")
-    
+    group.add_argument("--render-output", default=None, type=str)

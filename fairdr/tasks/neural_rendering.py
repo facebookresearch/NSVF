@@ -2,6 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import os
 import torch
 import numpy as np
 
@@ -114,6 +115,8 @@ class SingleObjRenderingTask(FairseqTask):
             path_gen=get_trajectory(args.render_path_style)(
                 **eval(args.render_path_args)
             ),
+            output_dir=args.render_output if args.render_output is not None
+                else os.path.join(args.path, "output")
         )
 
     @property

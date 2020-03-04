@@ -67,8 +67,8 @@ class ShapeDataset(FairseqDataset):
     def find_point(self):
         vox_list = []
         for path in self.paths:
-            if os.path.exists(path + '/sparse_voxel.txt'):
-                vox_list.append(path + '/sparse_voxel.txt')
+            if os.path.exists(path + '/voxel.txt'):
+                vox_list.append(path + '/voxel.txt')
             else:
                 raise FileNotFoundError("CANNOT find intrinsic data")
         return vox_list

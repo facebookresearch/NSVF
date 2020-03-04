@@ -7,7 +7,8 @@
 This file is to simulate "generator" in fairseq
 """
 
-import os
+import os, tempfile
+import time
 import torch
 import numpy as np
 import logging
@@ -21,35 +22,40 @@ logger = logging.getLogger(__name__)
 class NeuralRenderer(object):
     
     def __init__(self, 
-        resolution=512, 
-        frames=501, 
-        speed=5, 
-        path_gen=None, 
-        beam=10):
+                resolution=512, 
+                frames=501, 
+                speed=5, 
+                path_gen=None, 
+                beam=10, 
+                output_dir=None):
+
         self.frames = frames
         self.speed = speed
         self.path_gen = path_gen
         self.resolution = resolution
         self.beam = beam
+        self.output_dir = output_dir
         if self.path_gen is None:
             self.path_gen = trajectory.circle()
+        if not os.path.exists(self.output_dir):
+            os.mkdir(self.output_dir)
 
     def generate_rays(self, t, intrinsics):
-        # cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
-        #                        device=intrinsics.device, dtype=intrinsics.dtype)
-        # cam_rot = geometry.look_at_rotation(cam_pos, inverse=True, cv=True)
+        cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
+                    device=intrinsics.device, dtype=intrinsics.dtype)
+        cam_rot = geometry.look_at_rotation(cam_pos, inverse=True, cv=True)
         
-        # inv_RT = cam_pos.new_zeros(4, 4)
-        # inv_RT[:3, :3] = cam_rot
-        # inv_RT[:3, 3] = cam_pos
-        # inv_RT[3, 3] = 1
+        inv_RT = cam_pos.new_zeros(4, 4)
+        inv_RT[:3, :3] = cam_rot
+        inv_RT[:3, 3] = cam_pos
+        inv_RT[3, 3] = 1
 
-        # generate ray from a fixed trajectory, for now.        
-        #RT = data_utils.load_matrix("/private/home/jgu/work/tsrn-master/test_trajs/maria/{}.txt".format(t))
-        RT = data_utils.load_matrix( "/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug/debug/extrinsic/model_{0:03d}.txt".format(t))
-        RT = np.concatenate([RT, np.zeros((1, 4))], 0)
-        RT[3, 3] = 1
-        inv_RT = torch.from_numpy(RT).to(intrinsics.device, intrinsics.dtype).inverse()
+        # -- generate ray from a fixed trajectory --      
+        # RT = data_utils.load_matrix("/private/home/jgu/work/tsrn-master/test_trajs/maria/{}.txt".format(t))
+        # RT = data_utils.load_matrix( "/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug/debug/extrinsic/model_{0:03d}.txt".format(t))
+        # RT = np.concatenate([RT, np.zeros((1, 4))], 0)
+        # RT[3, 3] = 1
+        # inv_RT = torch.from_numpy(RT).to(intrinsics.device, intrinsics.dtype).inverse()
 
         _, _, cx, cy = geometry.parse_intrinsics(intrinsics)
         cx, cy = int(cx), int(cy)
@@ -65,7 +71,7 @@ class NeuralRenderer(object):
     @torch.no_grad()    
     def generate(self, models, sample, **kwargs):
         model = models[0]
-        rgb_path = "/private/home/jgu/data/test_images"
+        rgb_path = tempfile.mkdtemp()
         for shape in range(sample['shape'].size(0)):
             for step in range(0, self.frames, self.beam):
                 logger.info("rendering frames: {}".format(step))
@@ -80,7 +86,9 @@ class NeuralRenderer(object):
                     'shape': sample['shape'],
                     'view': torch.arange(
                         step, min(step + self.beam, self.frames), 
-                        device=sample['shape'].device).unsqueeze(0)
+                        device=sample['shape'].device).unsqueeze(0),
+                    'voxels': sample.get('voxels', None).clone(),
+                    'points': sample.get('points', None).clone()
                 }
                 
                 _ = model(**_sample)
@@ -88,10 +96,11 @@ class NeuralRenderer(object):
                 for k in range(step, min(self.frames, step + self.beam)):
                     images = model.visualize(_sample, None, shape, k-step, 
                                         target_map=False, depth_map=False)
-                    rgb_name = "{}y_{:04d}".format(shape, k)
+                    rgb_name = "{}_{:04d}".format(shape, k)
                     for key in images:
                         if 'rgb' in key:
-                            save_image(images[key].permute(2, 0, 1), "{}/rgbz/{}.png".format(rgb_path, rgb_name), format=None)
-                
-            # save as gif
-            os.system("ffmpeg -framerate 60 -i {}/rgbz/{}y_%04d.png -y {}/rgb_slurm3.gif".format(rgb_path, shape, rgb_path))
+                            save_image(images[key].permute(2, 0, 1), "{}/rgb_{}.png".format(rgb_path, rgb_name), format=None)
+            
+            # -- output as gif
+            timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
+            os.system("ffmpeg -framerate 60 -i {}/rgb_{}_%04d.png -y {}/{}.gif".format(rgb_path, shape, self.output_dir, timestamp))

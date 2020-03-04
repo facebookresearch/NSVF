@@ -81,8 +81,13 @@ def load_matrix(path):
 
 def load_intrinsics(filepath, resized_width=None, invert_y=False):
     try:
-        return load_matrix(filepath)
-    
+        intrinsics = load_matrix(filepath)
+        if intrinsics.shape[0] == 3 and intrinsics.shape[1] == 3:
+            _intrinsics = np.zeros((4, 4), np.float32)
+            _intrinsics[:3, :3] = intrinsics
+            _intrinsics[3, 3] = 1
+            intrinsics = _intrinsics
+        return intrinsics
     except ValueError:
         pass
 

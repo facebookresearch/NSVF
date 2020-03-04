@@ -46,16 +46,18 @@ class IterativeSphereTracer(nn.Module):
         # TODO: fix the auguments
         super().__init__()
         self.args = args
+        self.use_raystart = getattr(args, "use_ray_start", False)
 
     def search(self, signed_distance_fn, start, ray_dir, min=0.05, max=None, steps=4):
         depths = ray_dir.new_ones(*ray_dir.size()[:-1], requires_grad=True) * min
         states, state = [], None
-
+        if self.use_raystart:
+            _, state = signed_distance_fn(start, state=state)  # camera as initial state.
+        
         for _ in range(steps):
             query = ray(start, ray_dir, depths.unsqueeze(-1))
-            delta, state = signed_distance_fn(query, state)
+            delta, state = signed_distance_fn(query, state=state)
             depths = depths + delta
             states.append((query, delta))
 
-        # from fairseq import pdb; pdb.set_trace()
         return depths, [q for q in zip(*states)]

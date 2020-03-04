@@ -8,15 +8,15 @@ pushd $ENGINE
 
 python fb_sweep/sweep_neural_rendering.py \
     --data ${ROOT}/${DATA} \
-    --grid "srn_debug" \
+    --grid "srn_start" \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_inf2 \
+    --prefix ${DATA}_start4 \
     --num-trials 1 \
-    --num-gpus 8 \
+    --num-gpus 1 \
     --num-nodes 1 \
     --mem 500gb \
     --constraint volta32gb \

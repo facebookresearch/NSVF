@@ -62,6 +62,8 @@ class SRNModel(BaseModel):
                             help='hidden dimension of SDF'),
         parser.add_argument('--lstm-sdf',  action='store_true', 
                             help='model the raymarcher with LSTM cells.')
+        parser.add_argument('--use-ray-start', action='store_true', 
+                            help='use the camera position.')
         parser.add_argument('--hidden-textures', type=int, metavar='N',
                             help='renderer hidden dimension for FFN')
         parser.add_argument('--num-layer-textures', type=int, metavar='N',
@@ -257,4 +259,10 @@ def base_architecture(args):
 @register_model_architecture("scene_representation_networks", "srn_simple")
 def simple_architecture(args):
     args.lstm_sdf = getattr(args, "lstm_sdf", False)
+    base_architecture(args)
+
+@register_model_architecture("scene_representation_networks", "srn_start")
+def raystart_architecture(args):
+    args.lstm_sdf = getattr(args, "lstm_sdf", True)
+    args.use_ray_start = getattr(args, "use_ray_start", True)
     base_architecture(args)
