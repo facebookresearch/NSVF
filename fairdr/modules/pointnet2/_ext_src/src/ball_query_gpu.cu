@@ -77,7 +77,7 @@ __global__ void query_ball_nearest_point_kernel(int b, int n, int m, float radiu
 
   float radius2 = radius * radius;
   float min_dis = 10000.0;
-  int candidate = 0;
+  int candidate = -1;
 
   for (int j = index; j < m; j += stride) {
     float new_x = new_xyz[j * 3 + 0];

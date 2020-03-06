@@ -112,11 +112,13 @@ class SingleObjRenderingTask(FairseqTask):
             resolution=args.render_resolution,
             frames=args.render_num_frames,
             speed=args.render_angular_speed,
+            raymarching_steps=args.render_raymarching_steps,
             path_gen=get_trajectory(args.render_path_style)(
                 **eval(args.render_path_args)
             ),
             output_dir=args.render_output if args.render_output is not None
-                else os.path.join(args.path, "output")
+                else os.path.join(args.path, "output"),
+            output_type=args.render_output_types
         )
 
     @property

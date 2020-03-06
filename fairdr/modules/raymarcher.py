@@ -48,9 +48,9 @@ class IterativeSphereTracer(nn.Module):
         self.args = args
         self.use_raystart = getattr(args, "use_ray_start", False)
 
-    def search(self, signed_distance_fn, start, ray_dir, min=0.05, max=None, steps=4):
+    def search(self, signed_distance_fn, start, ray_dir, state=None, min=0.05, max=None, steps=4):
         depths = ray_dir.new_ones(*ray_dir.size()[:-1], requires_grad=True) * min
-        states, state = [], None
+        states = []
         if self.use_raystart:
             _, state = signed_distance_fn(start, state=state)  # camera as initial state.
         

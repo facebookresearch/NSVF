@@ -25,7 +25,7 @@ class GEOSRNModel(SRNModel):
     def build_field(cls, args):
         return GEOSRNField(args)
 
-    def forward(self, ray_start, ray_dir, voxels, points, **kwargs):
+    def forward(self, ray_start, ray_dir, voxels, points, raymarching_steps=None, **kwargs):
         intersection = self.field.voxel_intersect(
             self.field.voxel_travsal(
                 ray_start, ray_dir),

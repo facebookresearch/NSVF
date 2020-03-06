@@ -10,6 +10,20 @@ from fairseq.modules import LayerNorm
 from fairseq.utils import get_activation_fn
 
 
+def Linear(in_features, out_features, bias=True):
+    m = nn.Linear(in_features, out_features, bias)
+    nn.init.xavier_uniform_(m.weight)
+    if bias:
+        nn.init.constant_(m.bias, 0.0)
+    return m
+
+
+def Embedding(num_embeddings, embedding_dim, padding_idx=None):
+    m = nn.Embedding(num_embeddings, embedding_dim, padding_idx=padding_idx)
+    nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
+    return m
+    
+
 class FCLayer(nn.Module):
     """
     Reference:

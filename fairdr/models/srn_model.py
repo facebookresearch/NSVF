@@ -76,12 +76,13 @@ class SRNModel(BaseModel):
                             help="additional gradient penalty to make ray marching close to sphere-tracing")
         parser.add_argument('--implicit-gradient', action='store_true')
 
-    def forward(self, ray_start, ray_dir, **kwargs):
+    def forward(self, ray_start, ray_dir, raymarching_steps=None, **kwargs):
         # ray intersection
         depths, _ = self.raymarcher(
             self.field.get_sdf, 
             ray_start, ray_dir, 
-            steps=self.args.raymarching_steps)
+            steps=self.args.raymarching_steps 
+                if raymarching_steps is None else raymarching_steps)
         points = ray(ray_start, ray_dir, depths.unsqueeze(-1))
 
         # return color
@@ -117,9 +118,10 @@ class SRNModel(BaseModel):
             target_map=True, 
             depth_map=True,
             error_map=False, 
-            normal_map=False, 
+            normal_map=False,
+            hit_map=False,
             **kwargs):
-        
+
         if output is None:
             assert self.cache is not None, "need to run forward-pass"
             output = self.cache  # make sure to run forward-pass.
@@ -130,9 +132,13 @@ class SRNModel(BaseModel):
                 {'img': output['predicts'][shape, view]},
         }
         if depth_map:
-            images['depth/{}:HW'.format(img_id)] = {
+            images['depth/{}:HWC'.format(img_id)] = {
                 'img': output['depths'][shape, view], 'min_val': 0.5, 'max_val': 5}
-
+        
+        if hit_map and 'hits' in output:
+            images['hit/{}:HWC'.format(img_id)] = {
+                'img': output['hits'][shape, view].float(), 'min_val': 0, 'max_val': 255}
+        
         if target_map:
             images.update({
                 'target/{}:HWC'.format(img_id):
@@ -160,9 +166,9 @@ class SRNModel(BaseModel):
                 'img': errors, 'min_val': errors.min(), 'max_val': errors.max()}
 
         images = {
-            tag: recover_image(**images[tag]) for tag in images if images[tag] is not None
+            tag: recover_image(**images[tag]) 
+                for tag in images if images[tag] is not None
         }
-
         return images
 
 
@@ -219,15 +225,15 @@ class SRNRaymarcher(Raymarcher):
         self.raymarcher = IterativeSphereTracer(args)
         self.implicit = args.implicit_gradient
 
-    def _forward(self, sdf_fn, ray_start, ray_dir, steps=4):
+    def _forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4):
         return self.raymarcher.search(
             sdf_fn,
             ray_start.expand_as(ray_dir),
-            ray_dir, steps=steps, min=0.05)
+            ray_dir, state=state, steps=steps, min=0.05)
 
-    def forward(self, sdf_fn, ray_start, ray_dir, steps=4):
+    def forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4):
         if not self.implicit or not self.training:
-            return self._forward(sdf_fn, ray_start, ray_dir, steps)
+            return self._forward(sdf_fn, ray_start, ray_dir, state, steps)
         
         assert not self.args.lstm_sdf, "implicit gradient does not support LSTM."
         with torch.no_grad():

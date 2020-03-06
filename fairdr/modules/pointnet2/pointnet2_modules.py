@@ -15,11 +15,9 @@ import torch.nn.functional as F
 
 import os
 import sys
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
 
-import pointnet2_utils
-import pytorch_utils as pt_utils
+from fairdr.modules.pointnet2 import pointnet2_utils
+from fairdr.modules.pointnet2 import pytorch_utils as pt_utils
 from typing import List
 
 
