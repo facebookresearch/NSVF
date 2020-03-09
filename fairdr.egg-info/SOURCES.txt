@@ -1,0 +1,16 @@
+README.md
+setup.py
+fairdr.egg-info/PKG-INFO
+fairdr.egg-info/SOURCES.txt
+fairdr.egg-info/dependency_links.txt
+fairdr.egg-info/entry_points.txt
+fairdr.egg-info/top_level.txt
+fairdr/modules/pointnet2/_ext_src/src/ball_query.cpp
+fairdr/modules/pointnet2/_ext_src/src/ball_query_gpu.cu
+fairdr/modules/pointnet2/_ext_src/src/bindings.cpp
+fairdr/modules/pointnet2/_ext_src/src/group_points.cpp
+fairdr/modules/pointnet2/_ext_src/src/group_points_gpu.cu
+fairdr/modules/pointnet2/_ext_src/src/interpolate.cpp
+fairdr/modules/pointnet2/_ext_src/src/interpolate_gpu.cu
+fairdr/modules/pointnet2/_ext_src/src/sampling.cpp
+fairdr/modules/pointnet2/_ext_src/src/sampling_gpu.cu

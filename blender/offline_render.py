@@ -179,11 +179,9 @@ for i in range(0, args.views):
     scene.render.filepath = os.path.join(args.output_folder, model_identifier, 'rgb', 'model' + filename)
     normal_file_output.file_slots[0].path = os.path.join(args.output_folder, model_identifier, 'normal', 'model' + filename + '.')
 
+    bpy.ops.render.render(write_still=True)  # render still
     with open(os.path.join(args.output_folder, model_identifier, 'extrinsic', 'model' + filename + '.txt'), 'w') as frt:
         print(matrix2str(get_3x4_RT_matrix_from_blender(cam)), file=frt)
-
-    bpy.ops.render.render(write_still=True)  # render still
-
     if args.camera_trace == 'sphere_random':
         cam.location = sample_spherical(args.camera_radius)
     else:

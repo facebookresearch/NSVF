@@ -1,0 +1,40 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+import argparse
+import sys
+import torch
+
+
+from fairseq import options
+
+
+def parse_args_and_arch(*args, **kwargs):
+    return options.parse_args_and_arch(*args, **kwargs)
+
+
+def get_rendering_parser(default_task="single_object_rendering"):
+    parser = options.get_parser("Rendering", default_task)
+    options.add_dataset_args(parser, gen=True)
+    add_rendering_args(parser)
+    return parser
+
+
+def add_rendering_args(parser):
+    group = parser.add_argument_group("Rendering")
+    options.add_common_eval_args(group)
+    group.add_argument("--render-beam", default=5, type=int, metavar="N",
+                       help="beam size for parallel rendering")
+    group.add_argument("--render-resolution", default=512, type=int, metavar="N")
+    group.add_argument("--render-angular-speed", default=1, type=float, metavar="D",
+                       help="angular speed when rendering around the object")
+    group.add_argument("--render-num-frames", default=500, type=int, metavar="N")
+    group.add_argument("--render-path-style", default="circle", choices=["circle"], type=str)
+    group.add_argument("--render-path-args", default="{'radius': 2.5, 'y': 0.0}",
+                       help="specialized arguments for rendering paths")
+    group.add_argument("--render-output", default=None, type=str)
+    group.add_argument("--render-output-types", nargs="+", type=str, default=["rgb"], 
+                        choices=["rgb", "depth", "normal", "hit"])
+    group.add_argument("--render-raymarching-steps", default=None, type=int)

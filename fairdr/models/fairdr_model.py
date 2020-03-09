@@ -3,11 +3,11 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 """
-Base classes for various fairdr models.
+Base classes for various  models.
 
 The basic principle of differentiable rendering is two components:
-    -- an encoder or so-called geometric encoder (GE)
-    -- an decoder or so-called differentiable ray-marcher (RM)
+    -- an field or so-called geometric field (GE)
+    -- an raymarcher or so-called differentiable ray-marcher (RM)
 So it can be composed as a GERM model
 """
 
@@ -20,53 +20,41 @@ from fairseq.models import BaseFairseqModel
 logger = logging.getLogger(__name__)
 
 
-class BaseFairDRModel(BaseFairseqModel):
+class BaseModel(BaseFairseqModel):
     """Base class"""
 
-    def __init__(self, args, encoder, decoder):
+    def __init__(self, args, field, raymarcher):
         super().__init__()
-
         self.args = args
-        self.encoder = encoder
-        self.decoder = decoder
+        self.field = field
+        self.raymarcher = raymarcher
+        self.cache = None
     
-        assert isinstance(self.encoder, FairDREncoder)
-        assert isinstance(self.decoder, FairDRDecoder)
+        assert isinstance(self.field, Field)
+        assert isinstance(self.raymarcher, Raymarcher)
 
-    def forward(self, uv, ray):
-        # ray-marching
-        xyz = self.decoder(uv, ray, self.encoder)
-        
-        # return the representation color
-        return self.encoder(xyz)
+    def forward(self, **kwargs):
+        raise NotImplementedError
+
+    def visualize(self, **kwargs):
+        return NotImplementedError
 
 
-class FairDREncoder(nn.Module):
+class Field(nn.Module):
 
     def __init__(self, args):
         super().__init__()
-
         self.args = args
 
     def forward(self, xyz, **kwargs):
-        """
-        Args:
-            xyz: query point in the implicit space
-        """
         raise NotImplementedError
 
 
-class FairDRDecoder(nn.Module):
+class Raymarcher(nn.Module):
 
     def __init__(self, args):
         super().__init__()
-
         self.args = args
 
-    def forward(self, uv, ray, encoder, **kwargs):
-        """
-        Args:
-            uv: coordinates in the image space
-            ray: the directional vector for each uv points
-        """
+    def forward(self, uv, ray, **kwargs):
         raise NotImplementedError
