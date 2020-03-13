@@ -405,7 +405,6 @@ def get_debug3_grid(args):
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
 
-
 @register_grid("srn_shapenet")
 def get_shapenet_grid(args):
     return [

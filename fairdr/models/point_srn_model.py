@@ -39,7 +39,6 @@ class PointSRNModel(SRNModel):
     def forward(self, ray_start, ray_dir, points, raymarching_steps=None, **kwargs):
         # get geometry features
         feats, xyz = self.field.get_backbone_features(points)
-
         # ray intersection
         depths, _ = self.raymarcher(
             self.field.get_sdf, 

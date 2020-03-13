@@ -1,0 +1,11 @@
+*.pyc
+*.so
+*.pkl
+.DS_Store/
+__pycache__/
+*.pt
+.idea/
+.vscode/
+build/
+*.egg-info/
+images/
