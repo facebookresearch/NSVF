@@ -10,6 +10,7 @@ import torch
 import logging
 
 from collections import defaultdict
+from fairseq.distributed_utils import get_rank
 from fairseq.data import FairseqDataset, BaseWrapperDataset
 from . import data_utils, geometry, trajectory
 
@@ -155,14 +156,16 @@ class ShapeViewDataset(ShapeDataset):
     def __init__(self, 
                 paths, 
                 max_train_view, 
-                num_view, 
+                num_view,
+                max_valid_view=None, 
                 resolution=None, 
                 load_depth=False,
                 load_mask=False,
                 load_point=False,
                 train=True,
                 preload=True,
-                repeat=1):
+                repeat=1,
+                binarize=True):
         
         super().__init__(paths, load_point, False, repeat)
 
@@ -170,6 +173,9 @@ class ShapeViewDataset(ShapeDataset):
         self.load_depth = load_depth
         self.load_mask = load_mask
         self.max_train_view = max_train_view
+        self.max_valid_view = max_valid_view \
+            if max_valid_view is not None \
+            else max_train_view 
         self.num_view = num_view
         self.resolution = resolution
         self.world2camera = True
@@ -205,7 +211,17 @@ class ShapeViewDataset(ShapeDataset):
                 self.data[_index].update(element)
 
                 if r == 0 and preload:
-                    self.cache += [self._load_batch(self.data, id, np.arange(total_num_view))]
+                    phase_name = f"{'train' if self.train else 'valid'}." + \
+                                f"{resolution}x{resolution}." + \
+                                f"{'d' if load_depth else ''}." + \
+                                f"{'m' if load_mask else ''}." + \
+                                f"{'p' if load_point else ''}"
+                    logger.info("preload {}-{}".format(id, phase_name))
+                    if binarize:
+                        cache = self._load_binary(id, np.arange(total_num_view), phase_name)
+                    else:
+                        cache = self._load_batch(self.data, id, np.arange(total_num_view))
+                    self.cache += [cache]
                 _index += 1
 
         # group the data together
@@ -225,6 +241,18 @@ class ShapeViewDataset(ShapeDataset):
                     data_utils.InfIndex(index_list, shuffle=False)
                 )
 
+    def _load_binary(self, id, views, phase='train'):
+        root = os.path.dirname(self.data[id]['ixt'])
+        npzfile = os.path.join(root, '{}.npz'.format(phase))
+        try:
+            with np.load(npzfile, allow_pickle=True) as f:
+                return f['cache']
+        except Exception:
+            cache = self._load_batch(self.data, id, views)
+            if get_rank() == 0:
+                np.savez(npzfile, cache=cache)
+            return cache
+
     def cutoff(self, file_list):
 
         def is_empty(list):
@@ -232,8 +260,8 @@ class ShapeViewDataset(ShapeDataset):
                 raise FileNotFoundError
             return list
         
-        # return [files[:self.max_train_view] if train else files[self.max_train_view:] for files in file_list]
-        return [is_empty(files[:self.max_train_view]) for files in file_list]
+        return [is_empty(files[:self.max_train_view]) if self.train else 
+                is_empty(files[24:24+self.max_valid_view]) for files in file_list]
 
     def find_rgb(self):
         try:

@@ -22,20 +22,42 @@ from fairseq.modules import (
     LayerNorm
 )
 
-class Pointnet2Backbone(nn.Module):
+
+class Backbone(nn.Module):
+    """
+    backbone network
+    """
+    def __init__(self, args):
+        super().__init__()
+        self.args = args
+
+        self.relative_position = getattr(args, "relative_position", False)
+        if not self.relative_position:
+            self.dummy_feature = Embedding(1, self.feature_dim, None)
+
+    def forward(self, pointcloud, add_dummy=False):
+        feats, xyz = self._forward(pointcloud)
+        if add_dummy and (not self.relative_position):
+            dummy = self.dummy_feature.weight.unsqueeze(1)
+            feats = torch.cat([dummy.expand(feats.size(0), 1, feats.size(2)), feats], 1)
+        return feats, xyz
+
+    def _forward(self, pointcloud):
+        raise NotImplementedError
+
+
+class Pointnet2Backbone(Backbone):
     """
     backbone network for pointcloud feature learning.
     this is a Pointnet++ single-scale grouping network
     --- copying from somewhere, maybe not optimal at all...
     """
     def __init__(self, args):
-        super().__init__()
-        self.args = args
-
+        super().__init__(args)
         self.r =getattr(args, "pointnet2_min_radius", 0.1)
         self.input_feature_dim = getattr(args, "pointnet2_input_feature_dim", 0)
         self.input_shuffle = getattr(args, "pointnet2_input_shuffle", False)
-
+        self.upsample512 = getattr(args, "pointnet2_upsample512", False)
         self.sa1 = PointnetSAModuleVotes(
                 npoint=512,
                 radius=self.r,
@@ -75,7 +97,8 @@ class Pointnet2Backbone(nn.Module):
         self.fp1 = PointnetFPModule(mlp=[256+256,256,128])
         self.fp2 = PointnetFPModule(mlp=[128+128,128,64])
 
-        self.dummy_feature = Embedding(1, self.feature_dim, None)
+        if self.upsample512:
+            self.fp3 = PointnetFPModule(mlp=[64+64,128,64])
 
     def _break_up_pc(self, pc):
         xyz = pc[..., 0:3].contiguous()
@@ -83,7 +106,6 @@ class Pointnet2Backbone(nn.Module):
             pc[..., 3:].transpose(1, 2).contiguous()
             if pc.size(-1) > 3 else None
         )
-
         return xyz, features
 
     @staticmethod
@@ -91,8 +113,9 @@ class Pointnet2Backbone(nn.Module):
         parser.add_argument('--pointnet2-min-radius', type=float, metavar='D')
         parser.add_argument('--pointnet2-input-feature-dim', type=int, metavar='N')
         parser.add_argument('--pointnet2-input-shuffle', action='store_true')
+        parser.add_argument('--pointnet2-upsample512', action='store_true')
 
-    def forward(self, pointcloud: torch.cuda.FloatTensor, add_dummy=False):
+    def _forward(self, pointcloud: torch.cuda.FloatTensor, add_dummy=False):
         r"""
             Forward pass of the network
 
@@ -141,16 +164,11 @@ class Pointnet2Backbone(nn.Module):
         # --------- 2 FEATURE UPSAMPLING LAYERS --------
         features = self.fp1(end_points['sa3_xyz'], end_points['sa4_xyz'], end_points['sa3_features'], end_points['sa4_features'])
         features = self.fp2(end_points['sa2_xyz'], end_points['sa3_xyz'], end_points['sa2_features'], features)
-        end_points['fp2_features'] = features
-        end_points['fp2_xyz'] = end_points['sa2_xyz']
-        num_seed = end_points['fp2_xyz'].shape[1]
-        end_points['fp2_inds'] = end_points['sa1_inds'][:, :num_seed]
-
-        feats = end_points['fp2_features'].transpose(1, 2)
-        xyz = end_points['fp2_xyz']    # return feature and xyz
-        if add_dummy:
-            feats = torch.cat([self.dummy_feature.weight.unsqueeze(1), feats], 1)
-
+        xyz = end_points['sa2_xyz']
+        if self.upsample512:
+            features = self.fp3(end_points['sa1_xyz'], end_points['sa2_xyz'], end_points['sa1_features'], features)
+            xyz = end_points['sa1_xyz']
+        feats = features.transpose(1, 2)
         return feats, xyz
 
     @property
@@ -158,14 +176,14 @@ class Pointnet2Backbone(nn.Module):
         return 64
 
 
-class TransformerBackbone(nn.Module):
+class TransformerBackbone(Backbone):
     
     def __init__(self, args):
-        super().__init__()
-        self.args = args
+        super().__init__(args)
         self.dropout = args.dropout
         self.sample_points = getattr(args, 'subsampling_points', None)
         self.furthest_sampling = getattr(args, 'furthest_sampling', True)
+        self.input_shuffle = getattr(args, 'transformer_input_shuffle', False)
         self.layers = nn.ModuleList([])
         self.layers.extend(
             [TransformerEncoderLayer(args) for i in range(args.encoder_layers)]
@@ -183,8 +201,6 @@ class TransformerBackbone(nn.Module):
         else:
             self.layernorm_embedding = None
 
-        self.dummy_feature = Embedding(1, self.feature_dim, None)
-
     @staticmethod
     def add_args(parser):
         """Add model-specific arguments to the parser."""
@@ -192,6 +208,8 @@ class TransformerBackbone(nn.Module):
                             help='if not set (None), do not perform subsampling.')
         parser.add_argument('--furthest-sampling', action='store_true', 
                             help='if enabled, use furthest sampling instead of random sampling')
+        parser.add_argument('--transformer-input-shuffle', action='store_true',
+                            help='if use subsampling, do we need to shuffle the points?')
         parser.add_argument('--activation-fn',
                             choices=utils.get_available_activation_fns(),
                             help='activation function to use')
@@ -220,10 +238,10 @@ class TransformerBackbone(nn.Module):
         parser.add_argument('--layernorm-embedding', action='store_true',
                             help='add layernorm to embedding')
         
-    def forward(self, pointcloud: torch.cuda.FloatTensor, add_dummy=False):
+    def _forward(self, pointcloud: torch.cuda.FloatTensor, add_dummy=False):
         if self.sample_points > 0:
             assert pointcloud.size(1) >= self.sample_points, "need more points"
-            if self.training:
+            if self.training and self.input_shuffle:
                 rand_inds = pointcloud.new_zeros(*pointcloud.size()[:-1]).uniform_().sort(1)[1]
                 pointcloud = pointcloud.gather(1, rand_inds.unsqueeze(2).expand_as(pointcloud))
             
@@ -233,6 +251,7 @@ class TransformerBackbone(nn.Module):
                         pointcloud, self.sample_points).unsqueeze(2).expand(
                             pointcloud.size(0), self.sample_points, 3).long())
             else:
+                assert self.input_shuffle, "only supports input shuffle"
                 pointcloud = pointcloud[:, :self.sample_points]
         
         # transform: B x N x 3 --> B x N x D
@@ -244,9 +263,7 @@ class TransformerBackbone(nn.Module):
         if self.layer_norm is not None:
             x = self.layer_norm(x)
         
-        x = x.transpose(0, 1)
-        if add_dummy:
-            x = torch.cat([self.dummy_feature.weight.unsqueeze(1), x], 1)        
+        x = x.transpose(0, 1)  
         return x, pointcloud    # return features & pointcloud
 
     @property

@@ -8,22 +8,23 @@ pushd $ENGINE
 
 python fb_sweep/sweep_neural_rendering.py \
     --data ${ROOT}/${DATA} \
-    --grid "srn_debug" \
+    --grid "srn_debug4" \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_PointNet2v2_noshuffle \
+    --prefix ${DATA}_Geo \
     --num-trials 1 \
     --num-gpus 8 \
     --num-nodes 1 \
     --mem 500gb \
     --constraint volta32gb \
     --exclusive \
-    --comment "NeurIPS2020 deadline." \
-    --partition priority \
+    --partition learnfair \
+    --comment NeurIPS2020 \
     --resume-failed \
     # --local \
     # --dry-run
+
 popd

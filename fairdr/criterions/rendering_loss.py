@@ -20,7 +20,13 @@ import fairdr.criterions.utils as utils
 class RenderingCriterion(FairseqCriterion):
 
     def __init__(self, args, task):
-        super().__init__(args, task)
+        super().__init__(task)
+        self.args = args
+
+    @classmethod
+    def build_criterion(cls, args, task):
+        """Construct a criterion from command-line args."""
+        return cls(args, task)
 
     @staticmethod
     def add_args(parser):
@@ -90,6 +96,8 @@ class SRNLossCriterion(RenderingCriterion):
         if args.vgg_weight > 0:
             from fairdr.criterions.perceptual_loss import VGGPerceptualLoss
             self.vgg = VGGPerceptualLoss(resize=True)
+            self._dummy = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float32), 
+                        requires_grad=True)  # HACK: to avoid warnings in c10d
 
     @staticmethod
     def add_args(parser):
@@ -163,7 +171,9 @@ class SRNLossCriterion(RenderingCriterion):
                 return x / 2 + 0.5
 
             # vgg_ratio = target.numel() / net_output['predicts'].numel()
-            losses['vgg_loss'] = (self.vgg(transform(inputs), transform(target), self.args.vgg_level), self.args.vgg_weight)
+            losses['vgg_loss'] = (self.vgg(
+                transform(inputs), transform(target), self.args.vgg_level) + 0.0 * self._dummy, self.args.vgg_weight)
+
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
         logging_outputs = {key: item(losses[key][0]) for key in losses}
         logging_outputs.update(other_logs)

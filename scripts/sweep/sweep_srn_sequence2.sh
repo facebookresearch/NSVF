@@ -1,5 +1,5 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=maria
+ROOT=/private/home/jgu/data/shapenet/maria
+DATA=maria_seq
 WORK=/checkpoint/jgu/space/neuralrendering/debug_srn
 mkdir -p ${WORK}
 
@@ -7,14 +7,14 @@ ENGINE=~jgu/work/neuralrendering
 pushd $ENGINE
 
 python fb_sweep/sweep_neural_rendering.py \
-    --data ${ROOT}/${DATA} \
-    --grid "srn_debug" \
+    --data ${ROOT}/${DATA}.txt \
+    --grid "srn_debug_seq" \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
-    --tensorboard-logdir ${WORK}/tensorboard \
+    --tensorboard-logdir ${WORK}/tensorboard/transformer_seq_small \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_PointNet2v2_noshuffle \
+    --prefix ${DATA}_PointNet2v2 \
     --num-trials 1 \
     --num-gpus 8 \
     --num-nodes 1 \

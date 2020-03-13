@@ -9,9 +9,10 @@ from fairdr.data import ShapeViewDataset, WorldCoordDataset
 
 # multi-view images
 DIR = "/private/home/jgu/data/shapenet/maria/{}".format(sys.argv[1])
+print(DIR)
 
 # DIR = "/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug/debug"
-dataset = ShapeViewDataset(DIR, 50, 50)
+dataset = ShapeViewDataset(DIR, 50, 50, load_mask=True, binarize=False)
 
 # visual-hull parameters
 s = 128     # voxel resolution
@@ -19,7 +20,7 @@ extent = 5.
 imgW, imgH = 1024, 1024
 background = -1
 tau = 0.005
-th = 40
+th = 49
 voxw = extent / s
 
 # prepare voxel grids
@@ -62,7 +63,7 @@ for i, data in enumerate(packed_data):
     # image_mask = 1 - np.all(np.logical_and(
     #     data['rgb'] > (background - tau),
     #     data['rgb'] < (background + tau)), 0).reshape(imgW, imgH).astype(np.int)
-    image_mask = data['alpha'].reshape(imgW, imgH).astype(np.int)
+    image_mask = data['mask'].reshape(imgW, imgH).astype(np.int)
     res = image_mask[sub_uvs[1, :], sub_uvs[0, :]]
     occupancy[indices] += res
 

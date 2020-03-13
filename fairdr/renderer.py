@@ -78,6 +78,8 @@ class NeuralRenderer(object):
     @torch.no_grad()    
     def generate(self, models, sample, **kwargs):
         model = models[0]
+        model.eval()
+        from fairseq import pdb; pdb.set_trace()
         rgb_path = tempfile.mkdtemp()
         for shape in range(sample['shape'].size(0)):
             for step in range(0, self.frames, self.beam):
@@ -86,17 +88,6 @@ class NeuralRenderer(object):
                     self.generate_rays(k, sample['intrinsics'][shape])
                     for k in range(step, min(self.frames, step + self.beam))
                 ])
-
-                def _process_points(points):
-                    return points
-                    # keep = points[:, :, 2] > -0.15
-                    # points = points[keep]                   
-                    # return points.unsqueeze(0)
-                    # _points1 = points.clone()
-                    # _points1[:, :, 0] += 0.5
-                    # _points2 = points.clone()
-                    # _points2[:, :, 0] -= 0.5
-                    # return torch.cat([_points1, _points2], 1)
 
                 _sample = {
                     'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
@@ -110,7 +101,6 @@ class NeuralRenderer(object):
                     'points': sample.get('points', None).clone(),
                     'raymarching_steps': self.raymarching_steps
                 }
-                _sample['points'] = _process_points(_sample['points'])
                 _ = model(**_sample)
 
                 for k in range(step, min(self.frames, step + self.beam)):

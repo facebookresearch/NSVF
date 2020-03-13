@@ -136,8 +136,20 @@ class SRNModel(BaseModel):
                 'img': output['depths'][shape, view], 'min_val': 2.0, 'max_val': 5.0}
         
         if hit_map and 'hits' in output:
+            
+            def _max_val(c):
+                if c < 256:
+                    return 256
+                elif c < 512:
+                    return 512
+                elif c < 1024:
+                    return 1024
+                return 2048
+
             images['hit/{}:HWC'.format(img_id)] = {
-                'img': output['hits'][shape, view].float(), 'min_val': 0, 'max_val': 255}
+                'img': output['hits'][shape, view].float(), 
+                'min_val': 0, 
+                'max_val': _max_val(output['hits'].max())}
         
         if target_map:
             images.update({

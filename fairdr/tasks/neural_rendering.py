@@ -25,6 +25,7 @@ class SingleObjRenderingTask(FairseqTask):
     def add_args(parser):
         """Add task-specific arguments to the parser"""
         parser.add_argument("data", help='data-path or data-directoy')
+        parser.add_argument("--no-preload", action="store_true")
         parser.add_argument("--load-depth", action="store_true", 
                             help="load depth images if exists")
         parser.add_argument("--load-point", action="store_true",
@@ -33,6 +34,8 @@ class SingleObjRenderingTask(FairseqTask):
                             help="load pre-computed masks which is useful for subsampling during training.")
         parser.add_argument("--max-train-view", type=int, default=50, 
                             help="number of views sampled for training, can be unlimited if set -1")
+        parser.add_argument("--max-valid-view", type=int, default=50,
+                            help="number of views sampled for validation, can be unlimited if set -1")
         parser.add_argument("--view-per-batch", type=int, default=6,
                             help="number of views training each batch (each GPU)")
         parser.add_argument("--pixel-per-view", default=None, nargs='?', const=16384, type=int,
@@ -61,27 +64,30 @@ class SingleObjRenderingTask(FairseqTask):
         """
         return cls(args)
 
+    def repeat_dataset(self, split):
+        max_view = self.args.max_train_view if split == 'train' \
+                else self.args.max_valid_view
+        return int(np.ceil(max_view / self.args.view_per_batch / 
+            self.args.distributed_world_size) * self.args.distributed_world_size)
+
     def load_dataset(self, split, **kwargs):
         """
         Load a given dataset split (train, valid, test)
         """
 
         if split != 'test':
-            repeats = int(np.ceil(self.args.max_train_view / 
-                            self.args.view_per_batch / 
-                            self.args.distributed_world_size
-                            ) * self.args.distributed_world_size)
-
             self.datasets[split] = ShapeViewDataset(
                 self.args.data,
-                self.args.max_train_view,
-                self.args.view_per_batch,
-                self.args.view_resolution,
+                max_train_view=self.args.max_train_view,
+                max_valid_view=self.args.max_valid_view,
+                num_view=self.args.view_per_batch,
+                resolution=self.args.view_resolution,
                 train=(split == 'train'),
                 load_depth=self.args.load_depth,
                 load_mask=self.args.load_mask,
                 load_point=self.args.load_point,
-                repeat=repeats)
+                repeat=self.repeat_dataset(split),
+                preload=(not getattr(self.args, "no_preload", False)))
 
             if split == 'train' and (self.args.pixel_per_view is not None):
                 self.datasets[split] = SampledPixelDataset(
@@ -94,7 +100,7 @@ class SingleObjRenderingTask(FairseqTask):
             )
 
             if split == 'train':   # infinite sampler
-                total_num_models = self.args.max_update * self.args.distributed_world_size
+                total_num_models = self.args.max_update * self.args.distributed_world_size * self.args.max_sentences
                 self.datasets[split] = InfiniteDataset(
                     self.datasets[split], total_num_models)
 
@@ -141,8 +147,9 @@ class SingleObjRenderingTask(FairseqTask):
         """
         self._num_updates = num_updates
 
-    def train_step(self, sample, model, criterion, optimizer, ignore_grad=False):
-        return super().train_step(sample, model, criterion, optimizer, ignore_grad)
+    def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
+        self._num_updates = update_num
+        return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
@@ -161,3 +168,24 @@ class SingleObjRenderingTask(FairseqTask):
 
         return loss, sample_size, logging_output
     
+
+@register_task("sequence_object_rendering")
+class SequenceObjRenderingTask(SingleObjRenderingTask):
+    """
+    Task for rendering a sequence of an single object.
+       -- it is a conditional generation.
+    """
+    @staticmethod
+    def add_args(parser):
+        """Add task-specific arguments"""    
+        SingleObjRenderingTask.add_args(parser)
+
+    def repeat_dataset(self, split):
+        return 1
+
+    def load_dataset(self, split, **kwargs):
+        assert os.path.isfile(self.args.data), \
+            "a list of multiple objects must be saved in a document"
+        assert self.args.load_point, "for now only supports point condition"  # TODO
+
+        super().load_dataset(split, **kwargs)

@@ -160,7 +160,7 @@ def get_debug2_grid(args):
 def get_debug_grid(args):
     return [
         # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
-        hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
+        # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
         
@@ -181,7 +181,7 @@ def get_debug_grid(args):
         hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
 
         hyperparam('--arch', 'pointnet2_srn', save_dir_key=lambda val: val),
-        hyperparam('--ball-radius', 5, save_dir_key=lambda val: f'ball{val}'),
+        hyperparam('--ball-radius', 1000, save_dir_key=lambda val: f'ball{val}'),
         hyperparam('--relative-position', binary_flag=True, save_dir_key=lambda val: 'rel'),
         hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
         hyperparam('--adam-betas', '(0.9, 0.999)'),
@@ -204,8 +204,163 @@ def get_debug_grid(args):
     ]
 
 
+@register_grid("srn_debug4")
+def get_debug4_grid(args):
+    return [
+        # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+        # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
+        hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
+        hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
+        
+        hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
+        hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--view-per-batch', 5, save_dir_key=lambda val: f'v{val}'),
+        hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p{val}'),
+        hyperparam('--sampling-on-mask', 0.5, save_dir_key=lambda val: f'mask{val}'),
+        hyperparam('--sampling-on-bbox', binary_flag=True, save_dir_key=lambda val: 'bbox'),
+        hyperparam('--raymarching-steps', 10, save_dir_key=lambda val: f'march{val}'),
+
+        hyperparam('--load-point', binary_flag=True, save_dir_key=lambda val: 'p'),
+        hyperparam('--load-depth', binary_flag=True, save_dir_key=lambda val: 'd'),
+        hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
+        hyperparam('--rgb-weight', 200, save_dir_key=lambda val: f'rgb{val}'),
+        hyperparam('--depth-weight', 0.08, save_dir_key=lambda val: f'dep{val}'),
+        hyperparam('--reg-weight', 1e-3),
+        hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
+
+        hyperparam('--arch', 'geo_srn', save_dir_key=lambda val: val),
+        hyperparam('--ball-radius', 1000, save_dir_key=lambda val: f'ball{val}'),
+        hyperparam('--relative-position', binary_flag=True, save_dir_key=lambda val: 'rel'),
+        hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
+        hyperparam('--adam-betas', '(0.9, 0.999)'),
+        hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
+        hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
+        hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
+
+        # hyperparam('--dropout', 0.3, save_dir_key=lambda val: f'drop{val}'),
+        hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),
+        hyperparam('--criterion', 'srn_loss'),
+        hyperparam('--num-workers', 0),
+        hyperparam('--seed', [2], save_dir_key=lambda val: f'seed{val}'),
+        hyperparam('--save-interval-updates', 200),
+        hyperparam('--save-interval', 100000),
+        hyperparam('--max-update', 100000),
+        hyperparam('--no-epoch-checkpoints'),
+        hyperparam('--keep-interval-updates', 2),
+        hyperparam('--log-format', 'simple'),
+        hyperparam('--log-interval', 10 if not args.local else 1),
+    ]
+
+
+@register_grid("srn_debug_seq")
+def get_seq_grid(args):
+    return [
+        # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+        # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
+        hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
+        hyperparam('--task', "sequence_object_rendering", save_dir_key=lambda val: "single"),
+        
+        hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
+        hyperparam('--max-sentences', 2, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--max-sentences-valid', 1),
+        hyperparam('--view-per-batch', 5, save_dir_key=lambda val: f'v{val}'),
+        hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p{val}'),
+        hyperparam('--sampling-on-mask', 0.5, save_dir_key=lambda val: f'mask{val}'),
+        hyperparam('--sampling-on-bbox', binary_flag=True, save_dir_key=lambda val: 'bbox'),
+        hyperparam('--raymarching-steps', 10, save_dir_key=lambda val: f'march{val}'),
+        hyperparam('--max-valid-view', 1),
+
+        hyperparam('--no-preload', binary_flag=True),
+        hyperparam('--load-point', binary_flag=True, save_dir_key=lambda val: 'p'),
+        # hyperparam('--load-depth', binary_flag=True, save_dir_key=lambda val: 'd'),
+        hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
+        hyperparam('--rgb-weight', 200, save_dir_key=lambda val: f'rgb{val}'),
+        hyperparam('--depth-weight', 0.08, save_dir_key=lambda val: f'dep{val}'),
+        hyperparam('--reg-weight', 1e-3),
+        hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
+
+        hyperparam('--arch', 'pointnet2_srn', save_dir_key=lambda val: val),
+        # hyperparam('--arch', 'transformer_srn', save_dir_key=lambda val: val),
+        hyperparam('--ball-radius', 1000, save_dir_key=lambda val: f'ball{val}'),
+        hyperparam('--relative-position', binary_flag=True, save_dir_key=lambda val: 'rel'),
+        # hyperparam('--pointnet2-upsample512', binary_flag=True, save_dir_key=lambda val: 'up512'),
+        
+        hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
+        hyperparam('--adam-betas', '(0.9, 0.999)'),
+        hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
+        hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
+        hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
+
+        # hyperparam('--dropout', 0.3, save_dir_key=lambda val: f'drop{val}'),
+        hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),
+        hyperparam('--criterion', 'srn_loss'),
+        hyperparam('--num-workers', 0),
+        hyperparam('--seed', [2], save_dir_key=lambda val: f'seed{val}'),
+        hyperparam('--save-interval-updates', 400),
+        hyperparam('--save-interval', 100000),
+        hyperparam('--max-update', 100000),
+        hyperparam('--no-epoch-checkpoints'),
+        hyperparam('--keep-interval-updates', 2),
+        hyperparam('--log-format', 'simple'),
+        hyperparam('--log-interval', 10 if not args.local else 1),
+    ]
+
+
+@register_grid("srn_debug_seq2")
+def get_seq2_grid(args):
+    return [
+        # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+        # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
+        hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
+        hyperparam('--task', "sequence_object_rendering", save_dir_key=lambda val: "single"),
+        
+        hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
+        hyperparam('--max-sentences', 2, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--max-sentences-valid', 1),
+        hyperparam('--view-per-batch', 5, save_dir_key=lambda val: f'v{val}'),
+        hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p{val}'),
+        hyperparam('--sampling-on-mask', 0.5, save_dir_key=lambda val: f'mask{val}'),
+        hyperparam('--sampling-on-bbox', binary_flag=True, save_dir_key=lambda val: 'bbox'),
+        hyperparam('--raymarching-steps', 10, save_dir_key=lambda val: f'march{val}'),
+        hyperparam('--max-valid-view', 1),
+
+        # hyperparam('--no-preload', binary_flag=True),
+        hyperparam('--load-point', binary_flag=True, save_dir_key=lambda val: 'p'),
+        # hyperparam('--load-depth', binary_flag=True, save_dir_key=lambda val: 'd'),
+        hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
+        hyperparam('--rgb-weight', 200, save_dir_key=lambda val: f'rgb{val}'),
+        hyperparam('--depth-weight', 0.08, save_dir_key=lambda val: f'dep{val}'),
+        hyperparam('--reg-weight', 1e-3),
+        hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
+
+        hyperparam('--arch', 'transformer_srn', save_dir_key=lambda val: val),
+        hyperparam('--ball-radius', 0.1, save_dir_key=lambda val: f'ball{val}'),
+        # hyperparam('--relative-position', binary_flag=True, save_dir_key=lambda val: 'rel'),
+        hyperparam('--subsampling-points', [2048], save_dir_key=lambda val: f'sub{val}'),
+        hyperparam('--encoder-attention-heads', [8], save_dir_key=lambda val: f'head{val}'),
+        hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
+        hyperparam('--adam-betas', '(0.9, 0.999)'),
+        hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
+        hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
+        hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
+
+        # hyperparam('--dropout', 0.3, save_dir_key=lambda val: f'drop{val}'),
+        hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),
+        hyperparam('--criterion', 'srn_loss'),
+        hyperparam('--num-workers', 0),
+        hyperparam('--seed', [2], save_dir_key=lambda val: f'seed{val}'),
+        hyperparam('--save-interval-updates', 400),
+        hyperparam('--save-interval', 100000),
+        hyperparam('--max-update', 100000),
+        hyperparam('--no-epoch-checkpoints'),
+        hyperparam('--keep-interval-updates', 2),
+        hyperparam('--log-format', 'simple'),
+        hyperparam('--log-interval', 10 if not args.local else 1),
+    ]
+
+
 @register_grid("srn_debug3")
-def get_debug_grid(args):
+def get_debug3_grid(args):
     return [
         # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
         hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
