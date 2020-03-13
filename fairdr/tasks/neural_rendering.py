@@ -122,6 +122,8 @@ class SingleObjRenderingTask(FairseqTask):
             path_gen=get_trajectory(args.render_path_style)(
                 **eval(args.render_path_args)
             ),
+            at=eval(args.render_at_vector),
+            up=eval(args.render_up_vector),
             output_dir=args.render_output if args.render_output is not None
                 else os.path.join(args.path, "output"),
             output_type=args.render_output_types

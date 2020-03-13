@@ -105,12 +105,16 @@ def look_at_rotation(camera_position, at=None, up=None, inverse=False, cv=False)
         at: 1 x 3 or N x 3  (0, 0, 0) in default
         up: 1 x 3 or N x 3  (0, 1, 0) in default
     """
+       
     if at is None:
         at = torch.zeros_like(camera_position)
-
+    else:
+        at = torch.tensor(at).type_as(camera_position)
     if up is None:
         up = torch.zeros_like(camera_position)
         up[2] = -1
+    else:
+        up = torch.tensor(up).type_as(camera_position)
 
     z_axis = normalize(at - camera_position)[0]
     x_axis = normalize(cross(up, z_axis))[0]

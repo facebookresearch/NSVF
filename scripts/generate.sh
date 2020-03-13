@@ -20,9 +20,10 @@ fairdr-render ${DATASET} \
     --task single_object_rendering \
     --load-point \
     --path ${MODEL_PATH}/checkpoint_last.pt \
-    --render-beam 10 \
-    --render-path-args "{'radius': 3.5, 'y': 0.0}" \
-    --render-angular-speed 3 \
-    --render-num-frames 100 \
-    --render-output /private/home/jgu/data/test_images/output \
+    --render-beam 15 \
+    --render-angular-speed 1 \
+    --render-num-frames 15 \
+    --render-output /private/home/jgu/data/test_images/output2 \
     --render-output-types "rgb" "depth" "normal" "hit" \
+#  --render-path-args "{'radius': 3.5, 'h': 0.0, 'axis': 'z'}" \
+#     --render-up-vector "(0,0,-1)" \
