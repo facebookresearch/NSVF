@@ -23,7 +23,7 @@ __global__ void query_ball_point_kernel(int b, int n, int m, float radius,
 
   int index = threadIdx.x;
   int stride = blockDim.x;
-
+  
   float radius2 = radius * radius;
   for (int j = index; j < m; j += stride) {
     float new_x = new_xyz[j * 3 + 0];

@@ -113,7 +113,7 @@ def _main(args, output_file):
     timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
     for type in generator.output_type:
         images = [imageio.imread(file_path) for file_path in output_files if type in file_path] 
-        imageio.mimsave('{}/{}_{}.gif'.format(generator.output_dir, type, timestamp), images, fps=55)
+        imageio.mimsave('{}/{}_{}.gif'.format(generator.output_dir, type, timestamp), images, fps=args.render_save_fps)
 
 def cli_main():
     parser = options.get_rendering_parser()

@@ -25,8 +25,9 @@ fairdr-render ${DATASET} \
     --max-sentences 10 \
     --render-path-args "{'radius': 3.5, 'h': 0.0, 'axis': 'z', 't0': -2, 'r':-1}" \
     --render-up-vector "(0,0,-1)" \
-    --render-angular-speed 6 \
+    --render-angular-speed 0.1 \
     --render-num-frames 200 \
+    --render-save-fps 15 \
     --render-output /private/home/jgu/data/test_images/output2 \
-    --render-output-types "rgb" "depth" "normal" "hit" \
+    --render-output-types "rgb"  # "depth" "normal" "hit" \
     #--render-output-types "rgb" "depth" "normal" "hit" \

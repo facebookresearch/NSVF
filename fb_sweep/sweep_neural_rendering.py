@@ -20,7 +20,7 @@ def register_grid(name):
 def get_grid(args):
     return [
         # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
-        hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
+        # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
         
@@ -324,7 +324,7 @@ def get_seq2_grid(args):
         hyperparam('--raymarching-steps', 10, save_dir_key=lambda val: f'march{val}'),
         hyperparam('--max-valid-view', 1),
 
-        # hyperparam('--no-preload', binary_flag=True),
+        hyperparam('--no-preload', binary_flag=True),
         hyperparam('--load-point', binary_flag=True, save_dir_key=lambda val: 'p'),
         # hyperparam('--load-depth', binary_flag=True, save_dir_key=lambda val: 'd'),
         hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
@@ -334,9 +334,9 @@ def get_seq2_grid(args):
         hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
 
         hyperparam('--arch', 'transformer_srn', save_dir_key=lambda val: val),
-        hyperparam('--ball-radius', 0.1, save_dir_key=lambda val: f'ball{val}'),
-        # hyperparam('--relative-position', binary_flag=True, save_dir_key=lambda val: 'rel'),
-        hyperparam('--subsampling-points', [2048], save_dir_key=lambda val: f'sub{val}'),
+        hyperparam('--ball-radius',1000, save_dir_key=lambda val: f'ball{val}'),
+        hyperparam('--relative-position', [True], binary_flag=True, save_dir_key=lambda val: 'rel'),
+        hyperparam('--subsampling-points', [256], save_dir_key=lambda val: f'sub{val}'),
         hyperparam('--encoder-attention-heads', [8], save_dir_key=lambda val: f'head{val}'),
         hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
         hyperparam('--adam-betas', '(0.9, 0.999)'),
@@ -404,6 +404,7 @@ def get_debug3_grid(args):
         hyperparam('--log-format', 'simple'),
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
+
 
 @register_grid("srn_shapenet")
 def get_shapenet_grid(args):

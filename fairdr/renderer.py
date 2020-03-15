@@ -55,8 +55,7 @@ class NeuralRenderer(object):
     def generate_rays(self, t, intrinsics):
         cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
                     device=intrinsics.device, dtype=intrinsics.dtype)
-                    # at=self.at, up=self.up, 
-        cam_rot = geometry.look_at_rotation(cam_pos, inverse=True, cv=True)
+        cam_rot = geometry.look_at_rotation(cam_pos, at=self.at, up=self.up, inverse=True, cv=True)
         
         inv_RT = cam_pos.new_zeros(4, 4)
         inv_RT[:3, :3] = cam_rot

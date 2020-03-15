@@ -40,3 +40,4 @@ def add_rendering_args(parser):
     group.add_argument("--render-output-types", nargs="+", type=str, default=["rgb"], 
                         choices=["rgb", "depth", "normal", "hit"])
     group.add_argument("--render-raymarching-steps", default=None, type=int)
+    group.add_argument("--render-save-fps", default=24, type=int)

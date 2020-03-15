@@ -452,3 +452,37 @@ class GroupAll(nn.Module):
             return new_features, grouped_xyz
         else:
             return new_features
+
+
+class BallRayIntersect(Function):
+    @staticmethod
+    def forward(ctx, radius, n_max, points, ray_start, ray_dir):
+        r"""
+
+        Parameters
+        ----------
+        radius : float
+            radius of the balls
+        n_max: int
+            maximum number of points to intersect.
+        xyz : torch.Tensor
+            (B, N, 3) xyz coordinates of the features
+        new_xyz : torch.Tensor
+            (B, npoint, 3) centers of the ball query
+
+        Returns
+        -------
+        torch.Tensor
+            (B, npoint) tensor with the nearest indicies of the features that form the query balls
+        """
+        inds, min_depth, max_depth = _ext.ball_intersect(ray_start, ray_dir, points, radius, n_max)
+        ctx.mark_non_differentiable(inds)
+        ctx.mark_non_differentiable(min_depth)
+        ctx.mark_non_differentiable(max_depth)
+        return inds, min_depth, max_depth
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None
+
+ball_ray_intersect = BallRayIntersect.apply
