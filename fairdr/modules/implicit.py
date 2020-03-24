@@ -62,7 +62,7 @@ class SignedDistanceField(nn.Module):
             shape = x.size()
             state = self.hidden_layer(x.view(-1, shape[-1]), state)
             if state[0].requires_grad:
-                state[0].register_hook(lambda x: x.clamp(min=-10, max=10))
+                state[0].register_hook(lambda x: x.clamp(min=-5, max=5))
             
             return self.output_layer(state[0].view(*shape[:-1], -1)).squeeze(-1), state
 

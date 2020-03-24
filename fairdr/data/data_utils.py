@@ -18,7 +18,7 @@ import pandas as pd
 import pylab as plt
 
 
-def load_rgb(path, resolution=None, with_alpha=True):
+def load_rgb(path, resolution=None, with_alpha=True, bg_color=-0.8):
     if with_alpha:
         img = imageio.imread(path)  # RGB-ALPHA
     else:
@@ -38,7 +38,7 @@ def load_rgb(path, resolution=None, with_alpha=True):
     img[:, :, :3] *= 2.
 
     # if alpha == 0, make it white (chair)
-    img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + 1.0 * (1 - img[:, :, 3:])    
+    img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + bg_color * (1 - img[:, :, 3:])     
     img = img.transpose(2, 0, 1)
     return img, uv
 

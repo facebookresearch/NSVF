@@ -1,20 +1,22 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=maria
-WORK=/checkpoint/jgu/space/neuralrendering/debug_srn_ball
+ROOT=/private/home/jgu/data/shapenet/bunny
+DATA=bunny
+WORK=/checkpoint/jgu/space/neuralrendering/debug_srn_bunny
 mkdir -p ${WORK}
 
+GRID=srn_shapenet
+GRID=srn_shapenet_geo
 ENGINE=~jgu/work/neuralrendering
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 python fb_sweep/sweep_neural_rendering.py \
-    --data ${ROOT}/${DATA} \
-    --grid "srn_debug4" \
+    --data ${ROOT}/${DATA}/0001 \
+    --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_GEOv4 \
+    --prefix ${DATA}_SRN \
     --num-trials 1 \
     --num-gpus 8 \
     --num-nodes 1 \

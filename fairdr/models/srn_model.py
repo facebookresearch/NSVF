@@ -237,15 +237,15 @@ class SRNRaymarcher(Raymarcher):
         self.raymarcher = IterativeSphereTracer(args)
         self.implicit = args.implicit_gradient
 
-    def _forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4):
+    def _forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4, min=None, max=None):
         return self.raymarcher.search(
             sdf_fn,
             ray_start.expand_as(ray_dir),
-            ray_dir, state=state, steps=steps, min=0.05)
+            ray_dir, state=state, steps=steps, min=min, max=None)
 
-    def forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4):
+    def forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4, min=0.05, max=None):
         if not self.implicit or not self.training:
-            return self._forward(sdf_fn, ray_start, ray_dir, state, steps)
+            return self._forward(sdf_fn, ray_start, ray_dir, state, steps, min, max)
         
         assert not self.args.lstm_sdf, "implicit gradient does not support LSTM."
         with torch.no_grad():

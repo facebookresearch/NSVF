@@ -165,7 +165,8 @@ class ShapeViewDataset(ShapeDataset):
                 train=True,
                 preload=True,
                 repeat=1,
-                binarize=True):
+                binarize=True,
+                bg_color=-0.8):
         
         super().__init__(paths, load_point, False, repeat)
 
@@ -180,7 +181,7 @@ class ShapeViewDataset(ShapeDataset):
         self.resolution = resolution
         self.world2camera = True
         self.cache_view = None
-
+        self.bg_color = bg_color  # only useful if image is transparent
         # -- load per-view data
         _data_per_view = {}
         _data_per_view['rgb'] = self.find_rgb()  
@@ -302,7 +303,10 @@ class ShapeViewDataset(ShapeDataset):
         return self.num_view * self.resolution ** 2  
 
     def _load_view(self, packed_data, view_idx):
-        image, uv = data_utils.load_rgb(packed_data['rgb'][view_idx], resolution=self.resolution)
+        image, uv = data_utils.load_rgb(
+            packed_data['rgb'][view_idx], 
+            resolution=self.resolution,
+            bg_color=self.bg_color)
         rgb, alpha = image[:3], image[3]  # C x H x W for RGB
         extrinsics = data_utils.load_matrix(packed_data['ext'][view_idx])
         extrinsics = geometry.parse_extrinsics(extrinsics, self.world2camera).astype('float32')

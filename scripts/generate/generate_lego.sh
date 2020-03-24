@@ -2,7 +2,9 @@
 # DATASET=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/61b984febe54b752d61420a53a0cb96d
 # DATASET=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/61b984febe54b752d61420a53a0cb96d
 # DATASET=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug/debug
-DATASET=/private/home/jgu/data/shapenet/maria
+DATA=${2:-"bulldozer2"}
+DATASET=/private/home/jgu/data/shapenet/bulldozer
+DATASET=/private/home/jgu/data/shapenet/${DATA}
 
 # MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn_ref21
 # MODEL_PATH=/checkpoint/jgu/space/neuralrendering/slurm_srn/maria.no_c10d.single.512x512.s1.v5.p16384.mask0.75.march10.rgb200.dep0.08.vgg1.0.srn_base.adam.lr_fixed.lr0.001.clip0.0.wd0.0.seed2.ngpu8
@@ -15,14 +17,17 @@ MODEL_PATH=/checkpoint/jgu/space/neuralrendering/slurm_srn/maria.no_c10d.single.
 MODEL_PATH=$1
 
 CUDA_VISIBLE_DEVICES=0 \
-fairdr-render ${DATASET} \
+python render.py ${DATASET} \
     --user-dir fairdr \
     --task single_object_rendering \
     --load-point \
     --path ${MODEL_PATH}/checkpoint_last.pt \
-    --render-beam 15 \
-    --render-angular-speed 1 \
-    --render-num-frames 15 \
+    --render-beam 1 \
+    --render-angular-speed 3 \
+    --render-save-fps 24 \
+    --render-num-frames 120 \
+    --render-resolution 400 \
+    --render-path-args "{'radius': 4.0, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}" \
     --render-output /private/home/jgu/data/test_images/output2 \
     --render-output-types "rgb" "depth" "normal" "hit" \
 #  --render-path-args "{'radius': 3.5, 'h': 0.0, 'axis': 'z'}" \

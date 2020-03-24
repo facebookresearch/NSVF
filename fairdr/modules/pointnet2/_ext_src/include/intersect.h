@@ -7,4 +7,7 @@
 #include <torch/extension.h>
 #include <utility>
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> ball_intersect(at::Tensor new_xyz, at::Tensor xyz, const float radius);
+std::tuple<at::Tensor, at::Tensor, at::Tensor> ball_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor points, 
+               const float radius, const int n_max);
+std::tuple<at::Tensor, at::Tensor, at::Tensor> aabb_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor points, 
+               const float voxelsize, const int n_max);

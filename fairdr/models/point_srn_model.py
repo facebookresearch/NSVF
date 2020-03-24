@@ -11,10 +11,10 @@ from fairseq.models import (
 )
 
 from fairdr.data.geometry import ray
-from fairdr.modules.linear import Linear
+from fairdr.modules.linear import Linear, PosEmbLinear
 from fairdr.modules.implicit import ImplicitField, SignedDistanceField, TextureField
 from fairdr.models.srn_model import SRNModel, SRNField, base_architecture
-from fairdr.modules.backbone import Pointnet2Backbone, TransformerBackbone
+from fairdr.modules.backbone import Pointnet2Backbone, TransformerBackbone, QuantizedEmbeddingBackbone
 from fairdr.modules.pointnet2.pointnet2_utils import ball_nearest
 
 @register_model('point_srn')
@@ -27,14 +27,18 @@ class PointSRNModel(SRNModel):
     @staticmethod
     def add_args(parser):
         SRNModel.add_args(parser)
+        
         Pointnet2Backbone.add_args(parser)
         TransformerBackbone.add_args(parser)
-        
+        QuantizedEmbeddingBackbone.add_args(parser)
+
         parser.add_argument("--ball-radius", type=float, metavar='D', 
                             help="maximum radius of ball query for ray-marching")
         parser.add_argument("--backbone", choices=['pointnet2', 'sparseconv', 'transformer'], type=str,
                             help="backbone network, encoding features for the input points")
         parser.add_argument("--relative-position", action='store_true')
+        parser.add_argument("--pos-embed", action='store_true', 
+                            help='use positional embedding instead of linear projection')
 
     def forward(self, ray_start, ray_dir, points, raymarching_steps=None, **kwargs):
         # get geometry features
@@ -78,13 +82,17 @@ class PointSRNField(SRNField):
             self.backbone = Pointnet2Backbone(args)
         elif args.backbone == "transformer":
             self.backbone = TransformerBackbone(args)
+        elif args.backbone == "embedding":
+            self.backbone = QuantizedEmbeddingBackbone(args)
         else:
-            raise NotImplementedError("Only PointNet++ and Transformer are implemented.")
+            raise NotImplementedError("Backbone is not implemented!!!")
+
         self.relative_position = getattr(args, "relative_position", False)
         self.ball_radius = args.ball_radius
-        if self.relative_position:
-            assert self.ball_radius >= 5, "relative position requires large ball-radius"
-        self.linear_proj = Linear(args.input_features, self.backbone.feature_dim)
+        self.point_proj = Linear(args.input_features, self.backbone.feature_dim) \
+            if not getattr(args, "pos_embed", False) \
+            else PosEmbLinear(args.input_features, self.backbone.feature_dim)
+
         self.feature_field = ImplicitField(
             args, 
             2 * self.backbone.feature_dim, 
@@ -123,7 +131,7 @@ class PointSRNField(SRNField):
                 1, query_inds.unsqueeze(-1).expand(S, V * P, 3)).view(S, V, P, -1)
             xyz = xyz - query_xyz
 
-        input_feats = torch.cat([query_feats.view(S, V, P, -1), self.linear_proj(xyz)], -1)
+        input_feats = torch.cat([query_feats.view(S, V, P, -1), self.point_proj(xyz)], -1)
         return self.feature_field(input_feats), query_inds.view(S, V, P), query_dis.view(S, V, P)
 
     def get_sdf(self, xyz, state=None):
@@ -140,6 +148,16 @@ class PointSRNField(SRNField):
         return self.get_texture(xyz, point_feats, point_xyz)
 
 
+@register_model_architecture("point_srn", "embedding_srn")
+def embedding_base_architecture(args):
+    args.backbone = "embedding"
+    args.quantized_voxel_path = getattr(args, "quantized_voxel_path", None)
+    args.quantized_embed_dim = getattr(args, "quantized_embed_dim", 256)
+    args.quantized_subsampling_points = getattr(args, "quantized_subsampling_points", 256)
+    args.quantized_input_shuffle = getattr(args, "quantized_input_shuffle", True)
+    base_architecture(args)
+
+
 @register_model_architecture("point_srn", "pointnet2_srn")
 def point_base_architecture(args):
     args.backbone = "pointnet2"
@@ -149,6 +167,7 @@ def point_base_architecture(args):
     args.pointnet2_input_feature_dim = getattr(args, "pointnet2_input_feature_dim", 0)
     args.pointnet2_min_radius = getattr(args, "pointnet2_min_radius", 0.1)
     args.pointnet2_upsample512 = getattr(args, "pointnet2_upsample512", False)
+    args.pos_embed = getattr(args, "pos_embed", False)
     base_architecture(args)
 
 @register_model_architecture("point_srn", "transformer_srn")
@@ -169,4 +188,6 @@ def transformer_base_architecture(args):
     args.activation_fn = getattr(args, "activation_fn", "relu")
     args.dropout = getattr(args, "dropout", 0.0)
     args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
+    args.pos_embed = getattr(args, "pos_embed", False)
+    args.transformer_pos_embed = getattr(args, "transformer_pos_embed", False)
     base_architecture(args)

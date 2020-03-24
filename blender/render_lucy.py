@@ -11,7 +11,7 @@ import os
 from math import radians
 import lib as utils
 from pathlib import Path
-
+from math import pi
 import sys, argparse, os
 
 parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
@@ -36,7 +36,7 @@ render_root = '%s/%s/%04d/'%(args.root,args.scene,args.frame_id)
 if args.obj_name is None:
     obj_file = args.obj_root + '/Frame_%05d.obj'%args.frame_id
 else:
-    obj_file = args.obj_root + '/' + args.obj_name + '.obj'
+    obj_file = args.obj_root + '/' + args.obj_name + '.ply'
 
 if not os.path.exists(render_root):
     os.makedirs(render_root)
@@ -45,7 +45,8 @@ prior_objects = [object.name for object in bpy.context.scene.objects]
 # do your stl imports here
 
 bpy.context.scene.frame_set(args.frame_id)
-bpy.ops.import_scene.obj(filepath=obj_file)
+#bpy.ops.import_scene.obj(filepath=obj_file)
+bpy.ops.import_mesh.ply(filepath=obj_file)
 
 new_current_objects = [object.name for object in bpy.context.scene.objects]
 new_objects = set(new_current_objects)-set(prior_objects) 
@@ -53,17 +54,43 @@ new_objects = set(new_current_objects)-set(prior_objects)
 # print([p for p in bpy.data.objects])
 # # # hard-coded transformation for imported objects (NO CHANGE)
 
+def color_vertex(obj, color):
+    """Paints a single vertex where vert is the index of the vertex
+    and color is a tuple with the RGB values."""
+
+    mesh = obj.data 
+    scn = bpy.context.scene
+
+    #check if our mesh already has Vertex Colors, and if not add some... (first we need to make sure it's the active object)
+    scn.objects.active = obj
+    obj.select = True
+    if mesh.vertex_colors:
+        vcol_layer = mesh.vertex_colors.active
+    else:
+        vcol_layer = mesh.vertex_colors.new()
+
+    for poly in mesh.polygons:
+        for loop_index in poly.loop_indices:
+            vcol_layer.data[loop_index].color = color
+
+#example usage
+color = (1.0, 0.0, 0.0)  # pink
+
 for obj_name in new_objects:
     obj = bpy.context.scene.objects[obj_name]
     obj.select = True
     print(obj.name)
     obj.scale = (0.0025, 0.0025, 0.0025)
+    obj.rotation_euler[0] = pi/2
     obj.location.z -= 1.0
+    mat = bpy.data.materials.new('material_1')
+    mat.use_vertex_color_paint = True
+    obj.active_material = mat
 
 bpy.ops.object.lamp_add(type='SUN')
 lamp2 = bpy.data.lamps['Sun']
 lamp2.shadow_method = 'NOSHADOW'
-lamp2.use_specular = False
+lamp2.use_specular = True
 lamp2.energy = 0.8
 
 bpy.ops.object.lamp_add(type='POINT')
@@ -75,7 +102,7 @@ lamp.energy = 0.05
 bpy.data.objects['Point'].rotation_euler = bpy.data.objects['Sun'].rotation_euler
 bpy.data.objects['Point'].rotation_euler[0] += 180
 
-
+bpy.data.worlds["World"].light_settings.use_ambient_occlusion = True
 # bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY')
 # obj.rotation_euler = (radians(176.551), radians(31.157), radians(-225.614))
 # obj.location.x += -0.21237

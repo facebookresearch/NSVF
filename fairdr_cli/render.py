@@ -106,9 +106,6 @@ def _main(args, output_file):
             wps_meter.update(500)
             t.log({'wps': round(wps_meter.avg)})
 
-            if step >= generator.frames:
-                break
-
     # -- output as gif
     timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
     for type in generator.output_type:

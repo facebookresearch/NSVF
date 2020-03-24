@@ -88,47 +88,48 @@ class NeuralRenderer(object):
         rgb_path = tempfile.mkdtemp()
         image_names = []
         sample, step = sample
-
         for shape in range(sample['shape'].size(0)):
-            logger.info("rendering frames: {}".format(step))
-            ray_start, ray_dir, inv_RT = zip(*[
-                self.generate_rays(k, sample['intrinsics'][shape])
-                for k in range(step, step + self.beam)
-            ])
+            max_step = step + self.frames
+            while step < max_step:
+                next_step = min(step + self.beam, max_step)
+                logger.info("rendering frames: {}".format(step))
+                ray_start, ray_dir, inv_RT = zip(*[
+                    self.generate_rays(k, sample['intrinsics'][shape])
+                    for k in range(step, next_step)
+                ])
         
-            voxels, points = sample.get('voxels', None), sample.get('points', None)
-            _sample = {
-                'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
-                'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
-                'extrinsics': torch.stack(inv_RT, 0).unsqueeze(0),
-                'shape': sample['shape'][shape:shape+1],
-                'view': torch.arange(
-                    step, min(step + self.beam, self.frames), 
-                    device=sample['shape'].device).unsqueeze(0),
-                'voxels': voxels[shape:shape+1].clone() if voxels is not None else None,
-                'points': points[shape:shape+1].clone() if points is not None else None,
-                'raymarching_steps': self.raymarching_steps
-            }
-            _ = model(**_sample)
-            # from fairseq import pdb; pdb.set_trace()
-            for k in range(step, step + self.beam):
-                images = model.visualize(
-                            _sample, None, 0, k-step, 
-                            target_map=False, 
-                            depth_map=('depth' in self.output_type),
-                            normal_map=('normal' in self.output_type),
-                            hit_map=True)
-                rgb_name = "{:04d}".format(k)
-                
-                for key in images:
-                    type = key.split('/')[0]
-                    if type in self.output_type:
-                        image = images[key].permute(2, 0, 1) \
-                            if images[key].dim() == 3 else torch.stack(3*[images[key]], 0)
-                        image_name = "{}/{}_{}.png".format(rgb_path, type, rgb_name)
-                        save_image(image, image_name, format=None)
-                        image_names.append(image_name)
-            step = step + self.beam
-        
+                voxels, points = sample.get('voxels', None), sample.get('points', None)
+                _sample = {
+                    'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
+                    'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
+                    'extrinsics': torch.stack(inv_RT, 0).unsqueeze(0),
+                    'shape': sample['shape'][shape:shape+1],
+                    'view': torch.arange(
+                        step, next_step, 
+                        device=sample['shape'].device).unsqueeze(0),
+                    'voxels': voxels[shape:shape+1].clone() if voxels is not None else None,
+                    'points': points[shape:shape+1].clone() if points is not None else None,
+                    'raymarching_steps': self.raymarching_steps
+                }
+                _ = model(**_sample)
+            
+                for k in range(step, next_step):
+                    images = model.visualize(
+                                _sample, None, 0, k-step, 
+                                target_map=False, 
+                                depth_map=('depth' in self.output_type),
+                                normal_map=('normal' in self.output_type),
+                                hit_map=True)
+                    rgb_name = "{:04d}".format(k)
+                    
+                    for key in images:
+                        type = key.split('/')[0]
+                        if type in self.output_type:
+                            image = images[key].permute(2, 0, 1) \
+                                if images[key].dim() == 3 else torch.stack(3*[images[key]], 0)
+                            image_name = "{}/{}_{}.png".format(rgb_path, type, rgb_name)
+                            save_image(image, image_name, format=None)
+                            image_names.append(image_name)
+                step = next_step
         return step, image_names
 

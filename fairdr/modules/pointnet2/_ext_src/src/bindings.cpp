@@ -24,4 +24,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("group_points_grad", &group_points_grad);
 
   m.def("ball_intersect", &ball_intersect);
+  m.def("aabb_intersect", &aabb_intersect);
 }
