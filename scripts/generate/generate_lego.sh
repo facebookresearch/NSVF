@@ -29,7 +29,7 @@ python render.py ${DATASET} \
     --render-num-frames 120 \
     --render-resolution 400 \
     --render-path-args "{'radius': 3.5, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}" \
-    --render-output /private/home/jgu/data/test_images/output2 \
+    --render-output /private/home/jgu/data/test_images/output3 \
     --render-output-types "rgb" "depth" "normal"  \
 #  --render-path-args "{'radius': 3.5, 'h': 0.0, 'axis': 'z'}" \
 #     --render-up-vector "(0,0,-1)" \

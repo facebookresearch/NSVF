@@ -53,6 +53,8 @@ class SingleObjRenderingTask(FairseqTask):
                             help="width for the squared image. downsampled from the original.")       
         parser.add_argument("--min-color", choices=(0, -1), default=-1, type=int,
                             help="RGB range used in the model. conventionally used -1 ~ 1")
+        parser.add_argument("--virtual-epoch-steps", type=int, default=None,
+                            help="virtual epoch used in Infinite Dataset. if None, set max-update")
 
     def __init__(self, args):
         super().__init__(args)
@@ -114,7 +116,10 @@ class SingleObjRenderingTask(FairseqTask):
             )
 
             if split == 'train':   # infinite sampler
-                total_num_models = self.args.max_update * self.args.distributed_world_size * self.args.max_sentences
+                max_step = getattr(self.args, "virtual_epoch_steps", None)
+                if max_step is None:
+                    max_step = self.args.max_update
+                total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
                 self.datasets[split] = InfiniteDataset(
                     self.datasets[split], total_num_models)
 

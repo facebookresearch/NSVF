@@ -17,7 +17,7 @@ parser.add_argument('--extent', type=float, default=5.0)
 parser.add_argument('--marching_cube', action='store_true')
 parser.add_argument('--downsample', type=float, default=4.0)
 parser.add_argument('--load_mask', action='store_true')
-parser.add_argument('--bounding-box', action='store_true')
+parser.add_argument('--boundingbox', action='store_true')
 args = parser.parse_args()
 
 
@@ -129,6 +129,21 @@ def voxelize_pcd(verts, voxel_size, fname):
     o3d.io.write_point_cloud(fname, pcd)
     return ovoxels
 
+def voxelize_bbx(verts, voxel_size, fname):
+    xyz_min, xyz_max = verts.min(0) - voxd * .5, verts.max(0) + voxel_size * .5
+    x, y, z = np.mgrid[
+        range(int((xyz_max[0] - xyz_min[0]) / voxel_size) + 1),
+        range(int((xyz_max[1] - xyz_min[1]) / voxel_size) + 1),
+        range(int((xyz_max[2] - xyz_min[2]) / voxel_size) + 1)
+    ]
+    ovoxels = np.vstack((x.flatten(), y.flatten(), z.flatten())).astype(np.float32)
+    ovoxels = ovoxels.T
+    ovoxels = ovoxels * voxel_size + xyz_min[None, :]
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(ovoxels)
+    o3d.io.write_point_cloud(fname, pcd)
+    return ovoxels
 
 if not args.marching_cube:
     ox, oy, oz = (occupancy >= th).nonzero()        # sparse voxel indexs
@@ -143,7 +158,11 @@ else:
     save_mesh(verts, faces, normals, os.path.join(DIR, 'visualhull_mc.ply'))
     # verts = downsample_pcd(verts, voxd, os.path.join(DIR, 'visualhull_down.ply'))
 
-ovoxels = voxelize_pcd(verts, voxd, os.path.join(DIR, 'visualhull_voxel{}.ply'.format(voxd)))
+if args.boundingbox:
+    ovoxels = voxelize_bbx(verts, voxd, os.path.join(DIR, 'visualhull_bbox{}.ply'.format(voxd)))
+else:
+    ovoxels = voxelize_pcd(verts, voxd, os.path.join(DIR, 'visualhull_voxel{}.ply'.format(voxd)))
+
 o = np.floor(ovoxels / voxd).astype(int)
 ox, oy, oz = o[:, 0], o[:, 1], o[:, 2]
 

@@ -97,12 +97,14 @@ class DiffusionSpecularField(nn.Module):
         # BUG: my default rgb is -1 ~ 1
         if self.training and self.dropout > 0:
             cs = cs * (cs.new_ones(cs.size(0)).uniform_() > self.dropout).type_as(cs)[:, None]
-        
+        else:
+            cs = cs * (1 - self.dropout)
+
         if getattr(self.args, "min_color", -1) == -1:
             return  (cd + cs) * 2 - 1  # 0 ~ 1 --> -1 ~ 1
         return cd + cs
-      
-        
+
+
 # bash scripts/generate/generate_lego.sh $MODEL bulldozer6 2 &
 class OccupancyField(ImplicitField):
     """

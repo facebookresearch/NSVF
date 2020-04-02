@@ -70,7 +70,7 @@ class NeuralRenderer(object):
         # inv_RT = torch.from_numpy(RT).to(intrinsics.device, intrinsics.dtype).inverse()
 
         _, _, cx, cy = geometry.parse_intrinsics(intrinsics)
-        hw, hh = 512, 378 # int(cx), int(cy)
+        hw, hh = int(cx), int(cy)
         # from fairseq import pdb; pdb.set_trace()
         v, u = torch.meshgrid([torch.arange(2 * hh), torch.arange(2 * hw)])
         uv = torch.stack([u, v], 0).type_as(intrinsics)
