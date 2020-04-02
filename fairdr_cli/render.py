@@ -12,12 +12,12 @@ import logging
 import math
 import os
 import sys
-
+import time
 import torch
+import imageio
 
 from fairseq import checkpoint_utils, progress_bar, tasks, utils
 from fairseq.meters import StopwatchMeter, TimeMeter
-
 from fairdr import options
 
 
@@ -90,21 +90,27 @@ def _main(args, output_file):
     # Initialize generator
     gen_timer = StopwatchMeter()
     generator = task.build_generator(args)
+    
 
+    output_files, step= [], 0
     with progress_bar.build_progress_bar(args, itr) as t:
         wps_meter = TimeMeter()
-        for sample in t:
-            
+        for sample in t:        
             sample = utils.move_to_cuda(sample) if use_cuda else sample
-            
             gen_timer.start()
-            hypos = task.inference_step(generator, models, sample)
-            # num_generated_tokens = sum(len(h[0]['tokens']) for h in hypos)
+            
+            step, _output_files = task.inference_step(generator, models, [sample, step])
+            output_files += _output_files
+
             gen_timer.stop(500)
             wps_meter.update(500)
             t.log({'wps': round(wps_meter.avg)})
-            # num_sentences += sample['nsentences']
 
+    # -- output as gif
+    timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
+    for type in generator.output_type:
+        images = [imageio.imread(file_path) for file_path in output_files if type in file_path] 
+        imageio.mimsave('{}/{}_{}.gif'.format(generator.output_dir, type, timestamp), images, fps=args.render_save_fps)
 
 def cli_main():
     parser = options.get_rendering_parser()

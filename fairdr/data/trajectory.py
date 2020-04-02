@@ -18,5 +18,10 @@ def get_trajectory(name):
 
 
 @register_traj('circle')
-def circle(radius=3.5, y=0.0):
-    return lambda t: [radius * np.cos(t), radius * np.sin(t), y]
+def circle(radius=3.5, h=0.0, axis='z', t0=0, r=1):
+    if axis == 'z':
+        return lambda t: [radius * np.cos(r * t+t0), radius * np.sin(r * t+t0), h]
+    elif axis == 'y':
+        return lambda t: [radius * np.cos(r * t+t0), h, radius * np.sin(r * t+t0)]
+    else:
+        return lambda t: [h, radius * np.cos(r * t+t0), radius * np.sin(r * t+t0)]

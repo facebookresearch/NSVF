@@ -13,8 +13,9 @@ import os
 from fairdr.modules.pointnet2.pointnet2_modules import (
     PointnetSAModuleVotes, PointnetFPModule
 )
+from fairdr.data.data_utils import load_matrix, unique_points
 from fairdr.modules.pointnet2.pointnet2_utils import furthest_point_sample
-from fairdr.modules.linear import Linear, Embedding
+from fairdr.modules.linear import Linear, Embedding, PosEmbLinear
 from fairseq import options, utils
 from fairseq.modules import (
     SinusoidalPositionalEmbedding,
@@ -31,20 +32,74 @@ class Backbone(nn.Module):
         super().__init__()
         self.args = args
 
-        self.relative_position = getattr(args, "relative_position", False)
-        if not self.relative_position:
-            self.dummy_feature = Embedding(1, self.feature_dim, None)
-
     def forward(self, pointcloud, add_dummy=False):
         feats, xyz = self._forward(pointcloud)
-        if add_dummy and (not self.relative_position):
-            dummy = self.dummy_feature.weight.unsqueeze(1)
-            feats = torch.cat([dummy.expand(feats.size(0), 1, feats.size(2)), feats], 1)
         return feats, xyz
 
     def _forward(self, pointcloud):
         raise NotImplementedError
+    
+    def get_features(self, x):
+        return x    
 
+class QuantizedEmbeddingBackbone(Backbone):
+    """
+    Embeddings on fixed voxel models
+    """
+    def __init__(self, args):
+        super().__init__(args)
+        self.embed_dim = args.quantized_embed_dim
+        self.quantized_input_shuffle = getattr(args, "quantized_input_shuffle", True)
+        self.sample_points = getattr(args, 'quantized_subsampling_points', None)
+        self.voxel_path = args.quantized_voxel_path if args.quantized_voxel_path is not None \
+            else os.path.join(args.data, 'voxel.txt')
+        assert os.path.exists(self.voxel_path), "voxel file does not exist"
+        self.voxel_size = args.ball_radius
+        self.voxel_vertex = getattr(args, 'quantized_voxel_vertex', False)
+
+        keys = torch.from_numpy(load_matrix(self.voxel_path)[:, 3:] )
+        if self.voxel_vertex:
+            offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
+                              [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]], 
+                            dtype=keys.dtype) * (self.voxel_size * 0.5)
+            keys = keys.unsqueeze(1) + offset.unsqueeze(0)
+            keys = unique_points(keys.reshape(-1, 3))
+            self.offset = nn.Parameter(offset, requires_grad=False)
+        else:
+            self.offset = None
+
+        self.keys = nn.Parameter(keys, requires_grad=False)
+        self.values = Embedding(self.keys.size(0), self.embed_dim, None)
+
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument('--quantized-subsampling-points', type=int, metavar='N',
+                            help='if not set (None), do not perform subsampling.')
+        parser.add_argument('--quantized-voxel-path', type=str,
+                            help="path to a pre-computed voxels.")
+        parser.add_argument('--quantized-embed-dim', type=int, metavar='N', help="embedding size")
+        parser.add_argument('--quantized-input-shuffle', action='store_true')
+        parser.add_argument('--quantized-voxel-vertex', action='store_true', help='if set, embeddings are set in the corners')
+
+    def _forward(self, pointcloud: torch.cuda.FloatTensor, add_dummy=False):
+        if self.sample_points > 0:
+            assert pointcloud.size(1) >= self.sample_points, "need more points"
+            if self.training and self.quantized_input_shuffle:
+                rand_inds = pointcloud.new_zeros(*pointcloud.size()[:-1]).uniform_().sort(1)[1]
+                pointcloud = pointcloud.gather(1, rand_inds.unsqueeze(2).expand_as(pointcloud))
+            pointcloud = pointcloud.gather(
+                1, furthest_point_sample(
+                    pointcloud, self.sample_points).unsqueeze(2).expand(
+                        pointcloud.size(0), self.sample_points, 3).long())
+        _, ids = ((pointcloud[:, :, None, :] - self.keys[None, None, :, :]) ** 2).sum(-1).min(-1)
+        return ids.unsqueeze(-1), pointcloud
+
+    def get_features(self, x):
+        return self.values(x)
+
+    @property
+    def feature_dim(self):
+        return self.embed_dim
 
 class Pointnet2Backbone(Backbone):
     """
@@ -184,6 +239,7 @@ class TransformerBackbone(Backbone):
         self.sample_points = getattr(args, 'subsampling_points', None)
         self.furthest_sampling = getattr(args, 'furthest_sampling', True)
         self.input_shuffle = getattr(args, 'transformer_input_shuffle', False)
+        self.transformer_pos_embed = getattr(args, 'transformer_pos_embed', False)
         self.layers = nn.ModuleList([])
         self.layers.extend(
             [TransformerEncoderLayer(args) for i in range(args.encoder_layers)]
@@ -191,7 +247,11 @@ class TransformerBackbone(Backbone):
         self.num_layers = len(self.layers)
         
         embed_dim = self.args.encoder_embed_dim
-        self.point_embed = Linear(3, embed_dim)
+        if not self.transformer_pos_embed:
+            self.point_embed = Linear(3, embed_dim)
+        else:
+            self.point_embed = PosEmbLinear(3, embed_dim)
+        
         if args.encoder_normalize_before:
             self.layer_norm = LayerNorm(embed_dim)
         else:
@@ -210,6 +270,9 @@ class TransformerBackbone(Backbone):
                             help='if enabled, use furthest sampling instead of random sampling')
         parser.add_argument('--transformer-input-shuffle', action='store_true',
                             help='if use subsampling, do we need to shuffle the points?')
+        parser.add_argument("--transformer-pos-embed", action='store_true', 
+                            help='use positional embedding instead of linear projection')
+
         parser.add_argument('--activation-fn',
                             choices=utils.get_available_activation_fns(),
                             help='activation function to use')

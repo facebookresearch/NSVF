@@ -12,6 +12,7 @@ import time
 import torch
 import numpy as np
 import logging
+
 from torchvision.utils import save_image
 from fairdr.data import trajectory, geometry, data_utils
 
@@ -27,7 +28,9 @@ class NeuralRenderer(object):
                 speed=5,
                 raymarching_steps=None,
                 path_gen=None, 
-                beam=10, 
+                beam=10,
+                at=(0,0,0),
+                up=(0,1,0),
                 output_dir=None,
                 output_type=None):
 
@@ -39,7 +42,9 @@ class NeuralRenderer(object):
         self.beam = beam
         self.output_dir = output_dir
         self.output_type = output_type
-
+        self.at = at
+        self.up = up
+    
         if self.path_gen is None:
             self.path_gen = trajectory.circle()
         if not os.path.exists(self.output_dir):
@@ -50,7 +55,7 @@ class NeuralRenderer(object):
     def generate_rays(self, t, intrinsics):
         cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
                     device=intrinsics.device, dtype=intrinsics.dtype)
-        cam_rot = geometry.look_at_rotation(cam_pos, inverse=True, cv=True)
+        cam_rot = geometry.look_at_rotation(cam_pos, at=self.at, up=self.up, inverse=True, cv=True)
         
         inv_RT = cam_pos.new_zeros(4, 4)
         inv_RT[:3, :3] = cam_rot
@@ -65,10 +70,12 @@ class NeuralRenderer(object):
         # inv_RT = torch.from_numpy(RT).to(intrinsics.device, intrinsics.dtype).inverse()
 
         _, _, cx, cy = geometry.parse_intrinsics(intrinsics)
-        cx, cy = int(cx), int(cy)
-        v, u = torch.meshgrid([torch.arange(2 * cy), torch.arange(2 * cx)])
+        hw, hh = int(cx), int(cy)
+        # from fairseq import pdb; pdb.set_trace()
+        v, u = torch.meshgrid([torch.arange(2 * hh), torch.arange(2 * hw)])
         uv = torch.stack([u, v], 0).type_as(intrinsics)
-        uv = uv[:, ::2*cy//self.resolution, ::2*cx//self.resolution]
+        ratio = 2 * hw // self.resolution
+        uv = uv[:, ::ratio, ::ratio]
         uv = uv.reshape(2, -1)
     
         ray_start = inv_RT[:3, 3]
@@ -79,52 +86,53 @@ class NeuralRenderer(object):
     def generate(self, models, sample, **kwargs):
         model = models[0]
         model.eval()
-        from fairseq import pdb; pdb.set_trace()
+        
         rgb_path = tempfile.mkdtemp()
+        image_names = []
+        sample, step = sample
         for shape in range(sample['shape'].size(0)):
-            for step in range(0, self.frames, self.beam):
+            max_step = step + self.frames
+            while step < max_step:
+                next_step = min(step + self.beam, max_step)
                 logger.info("rendering frames: {}".format(step))
                 ray_start, ray_dir, inv_RT = zip(*[
                     self.generate_rays(k, sample['intrinsics'][shape])
-                    for k in range(step, min(self.frames, step + self.beam))
+                    for k in range(step, next_step)
                 ])
-
+        
+                voxels, points = sample.get('voxels', None), sample.get('points', None)
                 _sample = {
                     'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
                     'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
                     'extrinsics': torch.stack(inv_RT, 0).unsqueeze(0),
-                    'shape': sample['shape'],
+                    'shape': sample['shape'][shape:shape+1],
                     'view': torch.arange(
-                        step, min(step + self.beam, self.frames), 
+                        step, next_step, 
                         device=sample['shape'].device).unsqueeze(0),
-                    'voxels': sample.get('voxels', None).clone(),
-                    'points': sample.get('points', None).clone(),
-                    'raymarching_steps': self.raymarching_steps
+                    'voxels': voxels[shape:shape+1].clone() if voxels is not None else None,
+                    'points': points[shape:shape+1].clone() if points is not None else None,
+                    'raymarching_steps': self.raymarching_steps,
+                    'width': sample['shape'].new_ones(1, next_step-step) * self.resolution
                 }
                 _ = model(**_sample)
-
-                for k in range(step, min(self.frames, step + self.beam)):
+            
+                for k in range(step, next_step):
                     images = model.visualize(
-                                _sample, None, shape, k-step, 
+                                _sample, None, 0, k-step, 
                                 target_map=False, 
                                 depth_map=('depth' in self.output_type),
                                 normal_map=('normal' in self.output_type),
                                 hit_map=True)
-                    rgb_name = "{}_{:04d}".format(shape, k)
+                    rgb_name = "{:04d}".format(k)
                     
                     for key in images:
                         type = key.split('/')[0]
                         if type in self.output_type:
                             image = images[key].permute(2, 0, 1) \
                                 if images[key].dim() == 3 else torch.stack(3*[images[key]], 0)
-                            
-                            save_image(image, "{}/{}_{}.png".format(rgb_path, type, rgb_name), format=None)
-            
-            # -- output as gif
-            timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
-            if self.raymarching_steps is not None:
-                timestamp = '_ray{}_'.format(self.raymarching_steps) + timestamp
-                
-            for type in self.output_type:
-                os.system("ffmpeg -framerate 60 -i {}/{}_{}_%04d.png -y {}/{}_{}.gif".format(
-                    rgb_path, type, shape, self.output_dir, type, timestamp))
+                            image_name = "{}/{}_{}.png".format(rgb_path, type, rgb_name)
+                            save_image(image, image_name, format=None)
+                            image_names.append(image_name)
+                step = next_step
+        return step, image_names
+

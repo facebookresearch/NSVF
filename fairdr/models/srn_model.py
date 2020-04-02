@@ -163,10 +163,11 @@ class SRNModel(BaseModel):
 
         if normal_map:
             normals = compute_normal_map(
-                sample['ray_start'][shape, view],
-                sample['ray_dir'][shape, view],
-                output['depths'][shape, view],
-                sample['extrinsics'][shape, view].inverse())
+                sample['ray_start'][shape, view].float(),
+                sample['ray_dir'][shape, view].float(),
+                output['depths'][shape, view].float(),
+                sample['extrinsics'][shape, view].float().inverse(),
+                sample['width'][shape, view])
             images['normal/{}:HWC'.format(img_id)] = {
                 'img': normals, 'min_val': -1, 'max_val': 1}
 
@@ -176,9 +177,9 @@ class SRNModel(BaseModel):
                 reduction='none').sum(-1)
             images['errors/{}:HW'.format(img_id)] = {
                 'img': errors, 'min_val': errors.min(), 'max_val': errors.max()}
-
+        
         images = {
-            tag: recover_image(**images[tag]) 
+            tag: recover_image(width=sample['width'][shape, view], **images[tag]) 
                 for tag in images if images[tag] is not None
         }
         return images
@@ -237,15 +238,15 @@ class SRNRaymarcher(Raymarcher):
         self.raymarcher = IterativeSphereTracer(args)
         self.implicit = args.implicit_gradient
 
-    def _forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4):
+    def _forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4, min=None, max=None):
         return self.raymarcher.search(
             sdf_fn,
             ray_start.expand_as(ray_dir),
-            ray_dir, state=state, steps=steps, min=0.05)
+            ray_dir, state=state, steps=steps, min=min, max=None)
 
-    def forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4):
+    def forward(self, sdf_fn, ray_start, ray_dir, state=None, steps=4, min=0.05, max=None):
         if not self.implicit or not self.training:
-            return self._forward(sdf_fn, ray_start, ray_dir, state, steps)
+            return self._forward(sdf_fn, ray_start, ray_dir, state, steps, min, max)
         
         assert not self.args.lstm_sdf, "implicit gradient does not support LSTM."
         with torch.no_grad():

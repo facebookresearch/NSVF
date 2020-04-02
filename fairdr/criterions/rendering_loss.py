@@ -75,6 +75,8 @@ class RenderingCriterion(FairseqCriterion):
                 metrics.log_scalar(w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
             elif '_weight' in w:
                 metrics.log_scalar('w_' + w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
+            elif '_acc' in w:
+                metrics.log_scalar('a_' + w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
             elif w == 'loss':
                 metrics.log_scalar('loss', summed_logging_outputs['loss'] / sample_size, sample_size, priority=0, round=3)
 
@@ -112,14 +114,22 @@ class SRNLossCriterion(RenderingCriterion):
                             help="""if set, use tuple to set (final_ratio, steps).
                                     For instance, (0, 30000)    
                                 """)
+        parser.add_argument('--freespace-weight', type=float, default=0.0)
+        parser.add_argument('--occupancy-weight', type=float, default=0.0)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
         parser.add_argument('--error-map', action='store_true')
+        parser.add_argument('--no-loss-if-predicted', action='store_true',
+                            help="if set, loss is only on the predicted pixels.")
+        parser.add_argument('--max-margin-freespace', type=float, default=None,
+                            help="instead of binary classification. use margin-loss")
+        parser.add_argument('--no-background-loss', action='store_true',
+                            help="do not compute RGB-loss on the background.")
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         alpha  = (sample['alpha'] > 0.5)
-        masks  = torch.ones_like(alpha)
+        masks = alpha.clone() if self.args.no_background_loss else torch.ones_like(alpha)
         
         losses, other_logs = {}, {}
         rgb_loss = utils.rgb_loss(
@@ -128,8 +138,9 @@ class SRNLossCriterion(RenderingCriterion):
         losses['rgb_loss'] = (rgb_loss, self.args.rgb_weight)
 
         if self.args.reg_weight > 0:
+            min_depths = net_output.get('min_depths', 0.0)
             reg_loss = utils.depth_regularization_loss(
-                net_output['depths'])
+                net_output['depths'], min_depths)
             losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
 
         if self.args.depth_weight > 0:
@@ -151,6 +162,34 @@ class SRNLossCriterion(RenderingCriterion):
 
             losses['depth_loss'] = (depth_loss, depth_weight)
 
+        if (self.args.freespace_weight > 0) and (self.args.occupancy_weight > 0):
+            freespace_mask = (1 - sample['mask']).bool() if sample['mask'] is not None else ~alpha
+            occupancy_mask = sample['mask'].bool() if sample['mask'] is not None else alpha
+            # if self.args.no_loss_if_predicted:
+            #     freespace_mask = freespace_mask & (net_output['missed'] < 0)
+            if self.args.max_margin_freespace is None:
+                freespace_pred = 1 - torch.sigmoid(net_output['missed'] / 0.1)
+                freespace_loss = utils.space_loss(freespace_pred, freespace_mask, sum=False)
+                
+                occupancy_pred = 1 - torch.sigmoid(net_output['missed'] / 0.1)
+                if self.args.no_loss_if_predicted:
+                    occupancy_pred = occupancy_pred.masked_fill(net_output['missed'] < 0, 1.0)
+                occupancy_loss = utils.occupancy_loss(occupancy_pred, occupancy_mask, sum=False)
+            
+            else:
+                margin = self.args.max_margin_freespace
+                assert self.args.no_loss_if_predicted, "only support no loss if preidcted"
+
+                freespace_loss, occupancy_loss = utils.maxmargin_space_loss(
+                    net_output['missed'], freespace_mask, margin, sum=False
+                )
+
+            losses['freespace_loss'] = (freespace_loss, self.args.freespace_weight)
+            losses['occupancy_loss'] = (occupancy_loss, self.args.occupancy_weight)    
+     
+            other_logs['freespace_acc'] = ((net_output['missed'] > 0)[freespace_mask]).float().mean()
+            other_logs['occupancy_acc'] = ((net_output['missed'] < 0)[occupancy_mask]).float().mean()
+
         if self.args.gp_weight > 0:
             losses['grd_loss'] = (net_output['grad_penalty'], self.args.gp_weight)
 
@@ -166,8 +205,8 @@ class SRNLossCriterion(RenderingCriterion):
 
             def transform(x):
                 S, V, D, _ = x.size()
-                L = int(math.sqrt(D))
-                x = x.transpose(2, 3).view(S * V, 3, L, L)
+                H, W = sample['height'][0, 0], sample['width'][0, 0]
+                x = x.transpose(2, 3).view(S * V, 3, H, W)
                 return x / 2 + 0.5
 
             # vgg_ratio = target.numel() / net_output['predicts'].numel()

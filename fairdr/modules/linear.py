@@ -3,6 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -23,6 +25,30 @@ def Embedding(num_embeddings, embedding_dim, padding_idx=None):
     nn.init.normal_(m.weight, mean=0, std=embedding_dim ** -0.5)
     return m
     
+
+class PosEmbLinear(nn.Module):
+
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        assert out_dim % (2 * in_dim) == 0, "dimension must be dividable"
+        half_dim = out_dim // 2 // in_dim
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float) * -emb)
+        
+        self.emb = nn.Parameter(emb, requires_grad=False)
+        self.linear = Linear(out_dim, out_dim)
+        self.scale = 1024
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+
+    def forward(self, x):
+        assert x.size(-1) == self.in_dim, "size must match"
+        sizes = x.size()
+        x = self.scale * x.unsqueeze(-1) @ self.emb.unsqueeze(0)
+        x = torch.cat([torch.sin(x), torch.cos(x)], dim=-1)
+        x = x.view(*sizes[:-1], self.out_dim)
+        return self.linear(x)
+
 
 class FCLayer(nn.Module):
     """

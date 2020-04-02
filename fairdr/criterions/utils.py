@@ -41,8 +41,25 @@ def occupancy_loss(occupancy, masks, sum=False):
     return loss.mean() if not sum else loss.sum()
 
 
-def depth_regularization_loss(depths, sum=False):
-    loss = torch.min(depths, torch.zeros_like(depths)) ** 2
+def maxmargin_space_loss(output, masks, margin, sum=False):
+    # freespace loss
+    if masks.sum() == 0:
+        freespace_loss = output.new_zeros(1)
+    else:
+        freespace_loss = torch.relu(margin - output[masks])
+
+    if (~masks).sum() == 0:
+        occupancy_loss = output.new_zeros(1)
+    else:
+        occupancy_loss = torch.relu(output[~masks])
+
+    if sum:
+        return freespace_loss.sum(), occupancy_loss.sum()
+    return freespace_loss.mean(), occupancy_loss.mean()
+
+
+def depth_regularization_loss(depths, min_depths=0.0, sum=False):
+    loss = torch.min(depths - min_depths, torch.zeros_like(depths)) ** 2
     return loss.mean() if not sum else loss.sum()
 
 

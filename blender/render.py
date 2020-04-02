@@ -41,18 +41,42 @@ else:
 if not os.path.exists(render_root):
     os.makedirs(render_root)
 
+prior_objects = [object.name for object in bpy.context.scene.objects]
+# do your stl imports here
+
 bpy.context.scene.frame_set(args.frame_id)
 bpy.ops.import_scene.obj(filepath=obj_file)
 
+new_current_objects = [object.name for object in bpy.context.scene.objects]
+new_objects = set(new_current_objects)-set(prior_objects) 
 # obj_name = Path(obj_file).stem
-# print(obj_name)
 # print([p for p in bpy.data.objects])
-# # hard-coded transformation for imported objects (NO CHANGE)
-# obj = bpy.data.objects[obj_name]
-# obj.select = True
+# # # hard-coded transformation for imported objects (NO CHANGE)
+
+for obj_name in new_objects:
+    obj = bpy.context.scene.objects[obj_name]
+    obj.select = True
+    print(obj.name)
+    obj.scale = (0.0025, 0.0025, 0.0025)
+    obj.location.z -= 1.0
+
+bpy.ops.object.lamp_add(type='SUN')
+lamp2 = bpy.data.lamps['Sun']
+lamp2.shadow_method = 'NOSHADOW'
+lamp2.use_specular = False
+lamp2.energy = 0.8
+
+bpy.ops.object.lamp_add(type='POINT')
+print([object.name for object in bpy.context.scene.objects])
+lamp = bpy.data.lamps['Point']
+# lamp2.shadow_method = 'NOSHADOW'
+lamp.use_specular = False
+lamp.energy = 0.05
+bpy.data.objects['Point'].rotation_euler = bpy.data.objects['Sun'].rotation_euler
+bpy.data.objects['Point'].rotation_euler[0] += 180
+
 
 # bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY')
-# obj.scale = (0.001, 0.001, 0.001)
 # obj.rotation_euler = (radians(176.551), radians(31.157), radians(-225.614))
 # obj.location.x += -0.21237
 # obj.location.y += 0.85433
@@ -62,9 +86,9 @@ bpy.ops.import_scene.obj(filepath=obj_file)
 #obj.location.z += 2.08499
 
 # Iterate over all members of the material struct
-for item in bpy.data.materials:
-    #Enable "use_shadeless"
-    item.use_shadeless = True
+# for item in bpy.data.materials:
+#     #Enable "use_shadeless"
+#     item.use_shadeless = True
 
 scene = bpy.context.scene
 scene.render.alpha_mode = 'TRANSPARENT'

@@ -7,6 +7,7 @@
 #include "group_points.h"
 #include "interpolate.h"
 #include "sampling.h"
+#include "intersect.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("gather_points", &gather_points);
@@ -21,4 +22,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("ball_nearest", &ball_nearest);
   m.def("group_points", &group_points);
   m.def("group_points_grad", &group_points_grad);
+
+  m.def("ball_intersect", &ball_intersect);
+  m.def("aabb_intersect", &aabb_intersect);
+  m.def("uniform_ray_sampling", &uniform_ray_sampling);
 }

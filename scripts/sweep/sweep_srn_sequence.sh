@@ -1,5 +1,6 @@
 ROOT=/private/home/jgu/data/shapenet/maria
-DATA=maria_seq_small
+# DATA=maria_seq_small
+DATA=maria_seq
 WORK=/checkpoint/jgu/space/neuralrendering/debug_srn
 mkdir -p ${WORK}
 
@@ -11,7 +12,7 @@ python fb_sweep/sweep_neural_rendering.py \
     --grid "srn_debug_seq2" \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
-    --tensorboard-logdir ${WORK}/tensorboard/transformer_seq_small \
+    --tensorboard-logdir ${WORK}/tensorboard/transformer_seq \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
     --prefix ${DATA}_Transformerv2 \

@@ -12,6 +12,8 @@ from fairdr.data.geometry import ray
 from torch.autograd import grad
 
 
+BG_DEPTH = 5.0
+MAX_DEPTH = 10000.0
 class UniformSearchRayMarcher(nn.Module):
 
     """
@@ -49,7 +51,11 @@ class IterativeSphereTracer(nn.Module):
         self.use_raystart = getattr(args, "use_ray_start", False)
 
     def search(self, signed_distance_fn, start, ray_dir, state=None, min=0.05, max=None, steps=4):
-        depths = ray_dir.new_ones(*ray_dir.size()[:-1], requires_grad=True) * min
+        if not isinstance(min, torch.Tensor):
+            depths = ray_dir.new_ones(*ray_dir.size()[:-1], requires_grad=True) * min
+        else:
+            depths = min
+        
         states = []
         if self.use_raystart:
             _, state = signed_distance_fn(start, state=state)  # camera as initial state.
@@ -60,4 +66,18 @@ class IterativeSphereTracer(nn.Module):
             depths = depths + delta
             states.append((query, delta))
 
+        if max is not None:
+            missed = (depths > max).float()
+            depths = depths * (1 - missed) + missed * BG_DEPTH
         return depths, [q for q in zip(*states)]
+
+
+class VolumeRenderer(nn.Module):
+
+    def __init__(self, args):
+        # TODO: fix the auguments
+        super().__init__()
+        self.args = args
+    
+    def search(self,):
+        pass

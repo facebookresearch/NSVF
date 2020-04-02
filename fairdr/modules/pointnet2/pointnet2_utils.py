@@ -452,3 +452,103 @@ class GroupAll(nn.Module):
             return new_features, grouped_xyz
         else:
             return new_features
+
+
+class BallRayIntersect(Function):
+    @staticmethod
+    def forward(ctx, radius, n_max, points, ray_start, ray_dir):
+        r"""
+
+        Parameters
+        ----------
+        radius : float
+            radius of the balls
+        n_max: int
+            maximum number of points to intersect.
+        xyz : torch.Tensor
+            (B, N, 3) xyz coordinates of the features
+        new_xyz : torch.Tensor
+            (B, npoint, 3) centers of the ball query
+
+        Returns
+        -------
+        torch.Tensor
+            (B, npoint) tensor with the nearest indicies of the features that form the query balls
+        """
+        inds, min_depth, max_depth = _ext.ball_intersect(
+            ray_start.float(), ray_dir.float(), points.float(), radius, n_max)
+        min_depth = min_depth.type_as(ray_start)
+        max_depth = max_depth.type_as(ray_start)
+
+        ctx.mark_non_differentiable(inds)
+        ctx.mark_non_differentiable(min_depth)
+        ctx.mark_non_differentiable(max_depth)
+        return inds, min_depth, max_depth
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None
+
+ball_ray_intersect = BallRayIntersect.apply
+
+
+class AABBRayIntersect(Function):
+    @staticmethod
+    def forward(ctx, voxelsize, n_max, points, ray_start, ray_dir):
+        r"""
+
+        Parameters
+        ----------
+        radius : float
+            radius of the balls
+        n_max: int
+            maximum number of points to intersect.
+        xyz : torch.Tensor
+            (B, N, 3) xyz coordinates of the features
+        new_xyz : torch.Tensor
+            (B, npoint, 3) centers of the ball query
+
+        Returns
+        -------
+        torch.Tensor
+            (B, npoint) tensor with the nearest indicies of the features that form the query balls
+        """
+        inds, min_depth, max_depth = _ext.aabb_intersect(
+            ray_start.float(), ray_dir.float(), points.float(), voxelsize, n_max)
+        min_depth = min_depth.type_as(ray_start)
+        max_depth = max_depth.type_as(ray_start)
+        
+        ctx.mark_non_differentiable(inds)
+        ctx.mark_non_differentiable(min_depth)
+        ctx.mark_non_differentiable(max_depth)
+        return inds, min_depth, max_depth
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None
+
+aabb_ray_intersect = AABBRayIntersect.apply
+
+
+class UniformRaySampling(Function):
+    @staticmethod
+    def forward(ctx, step_size, max_steps, pts_idx, min_depth, max_depth, deterministic=False):
+        noise = min_depth.new_zeros(*min_depth.size()[:-1], max_steps)
+        if deterministic:
+            noise += 0.5
+        else:
+            noise = noise.uniform_()
+
+        sampled_idx, sampled_depth, sampled_dists = _ext.uniform_ray_sampling(
+            pts_idx, min_depth.float(), max_depth.float(), noise.float(), step_size, max_steps)
+        sampled_depth = sampled_depth.type_as(min_depth)
+        sampled_dists = sampled_dists.type_as(min_depth)
+        ctx.mark_non_differentiable(sampled_idx)
+        ctx.mark_non_differentiable(sampled_depth)
+        return sampled_idx, sampled_depth, sampled_dists
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None, None
+
+uniform_ray_sampling = UniformRaySampling.apply
