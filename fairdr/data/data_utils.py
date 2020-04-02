@@ -18,24 +18,33 @@ import pandas as pd
 import pylab as plt
 
 
-def load_rgb(path, resolution=None, with_alpha=True, bg_color=-0.8):
+def load_rgb(
+    path, 
+    resolution=None, 
+    with_alpha=True, 
+    bg_color=-0.8,
+    min_rgb=-1):
     if with_alpha:
         img = imageio.imread(path)  # RGB-ALPHA
     else:
         img = imageio.imread(path)[:, :, :3]
 
     img = skimage.img_as_float32(img)
-    img = square_crop_img(img)
-    img_size = img.shape[0]
-
+    # img = square_crop_img(img)
+    H, W, _ = img.shape
+    
     # uv coordinates
-    uv = np.flip(np.mgrid[0: img_size, 0: img_size], axis=0).astype(np.float32)
+    uv = np.flip(np.mgrid[0: H, 0: W], axis=0).astype(np.float32)
     if resolution is not None:
-        img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_NEAREST)
-        uv = uv[:, ::img_size//resolution, ::img_size//resolution]
+        h, w = img.shape[:2]
+        ratio = w // resolution
+        w, h = resolution, int(h / ratio)
+        img = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
+        uv = uv[:, ::ratio, ::ratio]
 
-    img[:, :, :3] -= 0.5
-    img[:, :, :3] *= 2.
+    if min_rgb == -1:  # 0, 1  --> -1, 1
+        img[:, :, :3] -= 0.5
+        img[:, :, :3] *= 2.
 
     # if alpha == 0, make it white (chair)
     img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + bg_color * (1 - img[:, :, 3:])     
@@ -48,7 +57,7 @@ def load_depth(path, resolution=None, depth_plane=5):
         return None
     
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float32)
-    ret,img = cv2.threshold(img, depth_plane, depth_plane, cv2.THRESH_TRUNC)
+    ret, img = cv2.threshold(img, depth_plane, depth_plane, cv2.THRESH_TRUNC)
     if resolution is not None:
         h, w = img.shape[:2]
         w, h = resolution, int(h/float(w)*resolution)
@@ -132,10 +141,10 @@ def load_intrinsics(filepath, resized_width=None, invert_y=False):
     return full_intrinsic
 
 
-def unflatten_img(img):
+def unflatten_img(img, width=512):
     sizes = img.size()
-    side_len = int(math.sqrt(sizes[-1]))
-    return img.reshape(*sizes[:-1], side_len, side_len)
+    height = sizes[-1] // width
+    return img.reshape(*sizes[:-1], height, width)
 
 
 def square_crop_img(img):
@@ -149,12 +158,12 @@ def square_crop_img(img):
     return img
 
 
-def sample_pixel_from_image(num_pixel, num_sample, mask=None, ratio=1.0, use_bbox=False):
+def sample_pixel_from_image(num_pixel, num_sample, mask=None, ratio=1.0, use_bbox=False, width=512):
     if mask is None or ratio <= 0.0 or mask.sum() == 0 or (1 - mask).sum() == 0:
         return np.random.choice(num_pixel, num_sample)
 
     if use_bbox:
-        mask = mask.reshape(-1, int(math.sqrt(mask.shape[0])))
+        mask = mask.reshape(-1, width)
         x, y = np.where(mask == 1)
         mask = np.zeros_like(mask)
         mask[x.min(): x.max()+1, y.min(): y.max()+1] = 1.0
@@ -169,13 +178,14 @@ def colormap(dz):
     return plt.cm.jet(dz)
 
 
-def recover_image(img, min_val=-1, max_val=1):
+def recover_image(img, min_val=-1, max_val=1, width=512):
     sizes = img.size()
-    side_len = int(sizes[0]**0.5)
+    height = sizes[0] // width
+    
     img = ((img - min_val) / (max_val - min_val)).clamp(min=0, max=1).to('cpu')
     if len(sizes) == 1:
         img = torch.from_numpy(colormap(img.numpy()))
-    img = img.reshape(side_len, side_len, -1)
+    img = img.reshape(height, width, -1)
     return img
 
     
@@ -184,6 +194,12 @@ def write_images(writer, images, updates):
         img = images[tag]
         tag, dataform = tag.split(':')
         writer.add_image(tag, img, updates, dataformats=dataform)
+
+
+def unique_points(points):
+    points = set([" ".join(["{:.1f}".format(round(pi * 1000)) for pi in p]) for p in points.tolist()])
+    points = torch.tensor([[float(p) / 1000. for p in p.split()] for p in points])
+    return points
 
 
 class InfIndex(object):

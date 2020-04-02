@@ -129,7 +129,7 @@ class SRNLossCriterion(RenderingCriterion):
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         alpha  = (sample['alpha'] > 0.5)
-        masks = alpha.clone()
+        masks = alpha.clone() if self.args.no_background_loss else torch.ones_like(alpha)
         
         losses, other_logs = {}, {}
         rgb_loss = utils.rgb_loss(
@@ -205,8 +205,8 @@ class SRNLossCriterion(RenderingCriterion):
 
             def transform(x):
                 S, V, D, _ = x.size()
-                L = int(math.sqrt(D))
-                x = x.transpose(2, 3).view(S * V, 3, L, L)
+                H, W = sample['height'][0, 0], sample['width'][0, 0]
+                x = x.transpose(2, 3).view(S * V, 3, H, W)
                 return x / 2 + 0.5
 
             # vgg_ratio = target.numel() / net_output['predicts'].numel()

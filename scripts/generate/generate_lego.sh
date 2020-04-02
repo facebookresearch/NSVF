@@ -15,8 +15,9 @@ MODEL_PATH=/checkpoint/jgu/space/neuralrendering/slurm_srn/maria.no_c10d.single.
 # MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn/debug_inf2.no_c10d.single.512x512.s1.v5.p30000.mask0.0.march10.rgb200.dep1.0.vgg0.0.srn_base.adam.lr_fixed.lr0.001.clip0.0.wd0.0.seed2.ngpu8
 # MODEL_PATH=/checkpoint/jgu/space/neuralrendering/debug_srn/maria_inf2.no_c10d. single.512x512.s1.v5.march10.geo.rgb200.dep0.08.vgg1.0.geosrn_simple.adam.lr_fixed.lr0.001.clip0.0.wd0.0.seed2.ngpu8
 MODEL_PATH=$1
+GPU=${3:-0}
 
-CUDA_VISIBLE_DEVICES=0 \
+CUDA_VISIBLE_DEVICES=${GPU} \
 python render.py ${DATASET} \
     --user-dir fairdr \
     --task single_object_rendering \
@@ -27,8 +28,8 @@ python render.py ${DATASET} \
     --render-save-fps 24 \
     --render-num-frames 120 \
     --render-resolution 400 \
-    --render-path-args "{'radius': 4.0, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}" \
+    --render-path-args "{'radius': 3.5, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}" \
     --render-output /private/home/jgu/data/test_images/output2 \
-    --render-output-types "rgb" "depth" "normal" "hit" \
+    --render-output-types "rgb" "depth" "normal"  \
 #  --render-path-args "{'radius': 3.5, 'h': 0.0, 'axis': 'z'}" \
 #     --render-up-vector "(0,0,-1)" \

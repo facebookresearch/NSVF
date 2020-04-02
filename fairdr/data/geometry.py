@@ -128,12 +128,12 @@ def ray(ray_start, ray_dir, depths):
     return ray_start + ray_dir * depths
 
 
-def compute_normal_map(ray_start, ray_dir, depths, RT):
+def compute_normal_map(ray_start, ray_dir, depths, RT, width=512):
     # TODO:
     # this function is pytorch-only (for not)
     wld_coords = ray(ray_start, ray_dir, depths.unsqueeze(-1)).transpose(0, 1)
     cam_coords = matmul(RT[:3, :3], wld_coords) + RT[:3, 3].unsqueeze(-1)
-    cam_coords = D.unflatten_img(cam_coords)
+    cam_coords = D.unflatten_img(cam_coords, width)
 
     # estimate local normal
     shift_l = cam_coords[:, 2:,  :]
@@ -142,5 +142,8 @@ def compute_normal_map(ray_start, ray_dir, depths, RT):
     shift_d = cam_coords[:, :, :-2]
     diff_hor = normalize(shift_r - shift_l, axis=0)[0][:, :, 1:-1]
     diff_ver = normalize(shift_u - shift_d, axis=0)[0][:, 1:-1, :]
-    normal = cross(diff_hor, diff_ver).reshape(3, -1).transpose(0, 1)
-    return normal
+    normal = cross(diff_hor, diff_ver)
+    _normal = normal.new_zeros(*cam_coords.size())
+    _normal[:, 1:-1, 1:-1] = normal
+    _normal = _normal.reshape(3, -1).transpose(0, 1)
+    return _normal

@@ -47,9 +47,12 @@ class SingleObjRenderingTask(FairseqTask):
                             help="how many pixels to sample from each view. -1 means using all pixels")
         parser.add_argument("--sampling-on-mask", default=1.0, nargs='?', const=0.9, type=float,
                             help="this value determined the probability of sampling rays on masks")
-        parser.add_argument("--sampling-on-bbox", action='store_true')
+        parser.add_argument("--sampling-on-bbox", action='store_true',
+                            help="sampling points to close to the mask")
         parser.add_argument("--view-resolution", type=int, default=64,
-                            help="height/width for the squared image. downsampled from the original.")
+                            help="width for the squared image. downsampled from the original.")       
+        parser.add_argument("--min-color", choices=(0, -1), default=-1, type=int,
+                            help="RGB range used in the model. conventionally used -1 ~ 1")
 
     def __init__(self, args):
         super().__init__(args)
@@ -96,14 +99,16 @@ class SingleObjRenderingTask(FairseqTask):
                 repeat=self.repeat_dataset(split),
                 preload=(not getattr(self.args, "no_preload", False)),
                 binarize=(not getattr(self.args, "no_load_binary", False)),
-                bg_color=getattr(self.args, "transparent_background", -0.8))
+                bg_color=getattr(self.args, "transparent_background", -0.8),
+                min_color=getattr(self.args, "min_color", -1))
 
             if split == 'train' and (self.args.pixel_per_view is not None):
                 self.datasets[split] = SampledPixelDataset(
                     self.datasets[split],
                     self.args.pixel_per_view,
                     self.args.sampling_on_mask,
-                    self.args.sampling_on_bbox)
+                    self.args.sampling_on_bbox,
+                    self.args.view_resolution)
             self.datasets[split] = WorldCoordDataset(
                 self.datasets[split]
             )

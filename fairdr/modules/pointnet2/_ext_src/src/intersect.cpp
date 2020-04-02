@@ -73,3 +73,43 @@ std::tuple< at::Tensor, at::Tensor, at::Tensor > aabb_intersect(at::Tensor ray_s
                                       idx.data<int>(), min_depth.data<float>(), max_depth.data<float>());
   return std::make_tuple(idx, min_depth, max_depth);
 }
+
+
+void uniform_ray_sampling_kernel_wrapper(
+  int b, int num_rays, int max_hits, int max_steps, float step_size,
+  const int *pts_idx, const float *min_depth, const float *max_depth, const float *uniform_noise,
+  int *sampled_idx, float *sampled_depth, float *sampled_dists);
+
+
+std::tuple< at::Tensor, at::Tensor, at::Tensor> uniform_ray_sampling(
+  at::Tensor pts_idx, at::Tensor min_depth, at::Tensor max_depth, at::Tensor uniform_noise,
+  const float step_size, const int max_steps){
+
+  CHECK_CONTIGUOUS(pts_idx);
+  CHECK_CONTIGUOUS(min_depth);
+  CHECK_CONTIGUOUS(max_depth);
+  CHECK_CONTIGUOUS(uniform_noise);
+  CHECK_IS_FLOAT(min_depth);
+  CHECK_IS_FLOAT(max_depth);
+  CHECK_IS_FLOAT(uniform_noise);
+  CHECK_CUDA(pts_idx);
+  CHECK_CUDA(min_depth);
+  CHECK_CUDA(max_depth);
+  CHECK_CUDA(uniform_noise);
+
+  at::Tensor sampled_idx =
+      torch::zeros({pts_idx.size(0), pts_idx.size(1), max_steps},
+                    at::device(pts_idx.device()).dtype(at::ScalarType::Int));
+  at::Tensor sampled_depth =
+      torch::zeros({min_depth.size(0), min_depth.size(1), max_steps},
+                    at::device(min_depth.device()).dtype(at::ScalarType::Float));
+  at::Tensor sampled_dists =
+      torch::zeros({min_depth.size(0), min_depth.size(1), max_steps},
+                    at::device(min_depth.device()).dtype(at::ScalarType::Float));
+  uniform_ray_sampling_kernel_wrapper(min_depth.size(0), min_depth.size(1), min_depth.size(2), sampled_depth.size(2),
+                                      step_size,
+                                      pts_idx.data<int>(), min_depth.data<float>(), max_depth.data<float>(),
+                                      uniform_noise.data<float>(), sampled_idx.data<int>(), 
+                                      sampled_depth.data<float>(), sampled_dists.data<float>());
+  return std::make_tuple(sampled_idx, sampled_depth, sampled_dists);
+}

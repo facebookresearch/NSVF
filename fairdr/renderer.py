@@ -70,10 +70,12 @@ class NeuralRenderer(object):
         # inv_RT = torch.from_numpy(RT).to(intrinsics.device, intrinsics.dtype).inverse()
 
         _, _, cx, cy = geometry.parse_intrinsics(intrinsics)
-        cx, cy = int(cx), int(cy)
-        v, u = torch.meshgrid([torch.arange(2 * cy), torch.arange(2 * cx)])
+        hw, hh = 512, 378 # int(cx), int(cy)
+        # from fairseq import pdb; pdb.set_trace()
+        v, u = torch.meshgrid([torch.arange(2 * hh), torch.arange(2 * hw)])
         uv = torch.stack([u, v], 0).type_as(intrinsics)
-        uv = uv[:, ::2*cy//self.resolution, ::2*cx//self.resolution]
+        ratio = 2 * hw // self.resolution
+        uv = uv[:, ::ratio, ::ratio]
         uv = uv.reshape(2, -1)
     
         ray_start = inv_RT[:3, 3]
@@ -109,7 +111,8 @@ class NeuralRenderer(object):
                         device=sample['shape'].device).unsqueeze(0),
                     'voxels': voxels[shape:shape+1].clone() if voxels is not None else None,
                     'points': points[shape:shape+1].clone() if points is not None else None,
-                    'raymarching_steps': self.raymarching_steps
+                    'raymarching_steps': self.raymarching_steps,
+                    'width': sample['shape'].new_ones(1, next_step-step) * self.resolution
                 }
                 _ = model(**_sample)
             

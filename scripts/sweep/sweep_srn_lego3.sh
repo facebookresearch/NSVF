@@ -1,5 +1,5 @@
 ROOT=/private/home/jgu/data/shapenet/
-DATA=bulldozer3
+DATA=bulldozer4
 WORK=/checkpoint/jgu/space/neuralrendering/debug_srn_lego2
 mkdir -p ${WORK}
 

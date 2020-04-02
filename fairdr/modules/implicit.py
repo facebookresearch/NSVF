@@ -79,6 +79,31 @@ class TextureField(ImplicitField):
         super().__init__(args, in_dim, 3, hidden_dim, num_layers, outmost_linear=True)
 
 
+class DiffusionSpecularField(nn.Module):
+    def __init__(self, args, in_dim, hidden_dim, raydir_dim, num_layers, dropout=0.0):
+        super().__init__()
+        self.args = args
+        self.raydir_dim = raydir_dim
+        self.diffusionField = TextureField(args, in_dim, hidden_dim, num_layers)
+        self.specularField = TextureField(args, in_dim + raydir_dim, hidden_dim, num_layers)
+        self.dropout = dropout
+
+    def forward(self, x):
+        if self.dropout == 0:
+            return self.diffusionField(x[:, :-self.raydir_dim]) + self.specularField(x)
+        cd = self.diffusionField(x[:, :-self.raydir_dim])
+        cs = self.specularField(x)
+
+        # BUG: my default rgb is -1 ~ 1
+        if self.training and self.dropout > 0:
+            cs = cs * (cs.new_ones(cs.size(0)).uniform_() > self.dropout).type_as(cs)[:, None]
+        
+        if getattr(self.args, "min_color", -1) == -1:
+            return  (cd + cs) * 2 - 1  # 0 ~ 1 --> -1 ~ 1
+        return cd + cs
+      
+        
+# bash scripts/generate/generate_lego.sh $MODEL bulldozer6 2 &
 class OccupancyField(ImplicitField):
     """
     Occupancy Network which predicts 0~1 at every space

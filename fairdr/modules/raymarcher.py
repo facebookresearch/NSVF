@@ -70,3 +70,14 @@ class IterativeSphereTracer(nn.Module):
             missed = (depths > max).float()
             depths = depths * (1 - missed) + missed * BG_DEPTH
         return depths, [q for q in zip(*states)]
+
+
+class VolumeRenderer(nn.Module):
+
+    def __init__(self, args):
+        # TODO: fix the auguments
+        super().__init__()
+        self.args = args
+    
+    def search(self,):
+        pass

@@ -30,13 +30,13 @@ class PosEmbLinear(nn.Module):
 
     def __init__(self, in_dim, out_dim):
         super().__init__()
-
-        half_dim = out_dim // 2
+        assert out_dim % (2 * in_dim) == 0, "dimension must be dividable"
+        half_dim = out_dim // 2 // in_dim
         emb = math.log(10000) / (half_dim - 1)
         emb = torch.exp(torch.arange(half_dim, dtype=torch.float) * -emb)
         
         self.emb = nn.Parameter(emb, requires_grad=False)
-        self.linear = Linear(in_dim * out_dim, out_dim)
+        self.linear = Linear(out_dim, out_dim)
         self.scale = 1024
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -46,7 +46,7 @@ class PosEmbLinear(nn.Module):
         sizes = x.size()
         x = self.scale * x.unsqueeze(-1) @ self.emb.unsqueeze(0)
         x = torch.cat([torch.sin(x), torch.cos(x)], dim=-1)
-        x = x.view(*sizes[:-1], self.in_dim * self.out_dim)
+        x = x.view(*sizes[:-1], self.out_dim)
         return self.linear(x)
 
 

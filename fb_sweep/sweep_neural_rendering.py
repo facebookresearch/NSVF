@@ -507,6 +507,7 @@ def get_shapnetgeo_grid(args):
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
 
+
 @register_grid("srn_shapenet_geo2")
 def get_shapnetgeo2_grid(args):
     return [
@@ -563,6 +564,7 @@ def get_shapnetgeo2_grid(args):
         hyperparam('--log-format', 'simple'),
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
+
 
 @register_grid("srn_shapenet_dev")
 def get_shapnetdev_grid(args):
@@ -803,7 +805,7 @@ def get_legodev3_grid(args):
         hyperparam('--load-point', binary_flag=True, save_dir_key=lambda val: 'p'),
         # hyperparam('--load-depth', binary_flag=True, save_dir_key=lambda val: 'd'),
         # hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
-        hyperparam('--rgb-weight', 20.0, save_dir_key=lambda val: f'rgb{val}'),
+        hyperparam('--rgb-weight', 200.0, save_dir_key=lambda val: f'rgb{val}'),
         # hyperparam('--depth-weight', 0, save_dir_key=lambda val: f'dep{val}'),
         hyperparam('--reg-weight', 1e-2),
         hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
@@ -818,7 +820,8 @@ def get_legodev3_grid(args):
         hyperparam('--lstm-sdf', True, binary_flag=True, save_dir_key=lambda val: 'lstm'),
         hyperparam('--hidden-sdf', 128, save_dir_key=lambda val: f'sdfh{val}'),
         hyperparam('--max-hits', 32),
-        
+        hyperparam('--num-layer-features', 6, save_dir_key=lambda val: f'{val}lys'),
+
         # hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
         hyperparam('--quantized-subsampling-points', 0, save_dir_key=lambda val: f'sub{val}'),
         hyperparam('--quantized-embed-dim', 378, save_dir_key=lambda val: f'emb{val}'),
@@ -900,6 +903,7 @@ def get_lego_grid(args):
         hyperparam('--log-format', 'simple'),
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
+
 
 def postprocess_hyperparams(args, config):
     """Postprocess a given hyperparameter configuration."""

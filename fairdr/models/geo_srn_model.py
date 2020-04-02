@@ -19,7 +19,7 @@ from fairdr.data.geometry import ray
 from fairdr.models.point_srn_model import (
     PointSRNModel, PointSRNField, 
     transformer_base_architecture,
-    point_base_architecture,
+    pointnet_base_architecture,
     embedding_base_architecture
 )
 from fairdr.modules.raymarcher import BG_DEPTH, MAX_DEPTH
@@ -203,10 +203,11 @@ class GEOSRNField(PointSRNField):
         depth = depth * self.sdf_scale
         return depth, (point_feats, point_xyz, hidden_state)
 
-    def get_texture(self, xyz, point_feats, point_xyz):
+    def get_texture(self, xyz, point_feats, point_xyz, dir=None):
         features = self.get_feature(xyz, point_feats, point_xyz)
+        if dir is not None and self.use_raydir:
+            features = torch.cat([features, self.raydir_proj(dir)], -1)
         return self.renderer(features)
-
 
 @register_model_architecture("dev_srn", "dev_srn1")
 def geo_base_architecture(args):
@@ -232,7 +233,7 @@ def geo_base2_architecture(args):
     args.pointnet2_input_shuffle = getattr(args, "pointnet2_input_shuffle", True)
     args.bounded = getattr(args, 'bounded', True)
     args.sdf_scale = getattr(args, "sdf_scale", 0.1)
-    point_base_architecture(args)
+    pointnet_base_architecture(args)
     
 @register_model_architecture("dev_srn", "dev_srn3")
 def geo_base3_architecture(args):
