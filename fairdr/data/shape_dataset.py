@@ -269,7 +269,7 @@ class ShapeViewDataset(ShapeDataset):
 
     def find_rgb(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/rgb/*.png')) for path in self.paths])
+            return self.cutoff([sorted(glob.glob(path + '/rgb/*.*')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find rendered images.")
     
@@ -281,7 +281,7 @@ class ShapeViewDataset(ShapeDataset):
 
     def find_mask(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/mask/*.png')) for path in self.paths])
+            return self.cutoff([sorted(glob.glob(path + '/mask/*')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find precomputed mask images")
 
@@ -319,7 +319,8 @@ class ShapeViewDataset(ShapeDataset):
             z = data_utils.load_depth(packed_data['dep'][view_idx], resolution=self.resolution)
         if packed_data.get('mask', None) is not None:
             mask = data_utils.load_mask(packed_data['mask'][view_idx], resolution=self.resolution)
-
+            rgb = rgb * mask[None, :, :] + (1 - mask[None, :, :]) * self.bg_color
+            
         return {
             'view': view_idx,
             'uv': uv.reshape(2, -1), 

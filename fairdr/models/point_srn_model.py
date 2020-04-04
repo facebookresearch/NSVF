@@ -14,7 +14,7 @@ from fairdr.data.geometry import ray
 from fairdr.modules.linear import Linear, PosEmbLinear
 from fairdr.modules.implicit import ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField
 from fairdr.models.srn_model import SRNModel, SRNField, base_architecture
-from fairdr.modules.backbone import Pointnet2Backbone, TransformerBackbone, QuantizedEmbeddingBackbone
+from fairdr.modules.backbone import BACKBONE_REGISTRY
 from fairdr.modules.pointnet2.pointnet2_utils import ball_nearest
 
 @register_model('point_srn')
@@ -28,9 +28,8 @@ class PointSRNModel(SRNModel):
     def add_args(parser):
         SRNModel.add_args(parser)
         
-        Pointnet2Backbone.add_args(parser)
-        TransformerBackbone.add_args(parser)
-        QuantizedEmbeddingBackbone.add_args(parser)
+        for backbone in BACKBONE_REGISTRY:
+            BACKBONE_REGISTRY[backbone].add_args(parser)
 
         parser.add_argument("--ball-radius", type=float, metavar='D', 
                             help="maximum radius of ball query for ray-marching")
@@ -88,14 +87,9 @@ class PointSRNField(SRNField):
 
     def __init__(self, args):
         SRNField.__init__(self, args)
-
-        if args.backbone == "pointnet2":
-            self.backbone = Pointnet2Backbone(args)
-        elif args.backbone == "transformer":
-            self.backbone = TransformerBackbone(args)
-        elif args.backbone == "embedding":
-            self.backbone = QuantizedEmbeddingBackbone(args)
-        else:
+        try:
+            self.backbone = BACKBONE_REGISTRY[args.backbone](args)
+        except Exception:
             raise NotImplementedError("Backbone is not implemented!!!")
 
         self.relative_position = getattr(args, "relative_position", False)

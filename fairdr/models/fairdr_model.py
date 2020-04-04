@@ -39,6 +39,9 @@ class BaseModel(BaseFairseqModel):
     def visualize(self, **kwargs):
         return NotImplementedError
 
+    def pruning(self, **kwargs):
+        # do nothing
+        pass
 
 class Field(nn.Module):
 

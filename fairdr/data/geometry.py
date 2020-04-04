@@ -50,6 +50,8 @@ def parse_extrinsics(extrinsics, world2camera=True):
     """ this function is only for numpy for now"""
     if extrinsics.shape[0] == 3 and extrinsics.shape[1] == 4:
         extrinsics = np.vstack([extrinsics, np.array([[0, 0, 0, 1.0]])])
+    if extrinsics.shape[0] == 1 and extrinsics.shape[1] == 16:
+        extrinsics = extrinsics.reshape(4, 4)
     if world2camera:
         extrinsics = np.linalg.inv(extrinsics).astype(np.float32)
     return extrinsics
@@ -147,3 +149,7 @@ def compute_normal_map(ray_start, ray_dir, depths, RT, width=512):
     _normal[:, 1:-1, 1:-1] = normal
     _normal = _normal.reshape(3, -1).transpose(0, 1)
     return _normal
+
+
+# def shpere_sampling():
+#     pass

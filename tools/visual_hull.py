@@ -92,8 +92,6 @@ for i, data in enumerate(packed_data):
         image_mask = data['alpha'].reshape(imgH, imgW).astype(np.int)
     else:
         image_mask = data['mask'].reshape(imgH, imgW).astype(np.int)
-    
-    # from fairseq import pdb; pdb.set_trace()
 
     res = image_mask[sub_uvs[1, :], sub_uvs[0, :]]
     occupancy[indices] += res
@@ -146,6 +144,7 @@ def voxelize_bbx(verts, voxel_size, fname):
     return ovoxels
 
 if not args.marching_cube:
+    from fairseq import pdb; pdb.set_trace()
     ox, oy, oz = (occupancy >= th).nonzero()        # sparse voxel indexs
     verts = points[:3, ox * s * s + oy * s + oz].T  # sparse voxel coords
     pcd = o3d.geometry.PointCloud()

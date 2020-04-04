@@ -62,13 +62,6 @@ class NeuralRenderer(object):
         inv_RT[:3, 3] = cam_pos
         inv_RT[3, 3] = 1
 
-        # -- generate ray from a fixed trajectory --      
-        # RT = data_utils.load_matrix("/private/home/jgu/work/tsrn-master/test_trajs/maria/{}.txt".format(t))
-        # RT = data_utils.load_matrix( "/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug/debug/extrinsic/model_{0:03d}.txt".format(t))
-        # RT = np.concatenate([RT, np.zeros((1, 4))], 0)
-        # RT[3, 3] = 1
-        # inv_RT = torch.from_numpy(RT).to(intrinsics.device, intrinsics.dtype).inverse()
-
         _, _, cx, cy = geometry.parse_intrinsics(intrinsics)
         hw, hh = int(cx), int(cy)
         # from fairseq import pdb; pdb.set_trace()

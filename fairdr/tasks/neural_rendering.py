@@ -173,6 +173,7 @@ class SingleObjRenderingTask(FairseqTask):
         return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
 
     def valid_step(self, sample, model, criterion):
+        # model.pruning(points=sample['points'])
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
         if self.writer is not None:
             images = model.visualize(

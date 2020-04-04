@@ -24,6 +24,17 @@ from fairseq.modules import (
 )
 
 
+BACKBONE_REGISTRY = {}
+
+
+def register_backnone(name):
+    def register_backbone_cls(cls):
+        if name in BACKBONE_REGISTRY:
+            raise ValueError('Cannot register duplicate backbone module ({})'.format(name))
+        BACKBONE_REGISTRY[name] = cls
+        return cls
+    return register_backbone_cls
+
 class Backbone(nn.Module):
     """
     backbone network
@@ -34,6 +45,7 @@ class Backbone(nn.Module):
 
     def forward(self, pointcloud, add_dummy=False):
         feats, xyz = self._forward(pointcloud)
+        # placeholder reserved for backbone independent functions
         return feats, xyz
 
     def _forward(self, pointcloud):
@@ -42,9 +54,14 @@ class Backbone(nn.Module):
     def get_features(self, x):
         return x    
 
+    @staticmethod
+    def add_args(parser):
+        pass
+
+@register_backnone("embedding")
 class QuantizedEmbeddingBackbone(Backbone):
     """
-    Embeddings on fixed voxel models
+    Embeddings on fixed voxel models (only works for single object)
     """
     def __init__(self, args):
         super().__init__(args)
@@ -56,16 +73,17 @@ class QuantizedEmbeddingBackbone(Backbone):
         assert os.path.exists(self.voxel_path), "voxel file does not exist"
         self.voxel_size = args.ball_radius
         self.voxel_vertex = getattr(args, 'quantized_voxel_vertex', False)
-
-        keys = torch.from_numpy(load_matrix(self.voxel_path)[:, 3:] )
+        
+        points = torch.from_numpy(load_matrix(self.voxel_path)[:, 3:])
         if self.voxel_vertex:
             offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
                               [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]], 
-                            dtype=keys.dtype) * (self.voxel_size * 0.5)
-            keys = keys.unsqueeze(1) + offset.unsqueeze(0)
+                            dtype=points.dtype) * (self.voxel_size * 0.5)
+            keys = points.unsqueeze(1) + offset.unsqueeze(0)
             keys = unique_points(keys.reshape(-1, 3))
             self.offset = nn.Parameter(offset, requires_grad=False)
         else:
+            keys = points.clone()
             self.offset = None
 
         self.keys = nn.Parameter(keys, requires_grad=False)
@@ -101,6 +119,16 @@ class QuantizedEmbeddingBackbone(Backbone):
     def feature_dim(self):
         return self.embed_dim
 
+@register_backnone("minkunet")
+class MinkowskiUNetBackbone(Backbone):
+    """
+    Backbone using sparse-convolution
+    """
+    def __init__(self, args):
+        super().__init__(args)
+    
+
+@register_backnone("pointnet2")
 class Pointnet2Backbone(Backbone):
     """
     backbone network for pointcloud feature learning.
@@ -231,6 +259,7 @@ class Pointnet2Backbone(Backbone):
         return 64
 
 
+@register_backnone("transformer")
 class TransformerBackbone(Backbone):
     
     def __init__(self, args):

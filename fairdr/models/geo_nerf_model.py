@@ -63,7 +63,6 @@ class GEONERFModel(PointSRNModel):
         parser.add_argument('--expectation', choices=['rgb', 'depth', 'features'], type=str,
                             help='where to compute the expectation from, in default is rgb.')
 
-
     def _forward(self, ray_start, ray_dir, feats, xyz, **kwargs):
         # coarse ray-intersection
         S, V, P, _ = ray_dir.size()
@@ -94,7 +93,7 @@ class GEONERFModel(PointSRNModel):
         feats, xyz = self.field.get_backbone_features(points)
 
         # from fairseq import pdb; pdb.set_trace()
-        chunk_size = 400 * 400 # getattr(self.args, "outer_chunk_size", 400 * 400)
+        chunk_size = 800 * 800 # getattr(self.args, "outer_chunk_size", 400 * 400)
         if chunk_size >= ray_dir.size(2):
             # no need to chunk if the input is small
             predicts, depths = self._forward(ray_start, ray_dir, feats, xyz, **kwargs)
@@ -120,6 +119,11 @@ class GEONERFModel(PointSRNModel):
         }
         return results
 
+    @torch.no_grad()
+    def pruning(self, points, **kwargs):
+        # get geometry features
+        feats, xyz = self.field.get_backbone_features(points)
+        self.field.pruning(feats, xyz)
 
 class GEORadianceField(PointSRNField):
     
@@ -134,6 +138,7 @@ class GEORadianceField(PointSRNField):
         self.intersection_type = getattr(args, "intersection_type", 'aabb')
         self.deterministic_step = getattr(args, "deterministic_step", False)
         self.inner_chunking = getattr(args, "inner_chunking", True)
+        self.sigmoid_activation = getattr(args, "sigmoid_activation", False)
         self.trilinear_interp = False
         if args.backbone == 'embedding':
             self.trilinear_interp = getattr(args, "quantized_voxel_vertex", False)
@@ -246,7 +251,43 @@ class GEORadianceField(PointSRNField):
 
         return hits, ray_start, ray_dir, (point_feats, point_xyz), (sampled_depth, sampled_idx, sampled_dists)
 
+    @torch.no_grad()
+    def pruning(self, feats, xyz):
+        # prepare queries for all the voxels
+        c = torch.arange(1, 8, 2, device=xyz.device)
+        voxel_size = self.ball_radius
+        ox, oy, oz = torch.meshgrid([c, c, c])
+        offsets = (torch.cat([
+                    ox.reshape(-1, 1), 
+                    oy.reshape(-1, 1), 
+                    oz.reshape(-1, 1)], 1).type_as(xyz) - 4.) / 8.
+        point_xyz = (xyz[:, :, None, :] + offsets[None, None, :, :] * voxel_size).reshape(xyz.size(0), -1, 3)
+        point_feats = feats[:, :, None, :].repeat(1, 1, offsets.size(0), 1).reshape(feats.size(0), -1, feats.size(2))
+        queries = xyz[:, :, None, :].repeat(1, 1, offsets.size(0), 1).reshape(xyz.size(0), -1, 3)
 
+        # move the first dimension
+        if point_xyz.shape[0] == 1:
+            point_xyz, point_feats, queries = point_xyz[0], point_feats[0], queries[0]
+        else:
+            raise NotImplementedError
+
+        # query the field
+        sigma,  = self.forward(queries, point_feats, point_xyz, outputs=['sigma'])
+        if not self.sigmoid_activation:
+            sigma_dist = torch.relu(sigma) * (voxel_size / 4.)
+        else:
+            sigma_dist = -F.logsigmoid(sigma)
+
+        alpha = 1 - torch.exp(-sigma_dist)   # probability of filling this voxel
+        alpha = alpha.reshape(*xyz.size()[:2], offsets.size(0))
+
+        torch.save([
+            alpha.cpu().float(),
+            point_xyz.cpu().float()],
+             '/private/home/jgu/data/test_images/alpha.pt')
+        from fairseq import pdb; pdb.set_trace()
+
+        
 class GEORadianceRenderer(Raymarcher):
 
     def __init__(self, args):
@@ -303,7 +344,7 @@ class GEORadianceRenderer(Raymarcher):
         
         else:
             assert self.deterministic_step, "sigmoid activation only supports deterministic steps"
-            sigma_dist = -torch.log(torch.sigmoid(sigma + noise))
+            sigma_dist = -F.logsigmoid(sigma + noise)
 
         sigma_dist = torch.zeros_like(sampled_depth).masked_scatter(sample_mask, sigma_dist)
         shifted_sigma_dist = torch.cat([sigma_dist.new_zeros(P, 1), sigma_dist[:, :-1]], dim=-1)  # shift one step
@@ -382,6 +423,7 @@ class GEORadianceRenderer(Raymarcher):
         reorder_missed[sorted_idx] = missed
         return reorder_rgb, reorder_depth, reorder_missed
 
+
 @register_model_architecture("geo_nerf", "geo_nerf")
 def geo_base_architecture(args):
     args.lstm_sdf = getattr(args, "lstm_sdf", False)
@@ -403,5 +445,7 @@ def geo_base_architecture(args):
 def geo_trilinear_architecture(args):
     args.quantized_voxel_vertex = getattr(args, "quantized_voxel_vertex", True)
     args.raypos_features = getattr(args, "raypos_features", 0)
-    args.outer_chunk_size = getattr(args, "outer_chunk_size", 400 * 400)
+    args.outer_chunk_size = getattr(args, "outer_chunk_size", 800 * 800)
     geo_base_architecture(args)
+
+

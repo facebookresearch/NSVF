@@ -31,8 +31,10 @@ def load_rgb(
 
     img = skimage.img_as_float32(img)
     # img = square_crop_img(img)
-    H, W, _ = img.shape
-    
+    H, W, D = img.shape
+    if D == 3:
+        img = np.concatenate([img, np.ones((img.shape[0], img.shape[1], 1))], -1)
+
     # uv coordinates
     uv = np.flip(np.mgrid[0: H, 0: W], axis=0).astype(np.float32)
     if resolution is not None:
@@ -81,7 +83,7 @@ def load_mask(path, resolution=None):
         h, w = img.shape[:2]
         w, h = resolution, int(h/float(w)*resolution)
         img  = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
-    img = img / img.max()
+    img = img / (img.max() + 1e-7)
     return img
 
 
@@ -197,9 +199,9 @@ def write_images(writer, images, updates):
 
 
 def unique_points(points):
-    points = set([" ".join(["{:.1f}".format(round(pi * 1000)) for pi in p]) for p in points.tolist()])
-    points = torch.tensor([[float(p) / 1000. for p in p.split()] for p in points])
-    return points
+    _points = set([" ".join(["{:.1f}".format(round(pi * 10000)) for pi in p]) for p in points.tolist()])
+    return torch.tensor([[float(p) / 10000. for p in p.split()] for p in _points])
+    # _indexs = (points[:, None, :] - _points[None, :, :]).norm(dim=-1).min(1)[1]
 
 
 class InfIndex(object):
