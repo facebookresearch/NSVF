@@ -58,6 +58,10 @@ class Backbone(nn.Module):
     def add_args(parser):
         pass
 
+    def pruning(self, *args, **kwargs):
+        pass
+
+
 @register_backnone("embedding")
 class QuantizedEmbeddingBackbone(Backbone):
     """
@@ -114,6 +118,62 @@ class QuantizedEmbeddingBackbone(Backbone):
 
     def get_features(self, x):
         return self.values(x)
+
+    @property
+    def feature_dim(self):
+        return self.embed_dim
+
+
+@register_backnone('dynamic_embedding')
+class DynamicEmbeddingBackbone(Backbone):
+
+    def __init__(self, args):
+        super().__init__(args)
+
+        self.embed_dim = args.quantized_embed_dim
+        self.quantized_input_shuffle = getattr(args, "quantized_input_shuffle", True)
+        self.voxel_path = args.quantized_voxel_path if args.quantized_voxel_path is not None \
+            else os.path.join(args.data, 'voxel.txt')
+        assert os.path.exists(self.voxel_path), "Initial voxel file does not exist..."
+
+        self.voxel_size = args.ball_radius
+        self.total_size = 3200   # maximum number of voxel allowed
+
+        points, feats = torch.zeros(self.total_size, 3), torch.zeros(self.total_size, 8).long()
+        keys, keep = torch.zeros(self.total_size, 3), torch.zeros(self.total_size).long()
+
+        init_points = torch.from_numpy(load_matrix(self.voxel_path)[:, 3:])
+        init_length = init_points.size(0)
+        offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
+                            [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]], 
+                        dtype=points.dtype) * (self.voxel_size * 0.5)
+        init_feats = (init_points.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
+        init_keys  = unique_points(init_feats)
+        init_feats = (init_feats[:, None, :] - init_keys[None, :, :]).norm(dim=-1).min(1)[1].reshape(-1, 8)
+        
+        points[: init_length] = init_points
+        feats[: init_length] = init_feats
+        keep[: init_length] = 1
+        keys[: init_keys.size(0)] = init_keys
+
+        self.register_buffer("points", points)   # voxel centers
+        self.register_buffer("feats", feats)     # for each voxel, 8 vertexs
+        self.register_buffer("keys", keys)
+        self.register_buffer("keep", keep)
+        self.register_buffer("offset", offset)
+
+        # voxel embeddings
+        self.values = Embedding(self.total_size, self.embed_dim, None)
+    
+    def _forward(self, *args, **kwargs):
+        return self.feats[self.keep.bool()].unsqueeze(0), \
+               self.points[self.keep.bool()].unsqueeze(0)
+
+    def get_features(self, x):
+        return self.values(x)
+
+    def pruning(self, keep):
+        self.keep.masked_scatter_(self.keep.bool(), keep.long())
 
     @property
     def feature_dim(self):

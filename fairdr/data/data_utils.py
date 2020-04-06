@@ -180,13 +180,20 @@ def colormap(dz):
     return plt.cm.jet(dz)
 
 
-def recover_image(img, min_val=-1, max_val=1, width=512):
+def recover_image(img, min_val=-1, max_val=1, width=512, bg=None):
     sizes = img.size()
     height = sizes[0] // width
-    
-    img = ((img - min_val) / (max_val - min_val)).clamp(min=0, max=1).to('cpu')
+    img = img.float().to('cpu')
+
+    if len(sizes) == 1 and (bg is not None):
+        bg_mask = img.eq(bg)[:, None].type_as(img)
+
+    img = ((img - min_val) / (max_val - min_val)).clamp(min=0, max=1)
     if len(sizes) == 1:
-        img = torch.from_numpy(colormap(img.numpy()))
+        img = torch.from_numpy(colormap(img.numpy())[:, :3])
+
+    if bg is not None:
+        img = img * (1 - bg_mask) + bg_mask
     img = img.reshape(height, width, -1)
     return img
 
@@ -201,7 +208,6 @@ def write_images(writer, images, updates):
 def unique_points(points):
     _points = set([" ".join(["{:.1f}".format(round(pi * 10000)) for pi in p]) for p in points.tolist()])
     return torch.tensor([[float(p) / 10000. for p in p.split()] for p in _points])
-    # _indexs = (points[:, None, :] - _points[None, :, :]).norm(dim=-1).min(1)[1]
 
 
 class InfIndex(object):

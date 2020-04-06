@@ -204,6 +204,14 @@ def embedding_base_architecture(args):
     base_point_architecture(args)
 
 
+@register_model_architecture("point_srn", "dynamic_srn")
+def dynamic_embed_base_architecture(args):
+    args.backbone = "dynamic_embedding"
+    args.quantized_voxel_path = getattr(args, "quantized_voxel_path", None)
+    args.quantized_embed_dim = getattr(args, "quantized_embed_dim", 256)
+    base_point_architecture(args)
+
+
 @register_model_architecture("point_srn", "pointnet2_srn")
 def pointnet_base_architecture(args):
     args.backbone = "pointnet2"

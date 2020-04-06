@@ -15,6 +15,7 @@ import sys
 import time
 import torch
 import imageio
+import numpy as np
 
 from fairseq import checkpoint_utils, progress_bar, tasks, utils
 from fairseq.meters import StopwatchMeter, TimeMeter
@@ -105,12 +106,8 @@ def _main(args, output_file):
             gen_timer.stop(500)
             wps_meter.update(500)
             t.log({'wps': round(wps_meter.avg)})
-
-    # -- output as gif
-    timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
-    for type in generator.output_type:
-        images = [imageio.imread(file_path) for file_path in output_files if type in file_path] 
-        imageio.mimsave('{}/{}_{}.gif'.format(generator.output_dir, type, timestamp), images, fps=args.render_save_fps)
+            
+    generator.save_images(output_files)
 
 def cli_main():
     parser = options.get_rendering_parser()

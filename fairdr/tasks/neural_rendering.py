@@ -3,8 +3,10 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import json
 import torch
 import numpy as np
+from argparse import Namespace
 
 from fairseq.tasks import FairseqTask, register_task
 from fairdr.data import (
@@ -55,6 +57,13 @@ class SingleObjRenderingTask(FairseqTask):
                             help="RGB range used in the model. conventionally used -1 ~ 1")
         parser.add_argument("--virtual-epoch-steps", type=int, default=None,
                             help="virtual epoch used in Infinite Dataset. if None, set max-update")
+        parser.add_argument("--pruning-every-steps", type=int, default=None,
+                            help="if the model supports pruning, prune unecessary voxels")
+        parser.add_argument("--rendering-every-steps", type=int, default=None,
+                            help="if set, enables rendering online with default parameters")
+        parser.add_argument("--rendering-args", type=str, metavar='JSON')
+        parser.add_argument("--pruning-th", type=float, default=0.5,
+                            help="if larger than this, we choose keep the voxel.")
 
     def __init__(self, args):
         super().__init__(args)
@@ -66,6 +75,24 @@ class SingleObjRenderingTask(FairseqTask):
             self.writer = None
 
         self._num_updates = 0
+        self.pruning_every_steps = getattr(self.args, "pruning_every_steps", None)
+        self.pruning_th = getattr(self.args, "pruning_th", 0.5)
+        self.rendering_every_steps = getattr(self.args, "rendering_every_steps", None)
+        
+        if self.rendering_every_steps is not None and getattr(args, "distributed_rank", -1) == 0:
+            gen_args = {
+                'path': args.save_dir,
+                'render_beam': 5, 'render_resolution': 512,
+                'render_num_frames': 120, 'render_angular_speed': 3,
+                'render_output_types': ["rgb"], 'render_raymarching_steps': 10,
+                'render_at_vector': "(0,0,0)", 'render_up_vector': "(0,0,-1)",
+                'render_path_args': "{'radius': 1.5, 'h': 0.5}",
+                'render_path_style': 'circle', "render_output": None
+            }
+            gen_args.update(json.loads(getattr(args, 'rendering_args', '{}') or '{}'))
+            self.renderer = self.build_generator(Namespace(**gen_args))    
+        else:
+            self.renderer = None
 
     @classmethod
     def setup_task(cls, args, **kwargs):
@@ -170,6 +197,24 @@ class SingleObjRenderingTask(FairseqTask):
 
     def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
         self._num_updates = update_num
+
+        model.pruning(th=self.pruning_th)
+        
+        if self.pruning_every_steps is not None and \
+            (self._num_updates % self.pruning_every_steps == 0) and \
+            (self._num_updates > 0):
+            model.eval()
+            model.pruning(th=self.pruning_th)
+
+        if self.rendering_every_steps is not None and \
+            (self._num_updates % self.rendering_every_steps == 0) and \
+            (self._num_updates > 0) and \
+            self.renderer is not None:
+
+            self.renderer.save_images(
+                self.inference_step(self.renderer, [model], [sample, 0])[1],
+                self._num_updates)
+
         return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
 
     def valid_step(self, sample, model, criterion):
@@ -187,7 +232,7 @@ class SingleObjRenderingTask(FairseqTask):
 
             if images is not None:
                 write_images(self.writer, images, self._num_updates)
-
+        
         return loss, sample_size, logging_output
     
 

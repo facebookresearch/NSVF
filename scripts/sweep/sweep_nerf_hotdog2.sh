@@ -1,6 +1,6 @@
 ROOT=/private/home/jgu/data/shapenet/
 DATA=hotdog2
-WORK=/checkpoint/jgu/space/neuralrendering/debug_nerf_hotdog
+WORK=/checkpoint/jgu/space/neuralrendering/debug_nerf_hotdog2
 mkdir -p ${WORK}
 
 GRID=srn_lego
@@ -20,7 +20,7 @@ pushd $ENGINE
 #     --tensorboard-logdir ${WORK}/tensorboard \
 #     --snapshot-code \
 #     --snapshot-root ${WORK}/snapshot \
-#     --prefix ${DATA}_bbox \
+#     --prefix ${DATA}ver2 \
 #     --num-trials 1 \
 #     --num-gpus 8 \
 #     --num-nodes 1 \
@@ -28,7 +28,7 @@ pushd $ENGINE
 #     --constraint volta32gb \
 #     --exclusive \
 #     --comment "NeurIPS2020 deadline." \
-#     --partition priority \
+#     --partition learnfair \
 #     --resume-failed \
 #     --local \
    
@@ -42,7 +42,7 @@ python fb_sweep/sweep_nerf.py \
     --no-tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_RELOAD \
+    --prefix ${DATA}_DYNv3 \
     --num-trials 1 \
     --num-gpus 1 \
     --num-nodes 1 \

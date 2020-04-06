@@ -15,6 +15,7 @@ python render.py ${DATASET} \
     --render-save-fps 24 \
     --render-num-frames 120 \
     --render-resolution 400 \
-    --render-path-args "{'radius': 0.5, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}" \
+    --render-path-args "{'radius': 1.5, 'h': 0.5, 'axis': 'z', 't0': -2, 'r':-1}" \
     --render-output /private/home/jgu/data/test_images/output3 \
-    --render-output-types "rgb" "depth" "normal"  \
+    --render-output-types "hit" "rgb" "depth" "normal"  \
+    --render-combine-output

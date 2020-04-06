@@ -16,10 +16,11 @@ python render.py ${DATASET} \
     --render-save-fps 24 \
     --render-num-frames 120 \
     --render-resolution 514 \
+    --render-combine-output \
     --render-up-vector "(0,1,0)" \
     --render-at-vector "(0,1.5,0)" \
     --render-path-args "{'radius': 2.5, 'h': 1.5, 'axis': 'y', 't0': -2, 'r':-1}" \
-    --render-output /private/home/jgu/data/test_images/output2 \
-    --render-output-types "rgb" # "depth" "normal" \
+    --render-output /private/home/jgu/data/test_images/output3 \
+    --render-output-types "rgb" "depth" # "normal" \
 #  --render-path-args "{'radius': 3.5, 'h': 0.0, 'axis': 'z'}" \
 #     --render-up-vector "(0,0,-1)" \

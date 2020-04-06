@@ -41,3 +41,5 @@ def add_rendering_args(parser):
                         choices=["rgb", "depth", "normal", "hit"])
     group.add_argument("--render-raymarching-steps", default=None, type=int)
     group.add_argument("--render-save-fps", default=24, type=int)
+    group.add_argument("--render-combine-output", action='store_true', 
+                       help="if set, concat the images into one file.")
