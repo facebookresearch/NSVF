@@ -205,9 +205,29 @@ def write_images(writer, images, updates):
         writer.add_image(tag, img, updates, dataformats=dataform)
 
 
-def unique_points(points):
-    _points = set([" ".join(["{:.1f}".format(round(pi * 10000)) for pi in p]) for p in points.tolist()])
-    return torch.tensor([[float(p) / 10000. for p in p.split()] for p in _points])
+def unique_points(points, old_points=None):
+    def pts2set(points):
+        return sorted(list(set([" ".join([str(pi) for pi in p]) for p in points.cpu().tolist()])))
+
+    if old_points is None:
+        _points = pts2set(points)
+    else:
+        _points = pts2set(points).difference(pts2set(old_points))
+
+    return torch.tensor([[int(p) for p in p.split()] for p in _points]).type_as(points)
+
+
+# def unique_points(points, old_points=None):
+#     def pts2set(points):
+#         return set([" ".join(["{:.1f}".format(round(pi * 10000)) for pi in p]) for p in points.cpu().tolist()])
+    
+#     if old_points is None:
+#         _points = pts2set(points)
+#     else:
+#         _points = pts2set(points).difference(pts2set(old_points))
+
+#     return torch.tensor(
+#         [[float(p) / 10000. for p in p.split()] for p in _points], device=points.device)
 
 
 class InfIndex(object):

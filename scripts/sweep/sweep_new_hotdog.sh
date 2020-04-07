@@ -1,13 +1,15 @@
 ROOT=/private/home/jgu/data/shapenet/
-DATA=bulldozerbbox
+DATA=nerf_hotdog
+#DATA=nerf_hotdog2
 WORK=/checkpoint/jgu/space/neuralrendering/debug_new_hotdog
 mkdir -p ${WORK}
 
-GRID=geo_new_lego
+GRID=geo_new_hotdog
+#GRID=geo_new_hotdog2
 ENGINE=~jgu/work/neuralrendering
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
-#  --tensorboard-logdir ${WORK}/tensorboard \
+
 python fb_sweep/sweep_nerf.py \
     --data ${ROOT}/${DATA} \
     --grid $GRID \
@@ -16,7 +18,7 @@ python fb_sweep/sweep_nerf.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA} \
+    --prefix ${DATA}_bugfix \
     --num-trials 1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -24,9 +26,9 @@ python fb_sweep/sweep_nerf.py \
     --constraint volta32gb \
     --exclusive \
     --comment "NeurIPS2020 deadline." \
-    --partition priority \
+    --partition learnfair \
     --resume-failed \
-    # --local \
+    --local \
    
 # popd
 
@@ -40,7 +42,7 @@ python fb_sweep/sweep_nerf.py \
 #     --snapshot-root ${WORK}/snapshot \
 #     --prefix ${DATA}2_GEOv7 \
 #     --num-trials 1 \
-#     --num-gpus 1 \
+#     --num-gpus 8 \
 #     --num-nodes 1 \
 #     --mem 500gb \
 #     --constraint volta32gb \

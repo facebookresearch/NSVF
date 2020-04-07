@@ -10,46 +10,46 @@ ENGINE=~jgu/work/neuralrendering
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-python fb_sweep/sweep_nerf.py \
-    --data ${ROOT}/${DATA} \
-    --grid $GRID \
-    --user-dir "fairdr" \
-    --checkpoints-dir ${WORK} \
-    --tensorboard-logdir ${WORK}/tensorboard \
-    --snapshot-code \
-    --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}bugfix \
-    --num-trials 1 \
-    --num-gpus 8 \
-    --num-nodes 1 \
-    --mem 500gb \
-    --constraint volta32gb \
-    --exclusive \
-    --comment "EMNLP arxiv deadline." \
-    --partition priority \
-    --resume-failed \
-    --local \
-   
-# popd
-
 # python fb_sweep/sweep_nerf.py \
-#     --data ${ROOT}/${DATA}  \
+#     --data ${ROOT}/${DATA} \
 #     --grid $GRID \
 #     --user-dir "fairdr" \
 #     --checkpoints-dir ${WORK} \
-#     --no-tensorboard \
+#     --tensorboard-logdir ${WORK}/tensorboard \
 #     --snapshot-code \
 #     --snapshot-root ${WORK}/snapshot \
-#     --prefix ${DATA}2_GEOv8 \
+#     --prefix ${DATA}bugfix \
 #     --num-trials 1 \
-#     --num-gpus 1 \
+#     --num-gpus 8 \
 #     --num-nodes 1 \
 #     --mem 500gb \
 #     --constraint volta32gb \
 #     --exclusive \
-#     --comment "NeurIPS2020 deadline." \
+#     --comment "EMNLP arxiv deadline." \
 #     --partition priority \
 #     --resume-failed \
 #     --local \
+   
+# popd
+
+python fb_sweep/sweep_nerf.py \
+    --data ${ROOT}/${DATA}  \
+    --grid $GRID \
+    --user-dir "fairdr" \
+    --checkpoints-dir ${WORK} \
+    --no-tensorboard \
+    --snapshot-code \
+    --snapshot-root ${WORK}/snapshot \
+    --prefix ${DATA}2_GEOv8 \
+    --num-trials 1 \
+    --num-gpus 1 \
+    --num-nodes 1 \
+    --mem 500gb \
+    --constraint volta32gb \
+    --exclusive \
+    --comment "NeurIPS2020 deadline." \
+    --partition priority \
+    --resume-failed \
+    --local \
 # #     # --dry-run
 # popd

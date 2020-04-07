@@ -14,6 +14,7 @@ from fairdr.modules.pointnet2.pointnet2_modules import (
     PointnetSAModuleVotes, PointnetFPModule
 )
 from fairdr.data.data_utils import load_matrix, unique_points
+from fairdr.data.geometry import trilinear_interp
 from fairdr.modules.pointnet2.pointnet2_utils import furthest_point_sample
 from fairdr.modules.linear import Linear, Embedding, PosEmbLinear
 from fairseq import options, utils
@@ -59,6 +60,9 @@ class Backbone(nn.Module):
         pass
 
     def pruning(self, *args, **kwargs):
+        pass
+
+    def splitting(self, *args, **kwargs):
         pass
 
 
@@ -137,19 +141,22 @@ class DynamicEmbeddingBackbone(Backbone):
         assert os.path.exists(self.voxel_path), "Initial voxel file does not exist..."
 
         self.voxel_size = args.ball_radius
-        self.total_size = 3200   # maximum number of voxel allowed
+        self.total_size = 12000   # maximum number of voxel allowed
+        self.half_voxel = self.voxel_size * .5
 
         points, feats = torch.zeros(self.total_size, 3), torch.zeros(self.total_size, 8).long()
-        keys, keep = torch.zeros(self.total_size, 3), torch.zeros(self.total_size).long()
+        keys, keep = torch.zeros(self.total_size, 3).long(), torch.zeros(self.total_size).long()
 
         init_points = torch.from_numpy(load_matrix(self.voxel_path)[:, 3:])
         init_length = init_points.size(0)
+
+        # working in LONG space
+        init_coords = (init_points / self.half_voxel).floor_().long()
         offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
-                            [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]], 
-                        dtype=points.dtype) * (self.voxel_size * 0.5)
-        init_feats = (init_points.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
-        init_keys  = unique_points(init_feats)
-        init_feats = (init_feats[:, None, :] - init_keys[None, :, :]).norm(dim=-1).min(1)[1].reshape(-1, 8)
+                            [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]]).long()
+        init_keys0 = (init_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
+        init_keys  = unique_points(init_keys0)
+        init_feats = (init_keys0[:, None, :] - init_keys[None, :, :]).float().norm(dim=-1).min(1)[1].reshape(-1, 8)
         
         points[: init_length] = init_points
         feats[: init_length] = init_feats
@@ -161,6 +168,7 @@ class DynamicEmbeddingBackbone(Backbone):
         self.register_buffer("keys", keys)
         self.register_buffer("keep", keep)
         self.register_buffer("offset", offset)
+        self.register_buffer("num_keys", torch.scalar_tensor(init_keys.size(0)).long())
 
         # voxel embeddings
         self.values = Embedding(self.total_size, self.embed_dim, None)
@@ -172,12 +180,54 @@ class DynamicEmbeddingBackbone(Backbone):
     def get_features(self, x):
         return self.values(x)
 
+    @torch.no_grad()
     def pruning(self, keep):
         self.keep.masked_scatter_(self.keep.bool(), keep.long())
+
+    @torch.no_grad()
+    def splitting(self, half_voxel):
+        offset = self.offset
+        point_xyz = self.points[self.keep.bool()]
+        point_feats = self.values(self.feats[self.keep.bool()])
+       
+        # generate new centers
+        half_voxel = half_voxel * .5
+        new_points = (point_xyz.unsqueeze(1) + offset.unsqueeze(0).type_as(point_xyz) * half_voxel).reshape(-1, 3)
+        
+        old_coords = (point_xyz / half_voxel).floor_().long()
+        new_coords = (old_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
+        
+        new_keys0 = (new_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
+        new_keys = unique_points(new_keys0)
+        new_feats = (new_keys0[:, None, :] - new_keys[None, :, :]).float().norm(dim=-1).min(1)[1].reshape(-1, 8)
+        
+        # recompute key vectors using trilinear interpolation 
+        new_keys_idx = (new_keys[:, None, :] - old_coords[None, :, :]).float().norm(dim=-1).min(1)[1]
+        p = (new_keys - old_coords[new_keys_idx]).type_as(point_xyz).unsqueeze(1) * .25 + 0.5 # (1/4 voxel size)
+        q = (self.offset.type_as(p) * .5 + .5).unsqueeze(0)   # (1/2 voxel size)
+        new_values = trilinear_interp(p, q, point_feats[new_keys_idx])
+        
+        # assign to the parameters
+        # TODO: safe assignment. do not over write the original embeddings
+        new_num_keys = new_values.size(0)
+        new_point_length = new_points.size(0)
+        new_feats = new_feats + self.num_keys
+
+        self.values.weight.data.index_copy_(
+            0,
+            torch.arange(self.num_keys, self.num_keys + new_num_keys, device=new_values.device),
+            new_values.data
+        )
+        self.points[: new_point_length] = new_points
+        self.feats[: new_point_length] = new_feats
+        self.keep = torch.zeros_like(self.keep)
+        self.keep[: new_point_length] = 1
+        self.num_keys = self.num_keys + new_num_keys
 
     @property
     def feature_dim(self):
         return self.embed_dim
+
 
 @register_backnone("minkunet")
 class MinkowskiUNetBackbone(Backbone):

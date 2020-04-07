@@ -6,9 +6,13 @@ import os
 import json
 import torch
 import numpy as np
+from collections import defaultdict
+
 from argparse import Namespace
 
 from fairseq.tasks import FairseqTask, register_task
+from fairseq.optim.fp16_optimizer import FP16Optimizer
+
 from fairdr.data import (
     ShapeViewDataset, SampledPixelDataset, 
     WorldCoordDataset, ShapeDataset, InfiniteDataset
@@ -59,6 +63,10 @@ class SingleObjRenderingTask(FairseqTask):
                             help="virtual epoch used in Infinite Dataset. if None, set max-update")
         parser.add_argument("--pruning-every-steps", type=int, default=None,
                             help="if the model supports pruning, prune unecessary voxels")
+        parser.add_argument("--half-voxel-size-at", type=str, default=None,
+                            help='specific detailed number of updates to half the voxel sizes')
+        parser.add_argument("--reduce-step-size-at", type=str, default=None,
+                            help='specific detailed number of updates to reduce the raymarching step sizes')
         parser.add_argument("--rendering-every-steps", type=int, default=None,
                             help="if set, enables rendering online with default parameters")
         parser.add_argument("--rendering-args", type=str, metavar='JSON')
@@ -78,7 +86,14 @@ class SingleObjRenderingTask(FairseqTask):
         self.pruning_every_steps = getattr(self.args, "pruning_every_steps", None)
         self.pruning_th = getattr(self.args, "pruning_th", 0.5)
         self.rendering_every_steps = getattr(self.args, "rendering_every_steps", None)
+        self.steps_to_half_voxels = getattr(self.args, "half_voxel_size_at", None)
+        self.steps_to_reduce_step = getattr(self.args, "reduce_step_size_at", None)
         
+        if self.steps_to_half_voxels is not None:
+            self.steps_to_half_voxels = [int(s) for s in self.steps_to_half_voxels.split(',')]
+        if self.steps_to_reduce_step is not None:
+            self.steps_to_reduce_step = [int(s) for s in self.steps_to_reduce_step.split(',')]
+           
         if self.rendering_every_steps is not None and getattr(args, "distributed_rank", -1) == 0:
             gen_args = {
                 'path': args.save_dir,
@@ -197,14 +212,26 @@ class SingleObjRenderingTask(FairseqTask):
 
     def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
         self._num_updates = update_num
+    
+        if self.steps_to_half_voxels is not None and \
+            self._num_updates in self.steps_to_half_voxels:
+            
+            model.adjust('split')
+            if isinstance(optimizer, FP16Optimizer):
+                optimizer.fp32_params.data.copy_(FP16Optimizer.build_fp32_params(optimizer.fp16_params, True).data)  
+    
+            # reset optimizer, forget the optimizer history after pruning.
+            # avoid harmful history of adam
+            for p in optimizer.optimizer.state:
+                for key in optimizer.optimizer.state[p]:
+                    if key != 'step':
+                        optimizer.optimizer.state[p][key] *= 0.0
 
-        model.pruning(th=self.pruning_th)
-        
         if self.pruning_every_steps is not None and \
             (self._num_updates % self.pruning_every_steps == 0) and \
             (self._num_updates > 0):
             model.eval()
-            model.pruning(th=self.pruning_th)
+            model.adjust('prune', th=self.pruning_th)
 
         if self.rendering_every_steps is not None and \
             (self._num_updates % self.rendering_every_steps == 0) and \
@@ -214,6 +241,10 @@ class SingleObjRenderingTask(FairseqTask):
             self.renderer.save_images(
                 self.inference_step(self.renderer, [model], [sample, 0])[1],
                 self._num_updates)
+        
+        if self.steps_to_reduce_step is not None and \
+            self._num_updates in self.steps_to_reduce_step:
+            model.adjust('reduce')
 
         return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
 

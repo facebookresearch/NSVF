@@ -79,6 +79,8 @@ class RenderingCriterion(FairseqCriterion):
                 metrics.log_scalar('a_' + w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
             elif w == 'loss':
                 metrics.log_scalar('loss', summed_logging_outputs['loss'] / sample_size, sample_size, priority=0, round=3)
+            elif '_log' in w:
+                metrics.log_scalar(w[:3], summed_logging_outputs[w] / sample_size, sample_size, priority=1, round=3)
 
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:
@@ -116,6 +118,7 @@ class SRNLossCriterion(RenderingCriterion):
                                 """)
         parser.add_argument('--freespace-weight', type=float, default=0.0)
         parser.add_argument('--occupancy-weight', type=float, default=0.0)
+        parser.add_argument('--density-weight', type=float, default=0.0)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
@@ -126,15 +129,28 @@ class SRNLossCriterion(RenderingCriterion):
                             help="instead of binary classification. use margin-loss")
         parser.add_argument('--no-background-loss', action='store_true',
                             help="do not compute RGB-loss on the background.")
+        parser.add_argument('--random-background-loss', action='store_true',
+                            help='set if we are using transparent image')
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         alpha  = (sample['alpha'] > 0.5)
         masks = alpha.clone() if self.args.no_background_loss else torch.ones_like(alpha)
         
         losses, other_logs = {}, {}
-        rgb_loss = utils.rgb_loss(
-            net_output['predicts'], sample['rgb'], 
-            masks, self.args.L1)
+        if 'other_logs' in net_output:
+            other_logs.update(net_output['other_logs'])
+        if not self.args.random_background_loss:
+            rgb_loss = utils.rgb_loss(
+                net_output['predicts'], sample['rgb'], 
+                masks, self.args.L1)
+        else:
+            random_bg = torch.zeros_like(net_output['predicts']).uniform_(-1, 1) * 0.1 + net_output['bg_color'].unsqueeze(0) * 0.9
+            predicts = net_output['predicts'] + \
+                net_output['missed'].unsqueeze(-1) * (random_bg - net_output['bg_color'].unsqueeze(0))
+            targets = sample['rgb'].masked_scatter(~(alpha.unsqueeze(-1).expand_as(random_bg)), random_bg)
+            rgb_loss = utils.rgb_loss(predicts, targets, 
+                masks, self.args.L1)
+        
         losses['rgb_loss'] = (rgb_loss, self.args.rgb_weight)
 
         if self.args.reg_weight > 0:
@@ -142,6 +158,9 @@ class SRNLossCriterion(RenderingCriterion):
             reg_loss = utils.depth_regularization_loss(
                 net_output['depths'], min_depths)
             losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
+
+        if self.args.density_weight > 0:
+            losses['den_loss'] = (net_output['density'], self.args.density_weight)
 
         if self.args.depth_weight > 0:
             if sample['depths'] is not None:

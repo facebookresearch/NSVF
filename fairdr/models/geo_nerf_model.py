@@ -15,7 +15,7 @@ from fairseq.models import (
     register_model_architecture
 )
 from fairdr.modules.pointnet2.pointnet2_utils import aabb_ray_intersect, uniform_ray_sampling
-from fairdr.data.geometry import ray
+from fairdr.data.geometry import ray, trilinear_interp
 from fairdr.models.point_srn_model import (
     PointSRNModel, PointSRNField, 
     embedding_base_architecture,
@@ -52,7 +52,6 @@ class GEONERFModel(PointSRNModel):
                             help='chunk the input rays in the very beginning if the image was too large.')
         parser.add_argument('--inner-chunking', action='store_true', 
                             help="if set, chunking in the field function, otherwise, chunking in the rays")
-        
         parser.add_argument('--raymarching-stepsize', type=float, metavar='N',
                             help='ray marching step size')
         parser.add_argument('--bounded', action='store_true', 
@@ -73,52 +72,63 @@ class GEONERFModel(PointSRNModel):
         S, V, P, _ = ray_dir.size()
         predicts = self.field.bg_color.unsqueeze(0).expand(S * V * P, 3)
         depths = predicts.new_ones(S * V * P) * BG_DEPTH
+        missed = predicts.new_ones(S * V * P)
         first_hits = predicts.new_ones(S * V * P).long() * -1
+        density = 0
 
         hits, _ray_start, _ray_dir, state, samples = \
             self.field.ray_intersection(ray_start, ray_dir, xyz, feats)
 
-        if hits.sum() <= 0:   # missed everything
-            return predicts.view(S, V, P, 3), depths.view(S, V, P), first_hits.view(S, V, P)
-        hits = hits.view(S * V * P).contiguous()
+        if hits.sum() > 0:   # missed everything
+            hits = hits.view(S * V * P).contiguous()
 
-        # fine-grained raymarching + rendering
-        _predicts, _depths, _missed = self.raymarcher(self.field, _ray_start, _ray_dir, samples, state)
-        _predicts = _predicts + self.field.bg_color * _missed.unsqueeze(-1)  # fill background color
-        _depths = _depths + BG_DEPTH * _missed
+            # fine-grained raymarching + rendering
+            _predicts, _depths, _missed, _density = self.raymarcher(self.field, _ray_start, _ray_dir, samples, state)
+            _predicts = _predicts + self.field.bg_color * _missed.unsqueeze(-1)  # fill background color
+            _depths = _depths + BG_DEPTH * _missed
 
-        predicts = predicts.masked_scatter(
-            hits.unsqueeze(-1).expand(S * V * P, 3),
-            _predicts)
-        depths = depths.masked_scatter(
-            hits, _depths
-        )
-        first_hits = first_hits.masked_scatter(
-            hits, samples[1][:, 0].long()
-        )
-        return predicts.view(S, V, P, 3), depths.view(S, V, P), first_hits.view(S, V, P)
+            predicts = predicts.masked_scatter(
+                hits.unsqueeze(-1).expand(S * V * P, 3),
+                _predicts)
+            depths = depths.masked_scatter(
+                hits, _depths
+            )
+            missed = missed.masked_scatter(
+                hits, _missed
+            )
+            first_hits = first_hits.masked_scatter(
+                hits, samples[1][:, 0].long()
+            )
+            density = _density.float().mean().type_as(_density)
+
+        return predicts.view(S, V, P, 3), depths.view(S, V, P), first_hits.view(S, V, P), missed.view(S, V, P), density
 
     def forward(self, ray_start, ray_dir, points, raymarching_steps=None, **kwargs):
         # get geometry features
         feats, xyz = self.field.get_backbone_features(points)
-
-        # from fairseq import pdb; pdb.set_trace()
         chunk_size = 800 * 800 # getattr(self.args, "outer_chunk_size", 400 * 400)
         if chunk_size >= ray_dir.size(2):
             # no need to chunk if the input is small
-            predicts, depths, first_hits = self._forward(ray_start, ray_dir, feats, xyz, **kwargs)
+            predicts, depths, first_hits, missed, density = self._forward(ray_start, ray_dir, feats, xyz, **kwargs)
         
         else:            
-            predicts, depths, first_hits = zip(*[
+            predicts, depths, first_hits, missed, density = zip(*[
                 self._forward(ray_start, ray_dir[:, :, i: i+chunk_size], feats, xyz, **kwargs)
             for i in range(0, ray_dir.size(2), chunk_size)])
             predicts, depths = torch.cat(predicts, 2), torch.cat(depths, 2)
+            missed, first_hits = torch.cat(missed, 2), torch.cat(first_hits, 2)
 
         # model's output
         results = {
             'predicts': predicts,
             'depths': depths,
-            'hits': first_hits
+            'hits': first_hits,
+            'missed': missed,
+            'density': density,
+            'bg_color': self.field.bg_color,
+            'other_logs': {
+                'voxel_log': self.field.VOXEL_SIZE.item(),
+                'marchstep_log': self.raymarcher.MARCH_SIZE.item()}
         }
     
         # caching the prediction
@@ -131,11 +141,27 @@ class GEONERFModel(PointSRNModel):
         return results
 
     @torch.no_grad()
-    def pruning(self, *args, **kwargs):
-        # get geometry features
+    def adjust(self, action, *args, **kwargs):
+        # action=['prune', 'split', 'shrink']
         assert self.args.backbone == "dynamic_embedding", \
             "pruning currently only supports dynamic embedding"
-        self.field.pruning(*args, **kwargs)
+
+        if action == 'prune':
+            self.field.pruning(*args, **kwargs)
+        elif action == 'split':
+            self.field.splitting()
+        elif action == 'reduce':
+            logger.info("reduce the raymarching step size {} -> {}".format(
+                self.field.MARCH_SIZE.item(), self.field.MARCH_SIZE.item() * .5))
+            self.raymarcher.MARCH_SIZE *= 0.5
+            self.field.MARCH_SIZE *= 0.5
+        else:
+            raise NotImplementedError("please specify 'prune, split, shrink' actions")
+    
+    @property
+    def text(self):
+        return "GEONERF model (voxel size: {:.4f}, march step: {:.4f})".format(
+            self.field.VOXEL_SIZE, self.raymarcher.MARCH_SIZE)
 
 
 class GEORadianceField(PointSRNField):
@@ -143,7 +169,6 @@ class GEORadianceField(PointSRNField):
     def __init__(self, args):
         super().__init__(args)
         self.max_hits = args.max_hits
-        self.step_size = args.raymarching_stepsize
         self.chunk_size = 1024 * args.chunk_size
         self.bg_color = nn.Parameter(
             torch.tensor((1.0, 1.0, 1.0)) * getattr(args, "transparent_background", -0.8), 
@@ -160,6 +185,10 @@ class GEORadianceField(PointSRNField):
         assert not args.lstm_sdf, "we do not support LSTM field"
         assert self.intersection_type == 'aabb', "we only support AABB for now"
 
+        # register voxel-size and step-size
+        self.register_buffer("VOXEL_SIZE", torch.scalar_tensor(args.ball_radius))
+        self.register_buffer("MARCH_SIZE", torch.scalar_tensor(args.raymarching_stepsize))
+
     def get_backbone_features(self, points):
         if (not self.trilinear_interp) or self.dynamic_embed:
            return self.backbone(points, add_dummy=True)
@@ -172,14 +201,10 @@ class GEORadianceField(PointSRNField):
     def get_feature(self, xyz, point_feats, point_xyz):
         point_feats = self.backbone.get_features(point_feats).view(point_feats.size(0), -1)
         if self.trilinear_interp:
-            xyz = (xyz - point_xyz) / self.ball_radius + 0.5
-            xyz = xyz[:, None, :]
-            offset = self.backbone.offset / self.ball_radius + 0.5
-            offset = offset[None, :, :]
-            weights = (xyz * offset + (1 - xyz) * (1 - offset)).prod(dim=-1, keepdim=True) 
-            point_feats = (weights * point_feats.view(point_feats.size(0), 8, -1)).sum(1)
-            xyz = xyz.squeeze(1)
-
+            p = ((xyz - point_xyz) / self.VOXEL_SIZE + .5).unsqueeze(1)
+            q = (self.backbone.offset.type_as(p) * .5 + .5).unsqueeze(0)
+            point_feats = trilinear_interp(p, q, point_feats)
+           
         if self.raypos_features > 0:
             if self.relative_position:
                 point_feats = torch.cat([point_feats, self.point_proj(xyz - point_xyz)], -1)
@@ -228,7 +253,7 @@ class GEORadianceField(PointSRNField):
         ray_dir = ray_dir.reshape(S, V * P, 3)
         ray_intersect_fn = aabb_ray_intersect
         pts_idx, min_depth, max_depth = ray_intersect_fn(
-            self.ball_radius, self.max_hits, point_xyz, ray_start, ray_dir)
+            self.VOXEL_SIZE, self.max_hits, point_xyz, ray_start, ray_dir)
 
         # sort the depths
         min_depth.masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
@@ -246,11 +271,10 @@ class GEORadianceField(PointSRNField):
         pts_idx = pts_idx[hits]
         min_depth = min_depth[hits]
         max_depth = max_depth[hits]
-        max_steps = int(((max_depth - min_depth).sum(-1) / self.step_size).ceil_().max())
-
+        max_steps = int(((max_depth - min_depth).sum(-1) / self.MARCH_SIZE).ceil_().max())
         sampled_idx, sampled_depth, sampled_dists = [p.squeeze(0) for p in 
             uniform_ray_sampling(
-                self.step_size, max_steps, 
+                self.MARCH_SIZE, max_steps, 
                 pts_idx.unsqueeze(0), min_depth.unsqueeze(0), max_depth.unsqueeze(0),
                 self.deterministic_step or (not self.training)
             )]
@@ -266,20 +290,16 @@ class GEORadianceField(PointSRNField):
         return hits, ray_start, ray_dir, (point_feats, point_xyz), (sampled_depth, sampled_idx, sampled_dists)
 
     @torch.no_grad()
-    def pruning(self, th=0.5):
-
-
-
+    def pruning(self, th=0.5):    
         feats, xyz = [a[0] for a in self.backbone(None)]
-
         D = feats.size(-1)
-        G = int(self.ball_radius / self.step_size)  # how many microgrids to split
+        G = int(self.VOXEL_SIZE / self.MARCH_SIZE)  # how many microgrids to split
         
         logger.info("start pruning")
 
         # prepare queries for all the voxels
         c = torch.arange(1, 2 * G, 2, device=xyz.device)
-        voxel_size = self.ball_radius
+        voxel_size = self.VOXEL_SIZE
         ox, oy, oz = torch.meshgrid([c, c, c])
         offsets = (torch.cat([
                     ox.reshape(-1, 1), 
@@ -296,7 +316,7 @@ class GEORadianceField(PointSRNField):
         sigma,  = self.forward(queries, point_feats, point_xyz, outputs=['sigma'])
         assert (not self.sigmoid_activation), "currently does not support sigmoid based"
         
-        sigma_dist = torch.relu(sigma) * self.step_size
+        sigma_dist = torch.relu(sigma) * self.MARCH_SIZE
         sigma_dist = sigma_dist.reshape(-1, G ** 3)
 
         alpha = 1 - torch.exp(-sigma_dist.sum(-1))   # probability of filling the full voxel
@@ -306,18 +326,27 @@ class GEORadianceField(PointSRNField):
         logger.info("pruning done. before: {}, after: {} voxels".format(xyz.size(0), keep.sum()))
         self.backbone.pruning(keep=keep)
 
-        
+    @torch.no_grad()
+    def splitting(self):
+        logger.info("half the voxel size {} -> {}".format(
+            self.VOXEL_SIZE.item(), self.VOXEL_SIZE.item() * .5))
+        self.backbone.splitting(self.VOXEL_SIZE * .5)
+        self.VOXEL_SIZE *= .5
+        logger.info("Total voxel number increases to {}".format(self.backbone.keep.sum()))
+    
 class GEORadianceRenderer(Raymarcher):
 
     def __init__(self, args):
         super().__init__(args)
-        self.step_size = args.raymarching_stepsize
         self.chunk_size = 1024 * args.chunk_size
         self.inner_chunking = getattr(args, "inner_chunking", True)
         self.discrete_reg = getattr(args, "discrete_regularization", False)
         self.sigmoid_activation = getattr(args, "sigmoid_activation", False)
         self.deterministic_step = getattr(args, "deterministic_step", False)
         self.expectation = getattr(args, "expectation", "rgb")
+
+        # raymarching stepsize
+        self.register_buffer("MARCH_SIZE", torch.scalar_tensor(args.raymarching_stepsize))
 
     def _forward(self, field_fn, ray_start, ray_dir, samples, state=None):
         """
@@ -356,7 +385,7 @@ class GEORadianceRenderer(Raymarcher):
         
         if not self.sigmoid_activation:
             if self.deterministic_step:
-                dists = self.step_size
+                dists = self.MARCH_SIZE
             else:
                 dists = sampled_dists
             sigma_dist = torch.relu(noise + sigma) * dists  # follow NERF paper implementation
@@ -364,6 +393,8 @@ class GEORadianceRenderer(Raymarcher):
         else:
             assert self.deterministic_step, "sigmoid activation only supports deterministic steps"
             sigma_dist = -F.logsigmoid(sigma + noise)
+
+        total_density = sigma_dist.clone()
 
         sigma_dist = torch.zeros_like(sampled_depth).masked_scatter(sample_mask, sigma_dist)
         shifted_sigma_dist = torch.cat([sigma_dist.new_zeros(P, 1), sigma_dist[:, :-1]], dim=-1)  # shift one step
@@ -398,7 +429,7 @@ class GEORadianceRenderer(Raymarcher):
         else:
             raise NotImplementedError
 
-        return rgb, depth, missed
+        return rgb, depth, missed, total_density
 
     def forward(self, field_fn, ray_start, ray_dir, samples, state=None):
         if self.inner_chunking:

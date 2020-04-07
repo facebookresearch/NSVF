@@ -107,7 +107,7 @@ def _main(args, output_file):
             wps_meter.update(500)
             t.log({'wps': round(wps_meter.avg)})
             
-    generator.save_images(output_files)
+    generator.save_images(output_files, combine_output=args.render_combine_output)
 
 def cli_main():
     parser = options.get_rendering_parser()

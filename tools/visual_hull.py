@@ -144,7 +144,6 @@ def voxelize_bbx(verts, voxel_size, fname):
     return ovoxels
 
 if not args.marching_cube:
-    from fairseq import pdb; pdb.set_trace()
     ox, oy, oz = (occupancy >= th).nonzero()        # sparse voxel indexs
     verts = points[:3, ox * s * s + oy * s + oz].T  # sparse voxel coords
     pcd = o3d.geometry.PointCloud()

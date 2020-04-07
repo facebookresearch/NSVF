@@ -151,5 +151,9 @@ def compute_normal_map(ray_start, ray_dir, depths, RT, width=512):
     return _normal
 
 
-# def shpere_sampling():
-#     pass
+def trilinear_interp(p, q, point_feats):
+    weights = (p * q + (1 - p) * (1 - q)).prod(dim=-1, keepdim=True)
+    if point_feats.dim() == 2:
+        point_feats = point_feats.view(point_feats.size(0), 8, -1)
+    point_feats = (weights * point_feats).sum(1)
+    return point_feats

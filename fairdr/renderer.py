@@ -34,7 +34,6 @@ class NeuralRenderer(object):
                 up=(0,1,0),
                 output_dir=None,
                 output_type=None,
-                combine_output=True,
                 fps=24):
 
         self.frames = frames
@@ -47,7 +46,6 @@ class NeuralRenderer(object):
         self.output_type = output_type
         self.at = at
         self.up = up
-        self.combine_output = combine_output
         self.fps = fps
 
         if self.path_gen is None:
@@ -85,6 +83,8 @@ class NeuralRenderer(object):
         model = models[0]
         model.eval()
         
+        logger.info("rendering starts. {}".format(model.text))
+
         rgb_path = tempfile.mkdtemp()
         image_names = []
         sample, step = sample
@@ -134,15 +134,16 @@ class NeuralRenderer(object):
                 step = next_step
         return step, image_names
 
-    def save_images(self, output_files, steps=None):
+    def save_images(self, output_files, steps=None, combine_output=True):
         timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
         if steps is not None:
             timestamp = "step_{}.".format(steps) + timestamp
 
-        if not self.combine_output:
+        if not combine_output:
             for type in self.output_type:
                 images = [imageio.imread(file_path) for file_path in output_files if type in file_path] 
-                imageio.mimsave('{}/{}_{}.gif'.format(self.output_dir, type, timestamp), images, fps=self.fps)
+                # imageio.mimsave('{}/{}_{}.gif'.format(self.output_dir, type, timestamp), images, fps=self.fps)
+                imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, type, timestamp), images, fps=self.fps, quality=8)
         else:
             images = [[imageio.imread(file_path) for file_path in output_files if type in file_path] for type in self.output_type]
             images = [np.concatenate([images[j][i] for j, _ in enumerate(self.output_type)], 1) for i in range(len(images[0]))]

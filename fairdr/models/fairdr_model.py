@@ -39,9 +39,13 @@ class BaseModel(BaseFairseqModel):
     def visualize(self, **kwargs):
         return NotImplementedError
 
-    def pruning(self, **kwargs):
+    def adjust(self, **kwargs):
         # do nothing
         pass
+
+    @property
+    def text(self):
+        return "FAIRDR BaseModel"
 
 class Field(nn.Module):
 
