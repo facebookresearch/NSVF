@@ -211,18 +211,19 @@ class DynamicEmbeddingBackbone(Backbone):
         # TODO: safe assignment. do not over write the original embeddings
         new_num_keys = new_values.size(0)
         new_point_length = new_points.size(0)
-        new_feats = new_feats + self.num_keys
+        # new_feats = new_feats + self.num_keys
+        # 1 // 0
 
         self.values.weight.data.index_copy_(
             0,
-            torch.arange(self.num_keys, self.num_keys + new_num_keys, device=new_values.device),
+            torch.arange(new_num_keys, device=new_values.device),
             new_values.data
         )
         self.points[: new_point_length] = new_points
         self.feats[: new_point_length] = new_feats
         self.keep = torch.zeros_like(self.keep)
         self.keep[: new_point_length] = 1
-        self.num_keys = self.num_keys + new_num_keys
+        self.num_keys += (new_num_keys - self.num_keys)
 
     @property
     def feature_dim(self):

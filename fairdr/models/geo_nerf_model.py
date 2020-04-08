@@ -73,7 +73,7 @@ class GEONERFModel(PointSRNModel):
         predicts = self.field.bg_color.unsqueeze(0).expand(S * V * P, 3)
         depths = predicts.new_ones(S * V * P) * BG_DEPTH
         missed = predicts.new_ones(S * V * P)
-        first_hits = predicts.new_ones(S * V * P).long() * -1
+        first_hits = predicts.new_ones(S * V * P).long().fill_(self.field.num_voxels)
         density = 0
 
         hits, _ray_start, _ray_dir, state, samples = \
@@ -160,8 +160,8 @@ class GEONERFModel(PointSRNModel):
     
     @property
     def text(self):
-        return "GEONERF model (voxel size: {:.4f}, march step: {:.4f})".format(
-            self.field.VOXEL_SIZE, self.raymarcher.MARCH_SIZE)
+        return "GEONERF model (voxel size: {:.4f} ({} voxels), march step: {:.4f})".format(
+            self.field.VOXEL_SIZE, self.field.num_voxels, self.raymarcher.MARCH_SIZE)
 
 
 class GEORadianceField(PointSRNField):
@@ -332,13 +332,18 @@ class GEORadianceField(PointSRNField):
             self.VOXEL_SIZE.item(), self.VOXEL_SIZE.item() * .5))
         self.backbone.splitting(self.VOXEL_SIZE * .5)
         self.VOXEL_SIZE *= .5
-        logger.info("Total voxel number increases to {}".format(self.backbone.keep.sum()))
+        logger.info("Total voxel number increases to {}".format(self.num_voxels))
     
+    @property
+    def num_voxels(self):
+        return self.backbone.keep.sum()
+
+
 class GEORadianceRenderer(Raymarcher):
 
     def __init__(self, args):
         super().__init__(args)
-        self.chunk_size = 1024 * args.chunk_size
+        self.chunk_size = 256 * args.chunk_size  # 1024
         self.inner_chunking = getattr(args, "inner_chunking", True)
         self.discrete_reg = getattr(args, "discrete_regularization", False)
         self.sigmoid_activation = getattr(args, "sigmoid_activation", False)

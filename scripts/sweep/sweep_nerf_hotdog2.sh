@@ -1,6 +1,6 @@
 ROOT=/private/home/jgu/data/shapenet/
 DATA=hotdog2
-WORK=/checkpoint/jgu/space/neuralrendering/debug_nerf_hotdog3
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_hotdog
 mkdir -p ${WORK}
 
 GRID=srn_lego
@@ -12,37 +12,15 @@ ENGINE=~jgu/work/neuralrendering
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-# python fb_sweep/sweep_nerf.py \
-#     --data ${ROOT}/${DATA} \
-#     --grid $GRID \
-#     --user-dir "fairdr" \
-#     --checkpoints-dir ${WORK} \
-#     --tensorboard-logdir ${WORK}/tensorboard \
-#     --snapshot-code \
-#     --snapshot-root ${WORK}/snapshot \
-#     --prefix ${DATA}ver4 \
-#     --num-trials 1 \
-#     --num-gpus 8 \
-#     --num-nodes 1 \
-#     --mem 500gb \
-#     --constraint volta32gb \
-#     --exclusive \
-#     --comment "NeurIPS2020 deadline." \
-#     --partition learnfair \
-#     --resume-failed \
-    # --local \
-   
-# popd
-
 python fb_sweep/sweep_nerf.py \
-    --data ${ROOT}/${DATA}  \
+    --data ${ROOT}/${DATA} \
     --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
-    --no-tensorboard \
+    --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_DYNv3 \
+    --prefix ${DATA}ver4 \
     --num-trials 1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -50,8 +28,30 @@ python fb_sweep/sweep_nerf.py \
     --constraint volta32gb \
     --exclusive \
     --comment "NeurIPS2020 deadline." \
-    --partition priority \
+    --partition learnfair \
     --resume-failed \
     --local \
+   
+popd
+
+# python fb_sweep/sweep_nerf.py \
+#     --data ${ROOT}/${DATA}  \
+#     --grid $GRID \
+#     --user-dir "fairdr" \
+#     --checkpoints-dir ${WORK} \
+#     --no-tensorboard \
+#     --snapshot-code \
+#     --snapshot-root ${WORK}/snapshot \
+#     --prefix ${DATA}_DYNv3 \
+#     --num-trials 1 \
+#     --num-gpus 8 \
+#     --num-nodes 1 \
+#     --mem 500gb \
+#     --constraint volta32gb \
+#     --exclusive \
+#     --comment "NeurIPS2020 deadline." \
+#     --partition priority \
+#     --resume-failed \
+#     --local \
 # #     # --dry-run
 # popd

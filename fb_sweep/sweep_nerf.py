@@ -268,7 +268,7 @@ def get_hotdog_reload_grid(args):
     gen_args = {
         'render_resolution': 400,
         'render_output_types': ["hit", "rgb", "depth", "normal"],
-        'render_path_args': "{'radius': 1.5, 'h': 0.5, 'axis': 'z', 't0': -2, 'r':-1}",
+        'render_path_args': "{'radius': 0.8, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}",
     }
     gen_args = json.dumps(gen_args)
 
@@ -287,8 +287,8 @@ def get_hotdog_reload_grid(args):
         # hyperparam('--max-valid-view', 100),
         hyperparam('--pruning-every-steps', 2500, save_dir_key=lambda val: f'prune{val}'),
         hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
-        hyperparam('--half-voxel-size-at', "10000,50000", save_dir_key=lambda val: f'dyvox'),
-        hyperparam('--reduce-step-size-at', "10000,50000"),
+        hyperparam('--half-voxel-size-at', "5000,50000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--reduce-step-size-at', "5000,50000"),
 
         hyperparam('--rendering-every-steps', 1000),
         hyperparam('--rendering-args', gen_args),
@@ -296,9 +296,9 @@ def get_hotdog_reload_grid(args):
         hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p{val}'),
         hyperparam('--sampling-on-mask', 0.5),
         hyperparam('--sampling-on-bbox', binary_flag=True),
-        hyperparam('--raymarching-stepsize', 0.005, save_dir_key=lambda val: f'ss{val}'),
+        hyperparam('--raymarching-stepsize', 0.0075, save_dir_key=lambda val: f'ss{val}'),
 
-        hyperparam('--chunk-size', 256, save_dir_key=lambda val: f'chk{val}'),
+        hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk{val}'),
         hyperparam('--inner-chunking', True, binary_flag=True),
 
         hyperparam('--no-load-binary', binary_flag=True),
@@ -310,8 +310,6 @@ def get_hotdog_reload_grid(args):
         hyperparam('--reg-weight', 0.0),
         hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
         # hyperparam('--random-background-loss', True, binary_flag=True, save_dir_key=lambda val: 'rbl'),
-        # hyperparam('--freespace-weight', 0.0, save_dir_key=lambda val: f'fs{val}'),
-        # hyperparam('--occupancy-weight', 0.0, save_dir_key=lambda val: f'oc{val}'),
 
         # specific arguments
         hyperparam('--arch', 'geo_nerf_dyn', save_dir_key=lambda val: val),
@@ -320,19 +318,18 @@ def get_hotdog_reload_grid(args):
         hyperparam('--max-hits', 36),
         
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
+        hyperparam('--nerf-pos', True, binary_flag=True, save_dir_key=lambda val: f'np'),
         hyperparam('--quantized-embed-dim', 378, save_dir_key=lambda val: f'emb{val}'),
         # hyperparam('--raypos-features', 144, save_dir_key=lambda val: f'pos{val}'),
 
         hyperparam('--ball-radius', 0.06, save_dir_key=lambda val: f'v{val}'),
-        # hyperparam('--ball-radius', 0.03, save_dir_key=lambda val: f'v{val}'),
-        # hyperparam('--relative-position', binary_flag=True, save_dir_key=lambda val: 'rel'),
         hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
         hyperparam('--background-stop-gradient', True, binary_flag=True, save_dir_key=lambda val: f'bgsg'),
         hyperparam('--discrete-regularization', True, binary_flag=True, save_dir_key=lambda val: f'dis'),
         # hyperparam('--deterministic-step', True, binary_flag=True, save_dir_key=lambda val: 'dstep'),
         hyperparam('--intersection-type', 'aabb', save_dir_key=lambda val: f'{val}'),
         hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
-        hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
+        hyperparam('--raydir-features', 36, save_dir_key=lambda val: f'r{val}'),
         
         # hyperparam('--expectation', "depth", save_dir_key=lambda val: f'e_{val}'),
         # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
@@ -361,13 +358,13 @@ def get_hotdog_reload_grid(args):
         hyperparam('--log-format', 'simple'),
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
-    hyperparams += [
-        hyperparam('--restore-file', 
-            "/checkpoint/jgu//space/neuralrendering/" + 
-            "debug_nerf_hotdog3/hotdog2ver4.fp16.single.400x400.s1.v1.prune2500.th0.5.dyvox.p16384.ss0.005.chk512.p.rgb200.0.vgg1.0.geo_nerf_dyn.sdfh128.posemb.emb378.v0.06.bg1.0.bgsg.dis.aabb.raydir.r24.adam.lr_poly.max100000.lr0.001.clip0.0.wd0.0.seed20.ngpu8/" + 
-            "checkpoint_last.pt", save_dir_key=lambda val: "re"),
-        # hyperparam('--save-interval-updates', 1),
-    ]
+    # hyperparams += [
+    #     hyperparam('--restore-file', 
+    #         "/checkpoint/jgu//space/neuralrendering/" + 
+    #         "debug_nerf_hotdog3/hotdog2ver4.fp16.single.400x400.s1.v1.prune2500.th0.5.dyvox.p16384.ss0.005.chk512.p.rgb200.0.vgg1.0.geo_nerf_dyn.sdfh128.posemb.emb378.v0.06.bg1.0.bgsg.dis.aabb.raydir.r24.adam.lr_poly.max100000.lr0.001.clip0.0.wd0.0.seed20.ngpu8/" + 
+    #         "checkpoint_last.pt", save_dir_key=lambda val: "re"),
+    #     # hyperparam('--save-interval-updates', 1),
+    # ]
     return hyperparams
 
 
@@ -762,12 +759,12 @@ def get_newlego_grid(args):
         hyperparam('--rendering-every-steps', 1000),
         hyperparam('--rendering-args', gen_args),
 
-        hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p{val}'),
+        hyperparam('--pixel-per-view', 10000, save_dir_key=lambda val: f'p16384'),
         hyperparam('--sampling-on-mask', 0.5),
         hyperparam('--sampling-on-bbox', binary_flag=True),
         hyperparam('--raymarching-stepsize', 0.02, save_dir_key=lambda val: f'ss{val}'),
 
-        hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk{val}'),
+        hyperparam('--chunk-size', 256, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', True, binary_flag=True),
 
         hyperparam('--no-load-binary', binary_flag=True),

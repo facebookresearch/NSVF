@@ -50,6 +50,34 @@ class PosEmbLinear(nn.Module):
         return self.linear(x)
 
 
+class NeRFPosEmbLinear(nn.Module):
+
+    def __init__(self, in_dim, out_dim, angular=False):
+        super().__init__()
+        assert out_dim % (2 * in_dim) == 0, "dimension must be dividable"
+        L = out_dim // 2 // in_dim
+        emb = torch.exp(torch.arange(L, dtype=torch.float) * math.log(2.))
+        if not angular:
+            emb = emb * math.pi
+
+        self.emb = nn.Parameter(emb, requires_grad=False)
+        self.angular = angular
+        self.linear = Linear(out_dim, out_dim)
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+
+    def forward(self, x):
+        assert x.size(-1) == self.in_dim, "size must match"
+        sizes = x.size()
+        if self.angular:
+            x = torch.acos(x)
+        x = x.unsqueeze(-1) @ self.emb.unsqueeze(0)
+        x = torch.cat([torch.sin(x), torch.cos(x)], dim=-1)
+        x = x.view(*sizes[:-1], self.out_dim)
+        return self.linear(x)
+
+
+
 class FCLayer(nn.Module):
     """
     Reference:

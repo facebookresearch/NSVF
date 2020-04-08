@@ -83,6 +83,8 @@ class SingleObjRenderingTask(FairseqTask):
             self.writer = None
 
         self._num_updates = 0
+        self._safe_steps = 0
+
         self.pruning_every_steps = getattr(self.args, "pruning_every_steps", None)
         self.pruning_th = getattr(self.args, "pruning_th", 0.5)
         self.rendering_every_steps = getattr(self.args, "rendering_every_steps", None)
@@ -226,6 +228,9 @@ class SingleObjRenderingTask(FairseqTask):
                 for key in optimizer.optimizer.state[p]:
                     if key != 'step':
                         optimizer.optimizer.state[p][key] *= 0.0
+            
+            # set safe steps. do not update parameters, accumulate Adam state
+            self._safe_steps = 100
 
         if self.pruning_every_steps is not None and \
             (self._num_updates % self.pruning_every_steps == 0) and \
@@ -245,6 +250,10 @@ class SingleObjRenderingTask(FairseqTask):
         if self.steps_to_reduce_step is not None and \
             self._num_updates in self.steps_to_reduce_step:
             model.adjust('reduce')
+
+        if self._safe_steps > 0:  # do not update parameters, accumulate Adam state
+            optimizer.set_lr(0.0)
+            self._safe_steps -= 1
 
         return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
 

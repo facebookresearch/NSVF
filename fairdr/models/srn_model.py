@@ -140,7 +140,7 @@ class SRNModel(BaseModel):
                 'img': output['hits'][shape, view].float(), 
                 'min_val': 0, 
                 'max_val': output['hits'].max(),
-                'bg': -1}
+                'bg': output['hits'].max()}
         
         if target_map:
             images.update({

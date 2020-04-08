@@ -11,7 +11,7 @@ from fairseq.models import (
 )
 
 from fairdr.data.geometry import ray
-from fairdr.modules.linear import Linear, PosEmbLinear
+from fairdr.modules.linear import Linear, PosEmbLinear, NeRFPosEmbLinear
 from fairdr.modules.implicit import ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField
 from fairdr.models.srn_model import SRNModel, SRNField, base_architecture
 from fairdr.modules.backbone import BACKBONE_REGISTRY
@@ -38,6 +38,8 @@ class PointSRNModel(SRNModel):
         parser.add_argument("--relative-position", action='store_true')
         parser.add_argument("--pos-embed", action='store_true', 
                             help='use positional embedding instead of linear projection')
+        parser.add_argument("--nerf-pos", action='store_true', 
+                            help='instead of standard transformer-based position. use NERF based.')
         parser.add_argument('--use-raydir', action='store_true', 
                             help='if set, use view direction as additional inputs')
         parser.add_argument('--raydir-features', type=int, metavar='N',
@@ -101,15 +103,22 @@ class PointSRNField(SRNField):
             else getattr(args, "raypos_features")
 
         if self.raypos_features > 0:
-            self.point_proj = Linear(args.input_features, self.raypos_features) \
-                if not getattr(args, "pos_embed", False) \
-                else PosEmbLinear(args.input_features, self.raypos_features)
+            if not getattr(args, "pos_embed", False):
+                self.point_proj = Linear(args.input_features, self.raypos_features)
+            elif not getattr(args, "nerf_pos", False):
+                self.point_proj = PosEmbLinear(args.input_features, self.raypos_features)
+            else:
+                self.point_proj = NeRFPosEmbLinear(args.input_features, self.raypos_features, angular=False)
 
         if self.use_raydir:
             self.raydir_features = getattr(args, "raydir_features", 144)
-            self.raydir_proj = Linear(3, self.raydir_features) \
-                if not getattr(args, "pos_embed", False) \
-                else PosEmbLinear(3, self.raydir_features)
+            
+            if not getattr(args, "pos_embed", False):
+                self.raydir_proj = Linear(3, self.raydir_features)
+            elif not getattr(args, "nerf_pos", False):
+                self.raydir_proj = PosEmbLinear(3, self.raydir_features)
+            else:
+                self.raydir_proj = NeRFPosEmbLinear(3, self.raydir_features, angular=True)
 
         self.feature_field = ImplicitField(
             args, 
@@ -183,6 +192,7 @@ class PointSRNField(SRNField):
 
 def base_point_architecture(args):
     args.pos_embed = getattr(args, "pos_embed", False)
+    args.nerf_pos = getattr(args, "nerf_pos", False)
     args.use_raydir = getattr(args, "use_raydir", False)
     args.raydir_features = getattr(args, "raydir_features", 144)
     args.raypos_features = getattr(args, "raypos_features", None)

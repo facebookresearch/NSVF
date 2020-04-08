@@ -26,7 +26,7 @@ python fb_sweep/sweep_nerf.py \
     --comment "NeurIPS2020 deadline." \
     --partition priority \
     --resume-failed \
-    # --local \
+    --local \
    
 # popd
 
