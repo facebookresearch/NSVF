@@ -96,10 +96,10 @@ class SingleObjRenderingTask(FairseqTask):
         if self.steps_to_reduce_step is not None:
             self.steps_to_reduce_step = [int(s) for s in self.steps_to_reduce_step.split(',')]
            
-        if self.rendering_every_steps is not None and getattr(args, "distributed_rank", -1) == 0:
+        if self.rendering_every_steps is not None:
             gen_args = {
                 'path': args.save_dir,
-                'render_beam': 5, 'render_resolution': 512,
+                'render_beam': 1, 'render_resolution': 512,
                 'render_num_frames': 120, 'render_angular_speed': 3,
                 'render_output_types': ["rgb"], 'render_raymarching_steps': 10,
                 'render_at_vector': "(0,0,0)", 'render_up_vector': "(0,0,-1)",
@@ -243,9 +243,9 @@ class SingleObjRenderingTask(FairseqTask):
             (self._num_updates > 0) and \
             self.renderer is not None:
 
-            self.renderer.save_images(
-                self.inference_step(self.renderer, [model], [sample, 0])[1],
-                self._num_updates)
+            outputs = self.inference_step(self.renderer, [model], [sample, 0])[1]
+            if getattr(self.args, "distributed_rank", -1) == 0:  # save only for master
+                self.renderer.save_images(outputs, self._num_updates)
         
         if self.steps_to_reduce_step is not None and \
             self._num_updates in self.steps_to_reduce_step:

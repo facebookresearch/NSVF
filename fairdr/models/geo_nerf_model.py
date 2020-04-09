@@ -169,7 +169,7 @@ class GEORadianceField(PointSRNField):
     def __init__(self, args):
         super().__init__(args)
         self.max_hits = args.max_hits
-        self.chunk_size = 1024 * args.chunk_size
+        self.chunk_size = 256 * args.chunk_size
         self.bg_color = nn.Parameter(
             torch.tensor((1.0, 1.0, 1.0)) * getattr(args, "transparent_background", -0.8), 
             requires_grad=(not getattr(args, "background_stop_gradient", False)))
@@ -232,7 +232,7 @@ class GEORadianceField(PointSRNField):
     def forward(self, *args, **kwargs):
         if not self.inner_chunking:
             return self._forward(*args, **kwargs)
-
+        
         chunk_size = self.chunk_size
         outputs = zip(*[
                 self._forward(*[a[i: i + chunk_size] 
@@ -246,6 +246,7 @@ class GEORadianceField(PointSRNField):
         return tuple(outputs)
 
     def ray_intersection(self, ray_start, ray_dir, point_xyz, point_feats):
+        # self.max_hits = 64
         S, V, P, _ = ray_dir.size()
         _, H, D = point_feats.size()
 
@@ -332,6 +333,7 @@ class GEORadianceField(PointSRNField):
             self.VOXEL_SIZE.item(), self.VOXEL_SIZE.item() * .5))
         self.backbone.splitting(self.VOXEL_SIZE * .5)
         self.VOXEL_SIZE *= .5
+        self.max_hits = int(self.max_hits * 1.5)
         logger.info("Total voxel number increases to {}".format(self.num_voxels))
     
     @property
