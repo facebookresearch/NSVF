@@ -211,8 +211,6 @@ class DynamicEmbeddingBackbone(Backbone):
         # TODO: safe assignment. do not over write the original embeddings
         new_num_keys = new_values.size(0)
         new_point_length = new_points.size(0)
-        # new_feats = new_feats + self.num_keys
-        # 1 // 0
 
         self.values.weight.data.index_copy_(
             0,

@@ -11,3 +11,4 @@ export -f render
 DATA=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug/models/
 OUTPUT=/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug/output/
 render $DATA $OUTPUT model_normalized
+

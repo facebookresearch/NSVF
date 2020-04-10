@@ -30,7 +30,10 @@ python render.py ${DATASET} \
     --render-resolution 400 \
     --render-path-args "{'radius': 3.5, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}" \
     --render-output /private/home/jgu/data/test_images/output3 \
-    --render-output-types "rgb" "hit" "depth" "normal" \
+    --render-output-types "rgb" "hit" "normal" \
 
 #  --render-path-args "{'radius': 3.5, 'h': 0.0, 'axis': 'z'}" \
 #     --render-up-vector "(0,0,-1)" \
+# --render-path-style "zoomin_circle" \
+    # --render-path-args "{'radius': 1.0, 'h': 2.2, 'axis': 'z', 't0': -2, 'r':-1}" \
+    

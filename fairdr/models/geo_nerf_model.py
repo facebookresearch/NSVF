@@ -407,7 +407,7 @@ class GEORadianceRenderer(Raymarcher):
         shifted_sigma_dist = torch.cat([sigma_dist.new_zeros(P, 1), sigma_dist[:, :-1]], dim=-1)  # shift one step
         probs = ((1 - torch.exp(-sigma_dist.float())) * torch.exp(-torch.cumsum(shifted_sigma_dist.float(), dim=-1)))
         probs = probs.type_as(sigma_dist)
-        
+    
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
 
@@ -440,8 +440,7 @@ class GEORadianceRenderer(Raymarcher):
 
     def forward(self, field_fn, ray_start, ray_dir, samples, state=None):
         if self.inner_chunking:
-            return self._forward(field_fn, ray_start, ray_dir, samples, state)
-
+           return self._forward(field_fn, ray_start, ray_dir, samples, state)
         """
         use chunks to trade time to memory (save more!!)
         """
