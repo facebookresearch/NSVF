@@ -50,8 +50,6 @@ class NeuralRenderer(object):
 
         if self.path_gen is None:
             self.path_gen = trajectory.circle()
-        if not os.path.exists(self.output_dir):
-            os.mkdir(self.output_dir)
         if self.output_type is None:
             self.output_type = ["rgb"]
 
@@ -136,6 +134,8 @@ class NeuralRenderer(object):
         return step, image_names
 
     def save_images(self, output_files, steps=None, combine_output=True):
+        if not os.path.exists(self.output_dir):
+            os.mkdir(self.output_dir)
         timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
         if steps is not None:
             timestamp = "step_{}.".format(steps) + timestamp
@@ -148,5 +148,5 @@ class NeuralRenderer(object):
         else:
             images = [[imageio.imread(file_path) for file_path in output_files if type in file_path] for type in self.output_type]
             images = [np.concatenate([images[j][i] for j, _ in enumerate(self.output_type)], 1) for i in range(len(images[0]))]
-            # imageio.mimsave('{}/{}_{}.gif'.format(self.output_dir, 'full', timestamp), images, fps=self.fps)
-            imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=10)
+            imageio.mimsave('{}/{}_{}.gif'.format(self.output_dir, 'full', timestamp), images, fps=self.fps)
+            # imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=10)

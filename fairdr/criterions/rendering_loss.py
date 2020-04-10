@@ -118,7 +118,7 @@ class SRNLossCriterion(RenderingCriterion):
                                 """)
         parser.add_argument('--freespace-weight', type=float, default=0.0)
         parser.add_argument('--occupancy-weight', type=float, default=0.0)
-        parser.add_argument('--density-weight', type=float, default=0.0)
+        parser.add_argument('--entropy-weight', type=float, default=0.0)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
@@ -159,8 +159,8 @@ class SRNLossCriterion(RenderingCriterion):
                 net_output['depths'], min_depths)
             losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
 
-        if self.args.density_weight > 0:
-            losses['den_loss'] = (net_output['density'], self.args.density_weight)
+        if self.args.entropy_weight > 0:
+            losses['ent_loss'] = (net_output['entropy'], self.args.entropy_weight)
 
         if self.args.depth_weight > 0:
             if sample['depths'] is not None:

@@ -44,8 +44,9 @@ class Backbone(nn.Module):
         super().__init__()
         self.args = args
 
-    def forward(self, pointcloud, add_dummy=False):
-        feats, xyz = self._forward(pointcloud)
+    def forward(self, *args, **kwargs):
+        feats, xyz = self._forward(*args, **kwargs)
+
         # placeholder reserved for backbone independent functions
         return feats, xyz
 
@@ -53,18 +54,19 @@ class Backbone(nn.Module):
         raise NotImplementedError
     
     def get_features(self, x):
-        return x    
+        raise NotImplementedError
 
     @staticmethod
     def add_args(parser):
         pass
-
+    
+    @torch.no_grad()
     def pruning(self, *args, **kwargs):
-        pass
+        raise NotImplementedError
 
+    @torch.no_grad()
     def splitting(self, *args, **kwargs):
-        pass
-
+        raise NotImplementedError
 
 
 @register_backnone('dynamic_embedding')
@@ -161,7 +163,7 @@ class DynamicEmbeddingBackbone(Backbone):
             torch.arange(new_num_keys, device=new_values.device),
             new_values.data
         )
-        
+
         self.points[: new_point_length] = new_points
         self.feats[: new_point_length] = new_feats
         self.keep = torch.zeros_like(self.keep)

@@ -100,7 +100,7 @@ class GEONERFModel(SRNModel):
         depths = predicts.new_ones(S * V * P) * BG_DEPTH
         missed = predicts.new_ones(S * V * P)
         first_hits = predicts.new_ones(S * V * P).long().fill_(self.field.num_voxels)
-        density = 0
+        entropy = 0.0
 
         hits, _ray_start, _ray_dir, state, samples = \
             self.raymarcher.ray_intersection(ray_start, ray_dir, xyz, feats)
@@ -108,7 +108,7 @@ class GEONERFModel(SRNModel):
         # fine-grained raymarching + rendering
         if hits.sum() > 0:   # missed everything
             hits = hits.view(S * V * P).contiguous()
-            _predicts, _depths, _missed, _density = self.raymarcher(
+            _predicts, _depths, _missed, entropy = self.raymarcher(
                 self.field, _ray_start, _ray_dir, samples, state)
             _predicts = _predicts + self.field.bg_color * _missed.unsqueeze(-1)  # fill background color
             _depths = _depths + BG_DEPTH * _missed
@@ -125,7 +125,6 @@ class GEONERFModel(SRNModel):
             first_hits = first_hits.masked_scatter(
                 hits, samples[1][:, 0].long()
             )
-            density = _density.float().mean().type_as(_density)
 
         # model's output
         return {
@@ -133,7 +132,7 @@ class GEONERFModel(SRNModel):
             'depths': depths.view(S, V, P),
             'hits': first_hits.view(S, V, P),
             'missed': missed.view(S, V, P),
-            'density': density,
+            'entropy': entropy,
             'bg_color': self.field.bg_color,
             'other_logs': {
                 'voxel_log': self.field.VOXEL_SIZE.item(),
@@ -410,10 +409,12 @@ class GEORaymarcher(Raymarcher):
         sampled_idx = sampled_idx.long()
 
         H, D = point_feats.size()
-        P, M = sampled_idx.size()
 
         # only compute when the ray hits
         sample_mask = sampled_idx.ne(-1)
+        if sample_mask.sum() == 0:  # miss everything skip
+            return torch.zeros_like(sampled_depth), sampled_depth.new_zeros(*sampled_depth.size(), 3)
+
         queries = ray(ray_start.unsqueeze(1), ray_dir.unsqueeze(1), sampled_depth.unsqueeze(2))
         queries = queries[sample_mask]
         querie_dirs = ray_dir.unsqueeze(1).expand(*sampled_depth.size(), ray_dir.size()[-1])[sample_mask]
@@ -430,23 +431,50 @@ class GEORaymarcher(Raymarcher):
             else sampled_dists        
         sigma_dist = torch.relu(noise + sigma) * dists
         sigma_dist = torch.zeros_like(sampled_depth).masked_scatter(sample_mask, sigma_dist)
-        shifted_sigma_dist = torch.cat([sigma_dist.new_zeros(P, 1), sigma_dist[:, :-1]], dim=-1)  # shift one step
-        probs = ((1 - torch.exp(-sigma_dist.float())) * torch.exp(-torch.cumsum(shifted_sigma_dist.float(), dim=-1)))
-        probs = probs.type_as(sigma_dist)
+        texture = sigma_dist.new_zeros(*sigma_dist.size(), 3).masked_scatter(
+            sample_mask.unsqueeze(-1).expand(*sample_mask.size(), 3), texture)
+
+        return sigma_dist, texture
+
+    def forward(self, field_fn, ray_start, ray_dir, samples, state=None):
+        sampled_depth, sampled_idx, sampled_dists = samples
+
+        if self.inner_chunking:
+            sigma_dist, texture = self._forward(field_fn, ray_start, ray_dir, samples, state)
+        else:
+            hits = sampled_idx.ne(-1).sum(0)
+            sigma_dist, texture = [], []
+            size_so_far, start_step = 0, 0
+            for i in range(hits.size(0) + 1):
+                if (i == hits.size(0)) or (size_so_far + hits[i] > self.chunk_size):
+                    _sigma_dist, _texture = self._forward(
+                        field_fn, ray_start, ray_dir, (
+                            sampled_depth[:, start_step: i], 
+                            sampled_idx[:, start_step: i], 
+                            sampled_dists[:, start_step: i]), state)
+                    
+                    sigma_dist += [_sigma_dist]
+                    texture += [_texture]
+                    start_step, size_so_far = i, 0
+                
+                if (i < hits.size(0)):
+                    size_so_far += hits[i]
+            
+            sigma_dist = torch.cat(sigma_dist, 1)
+            texture = torch.cat(texture, 1)
+
+        # aggregate along the ray
+        shifted_sigma_dist = torch.cat([sigma_dist.new_zeros(sampled_depth.size(0), 1), sigma_dist[:, :-1]], dim=-1)  # shift one step
+        probs = ((1 - torch.exp(-sigma_dist.float())) * torch.exp(-torch.cumsum(shifted_sigma_dist.float(), dim=-1))).type_as(sigma_dist)
     
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
-
-        texture = sigma_dist.new_zeros(*sigma_dist.size(), 3).masked_scatter(
-            sample_mask.unsqueeze(-1).expand(*sample_mask.size(), 3), texture)
         rgb = (texture * probs.unsqueeze(-1)).sum(-2)
-        return rgb, depth, missed, sigma_dist
-
-    def forward(self, field_fn, ray_start, ray_dir, samples, state=None):
-        if self.inner_chunking:
-           return self._forward(field_fn, ray_start, ray_dir, samples, state)
         
-        raise NotImplementedError
+        # entropy regularization
+        ee = lambda s: (torch.exp(-s) * s).mean()
+
+        return rgb, depth, missed, ee(sigma_dist[sampled_idx.ne(-1)])
 
 
 def plain_architecture(args):
