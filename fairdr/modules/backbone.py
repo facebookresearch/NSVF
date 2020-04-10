@@ -66,67 +66,6 @@ class Backbone(nn.Module):
         pass
 
 
-@register_backnone("embedding")
-class QuantizedEmbeddingBackbone(Backbone):
-    """
-    Embeddings on fixed voxel models (only works for single object)
-    """
-    def __init__(self, args):
-        super().__init__(args)
-        self.embed_dim = args.quantized_embed_dim
-        self.quantized_input_shuffle = getattr(args, "quantized_input_shuffle", True)
-        self.sample_points = getattr(args, 'quantized_subsampling_points', None)
-        self.voxel_path = args.quantized_voxel_path if args.quantized_voxel_path is not None \
-            else os.path.join(args.data, 'voxel.txt')
-        assert os.path.exists(self.voxel_path), "voxel file does not exist"
-        self.voxel_size = args.ball_radius
-        self.voxel_vertex = getattr(args, 'quantized_voxel_vertex', False)
-        
-        points = torch.from_numpy(load_matrix(self.voxel_path)[:, 3:])
-        if self.voxel_vertex:
-            offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
-                              [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]], 
-                            dtype=points.dtype) * (self.voxel_size * 0.5)
-            keys = points.unsqueeze(1) + offset.unsqueeze(0)
-            keys = unique_points(keys.reshape(-1, 3))
-            self.offset = nn.Parameter(offset, requires_grad=False)
-        else:
-            keys = points.clone()
-            self.offset = None
-
-        self.keys = nn.Parameter(keys, requires_grad=False)
-        self.values = Embedding(self.keys.size(0), self.embed_dim, None)
-
-    @staticmethod
-    def add_args(parser):
-        parser.add_argument('--quantized-subsampling-points', type=int, metavar='N',
-                            help='if not set (None), do not perform subsampling.')
-        parser.add_argument('--quantized-voxel-path', type=str,
-                            help="path to a pre-computed voxels.")
-        parser.add_argument('--quantized-embed-dim', type=int, metavar='N', help="embedding size")
-        parser.add_argument('--quantized-input-shuffle', action='store_true')
-        parser.add_argument('--quantized-voxel-vertex', action='store_true', help='if set, embeddings are set in the corners')
-
-    def _forward(self, pointcloud: torch.cuda.FloatTensor, add_dummy=False):
-        if self.sample_points > 0:
-            assert pointcloud.size(1) >= self.sample_points, "need more points"
-            if self.training and self.quantized_input_shuffle:
-                rand_inds = pointcloud.new_zeros(*pointcloud.size()[:-1]).uniform_().sort(1)[1]
-                pointcloud = pointcloud.gather(1, rand_inds.unsqueeze(2).expand_as(pointcloud))
-            pointcloud = pointcloud.gather(
-                1, furthest_point_sample(
-                    pointcloud, self.sample_points).unsqueeze(2).expand(
-                        pointcloud.size(0), self.sample_points, 3).long())
-        _, ids = ((pointcloud[:, :, None, :] - self.keys[None, None, :, :]) ** 2).sum(-1).min(-1)
-        return ids.unsqueeze(-1), pointcloud
-
-    def get_features(self, x):
-        return self.values(x)
-
-    @property
-    def feature_dim(self):
-        return self.embed_dim
-
 
 @register_backnone('dynamic_embedding')
 class DynamicEmbeddingBackbone(Backbone):
@@ -135,12 +74,11 @@ class DynamicEmbeddingBackbone(Backbone):
         super().__init__(args)
 
         self.embed_dim = args.quantized_embed_dim
-        self.quantized_input_shuffle = getattr(args, "quantized_input_shuffle", True)
         self.voxel_path = args.quantized_voxel_path if args.quantized_voxel_path is not None \
             else os.path.join(args.data, 'voxel.txt')
         assert os.path.exists(self.voxel_path), "Initial voxel file does not exist..."
 
-        self.voxel_size = args.ball_radius
+        self.voxel_size = args.voxel_size
         self.total_size = 12000   # maximum number of voxel allowed
         self.half_voxel = self.voxel_size * .5
 
@@ -173,6 +111,12 @@ class DynamicEmbeddingBackbone(Backbone):
         # voxel embeddings
         self.values = Embedding(self.total_size, self.embed_dim, None)
     
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument('--quantized-voxel-path', type=str,
+                            help="path to a pre-computed voxels.")
+        parser.add_argument('--quantized-embed-dim', type=int, metavar='N', help="embedding size")
+
     def _forward(self, *args, **kwargs):
         return self.feats[self.keep.bool()].unsqueeze(0), \
                self.points[self.keep.bool()].unsqueeze(0)
@@ -217,6 +161,7 @@ class DynamicEmbeddingBackbone(Backbone):
             torch.arange(new_num_keys, device=new_values.device),
             new_values.data
         )
+        
         self.points[: new_point_length] = new_points
         self.feats[: new_point_length] = new_feats
         self.keep = torch.zeros_like(self.keep)

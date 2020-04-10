@@ -76,7 +76,7 @@ class SRNModel(BaseModel):
                             help="additional gradient penalty to make ray marching close to sphere-tracing")
         parser.add_argument('--implicit-gradient', action='store_true')
 
-    def forward(self, ray_start, ray_dir, raymarching_steps=None, **kwargs):
+    def _forward(self, ray_start, ray_dir, raymarching_steps=None, **kwargs):
         # ray intersection
         depths, _ = self.raymarcher(
             self.field.get_sdf, 
@@ -95,11 +95,14 @@ class SRNModel(BaseModel):
             grad_penalty = 0
 
         # model's output
-        results = {
+        return {
             'predicts': predicts,
             'depths': depths,
             'grad_penalty': grad_penalty
         }
+
+    def forward(self, *args, **kwargs):
+        results = self._forward(*args, **kwargs)
 
         # caching the prediction
         self.cache = {
@@ -109,6 +112,10 @@ class SRNModel(BaseModel):
             for w in results
         }
         return results
+
+    @property
+    def text(self):
+        return "SRN model"
 
     @torch.no_grad()
     def visualize(self, 
