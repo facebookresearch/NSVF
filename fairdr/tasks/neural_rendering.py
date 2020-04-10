@@ -230,7 +230,7 @@ class SingleObjRenderingTask(FairseqTask):
                         optimizer.optimizer.state[p][key] *= 0.0
             
             # set safe steps. do not update parameters, accumulate Adam state
-            self._safe_steps = 100
+            self._safe_steps = 0
 
         if self.pruning_every_steps is not None and \
             (self._num_updates % self.pruning_every_steps == 0) and \

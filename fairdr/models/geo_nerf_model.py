@@ -314,8 +314,6 @@ class GEORadianceField(Field):
         logger.info("evaluating {}x{}={} micro grids, th={}".format(
             xyz.size(0), G ** 3, queries.size(0), th))
         sigma,  = self.forward(queries, point_feats, point_xyz, outputs=['sigma'])
-        assert (not self.sigmoid_activation), "currently does not support sigmoid based"
-        
         sigma_dist = torch.relu(sigma) * self.MARCH_SIZE
         sigma_dist = sigma_dist.reshape(-1, G ** 3)
 
@@ -472,7 +470,7 @@ class GEORaymarcher(Raymarcher):
         rgb = (texture * probs.unsqueeze(-1)).sum(-2)
         
         # entropy regularization
-        ee = lambda s: (torch.exp(-s) * s).mean()
+        ee = lambda s: (torch.exp(-s.float()) * s.float()).mean().type_as(s)
 
         return rgb, depth, missed, ee(sigma_dist[sampled_idx.ne(-1)])
 

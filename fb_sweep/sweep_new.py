@@ -84,7 +84,7 @@ def get_newlego_grid(args):
         hyperparam('--inner-chunking', False, binary_flag=True),        
         
         hyperparam('--rgb-weight', 200.0, save_dir_key=lambda val: f'rgb{val}'),
-        hyperparam('--entropy-weight', 1.0, save_dir_key=lambda val: f'ent{val}'),
+        hyperparam('--entropy-weight', 0.0, save_dir_key=lambda val: f'ent{val}'),
         hyperparam('--reg-weight', 0.0),
         hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
 
