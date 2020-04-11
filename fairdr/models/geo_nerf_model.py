@@ -33,6 +33,25 @@ MAX_DEPTH = 10000.0
 logger = logging.getLogger(__name__)
 
 
+def chunking(func):
+    def chunk_func(*args, **kwargs):
+        chunk_size = kwargs.get('chunk_size', None)
+        if chunk_size is None:
+            return func(*args, **kwargs)
+
+        outputs = zip(*[
+                func(*[a[i: i + chunk_size] 
+                    if isinstance(a, torch.Tensor) else a 
+                    for a in args], **kwargs) 
+            for i in range(0, args[-1].shape[0], chunk_size)])
+        
+        outputs = [torch.cat(o, 0) 
+                    if isinstance(o[0], torch.Tensor) 
+                    else o for o in outputs]
+        return tuple(outputs)
+    return chunk_func
+
+
 @register_model('geo_nerf')
 class GEONERFModel(SRNModel):
 
@@ -190,7 +209,7 @@ class GEORadianceField(Field):
             requires_grad=(not getattr(args, "background_stop_gradient", False)))
 
         # arguments
-        self.chunk_size = 512 * getattr(args, "chunk_size", 256)
+        self.chunk_size = 256 * getattr(args, "chunk_size", 256)
         self.deterministic_step = getattr(args, "deterministic_step", False)
         self.inner_chunking = getattr(args, "inner_chunking", True)
         self.use_raydir = getattr(args, "use_raydir", False)
@@ -256,7 +275,8 @@ class GEORadianceField(Field):
             point_feats = torch.cat([point_feats, self.point_proj(xyz)], -1)
         return self.feature_field(point_feats)
 
-    def _forward(self, xyz, point_feats, point_xyz, dir=None, features=None, outputs=['sigma', 'texture']):
+    @chunking
+    def forward(self, xyz, point_feats, point_xyz, dir=None, features=None, outputs=['sigma', 'texture'], chunk_size=None):
         _data = {}
         if features is None:
             features = self.get_feature(xyz, point_feats, point_xyz)
@@ -272,22 +292,6 @@ class GEORadianceField(Field):
             texture = self.renderer(features)
             _data['texture'] = texture
         return tuple([_data[key] for key in outputs])
-
-    def forward(self, *args, **kwargs):
-        if not self.inner_chunking:
-            return self._forward(*args, **kwargs)
-        
-        chunk_size = self.chunk_size
-        outputs = zip(*[
-                self._forward(*[a[i: i + chunk_size] 
-                                if isinstance(a, torch.Tensor) else a 
-                                for a in args], **kwargs) 
-            for i in range(0, args[-1].shape[0], chunk_size)])
-        
-        outputs = [torch.cat(o, 0) 
-                    if isinstance(o[0], torch.Tensor) 
-                    else o for o in outputs]
-        return tuple(outputs)
 
     @torch.no_grad()
     def pruning(self, th=0.5, update=True):    
@@ -313,7 +317,7 @@ class GEORadianceField(Field):
         # query the field
         logger.info("evaluating {}x{}={} micro grids, th={}".format(
             xyz.size(0), G ** 3, queries.size(0), th))
-        sigma,  = self.forward(queries, point_feats, point_xyz, outputs=['sigma'])
+        sigma,  = self.forward(queries, point_feats, point_xyz, outputs=['sigma'], chunk_size=self.chunk_size)
         sigma_dist = torch.relu(sigma) * self.MARCH_SIZE
         sigma_dist = sigma_dist.reshape(-1, G ** 3)
 
@@ -341,7 +345,7 @@ class GEORaymarcher(Raymarcher):
 
     def __init__(self, args):
         super().__init__(args) 
-        self.chunk_size = 512 * getattr(args, "chunk_size", 256)
+        self.chunk_size = 256 * getattr(args, "chunk_size", 256)
         self.inner_chunking = getattr(args, "inner_chunking", True)
         self.discrete_reg = getattr(args, "discrete_regularization", False)
         self.deterministic_step = getattr(args, "deterministic_step", False)
@@ -405,6 +409,7 @@ class GEORaymarcher(Raymarcher):
         point_feats, point_xyz = state
         sampled_depth, sampled_idx, sampled_dists = samples
         sampled_idx = sampled_idx.long()
+        chunk_size = self.chunk_size if self.inner_chunking else None
 
         H, D = point_feats.size()
 
@@ -422,7 +427,7 @@ class GEORaymarcher(Raymarcher):
         point_xyz = point_xyz.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), 3))
         point_feats = point_feats.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), D))
 
-        sigma, texture = field_fn(queries, point_feats, point_xyz, querie_dirs)
+        sigma, texture = field_fn(queries, point_feats, point_xyz, querie_dirs, chunk_size=chunk_size)
         noise = 0 if not self.discrete_reg and (not self.training) \
             else torch.zeros_like(sigma).normal_()
         dists = self.MARCH_SIZE if self.deterministic_step \
@@ -439,6 +444,7 @@ class GEORaymarcher(Raymarcher):
 
         if self.inner_chunking:
             sigma_dist, texture = self._forward(field_fn, ray_start, ray_dir, samples, state)
+        
         else:
             hits = sampled_idx.ne(-1).sum(0)
             sigma_dist, texture = [], []

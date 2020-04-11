@@ -320,6 +320,13 @@ class TransformerBackbone(Backbone):
     
     def __init__(self, args):
         super().__init__(args)
+        
+        
+        
+        
+        
+        
+        
         self.dropout = args.dropout
         self.sample_points = getattr(args, 'subsampling_points', None)
         self.furthest_sampling = getattr(args, 'furthest_sampling', True)
@@ -349,6 +356,8 @@ class TransformerBackbone(Backbone):
     @staticmethod
     def add_args(parser):
         """Add model-specific arguments to the parser."""
+        parser.add_argument('--boundingbox-path', type=str, help="path to a pre-computed boundingbox")
+
         parser.add_argument('--subsampling-points', type=int, metavar='N',
                             help='if not set (None), do not perform subsampling.')
         parser.add_argument('--furthest-sampling', action='store_true', 
