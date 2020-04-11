@@ -18,12 +18,12 @@ def register_grid(name):
     return register_grid_cls
 
 
-@register_grid("geo_new_lego_t")
-def get_newlego_trans_grid(args):
+@register_grid("geo_maria_t")
+def get_maria_trans_grid(args):
     gen_args = {
-        'render_resolution': 400,
+        'render_resolution': 512,
         'render_output_types': ["hit", "rgb", "depth", "normal"],
-        'render_path_args': "{'radius': 3.5, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}",
+        'render_path_args': "{'radius': 3.0, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}",
     }
     gen_args = json.dumps(gen_args)
 
@@ -34,31 +34,28 @@ def get_newlego_trans_grid(args):
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
         
         # task level
-        hyperparam('--view-resolution', 400, save_dir_key=lambda val: f'{val}x{val}'),
+        hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 2),
-        hyperparam('--max-train-view', 100),
-        hyperparam('--max-valid-view', 100),
+        hyperparam('--max-train-view', 50),
         
         # model arguments
         hyperparam('--arch', 'geo_nerf_transformer', save_dir_key=lambda val: val),
-        
-        hyperparam('--raymarching-stepsize', 0.02, save_dir_key=lambda val: f'ss{val}'),
-        hyperparam('--voxel-size', 0.24, save_dir_key=lambda val: f'v{val}'),
-        hyperparam('--max-hits', 36),
+        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/maria/initial_voxel.txt"),
+        hyperparam('--raymarching-stepsize', 0.025, save_dir_key=lambda val: f'ss{val}'),
+        hyperparam('--voxel-size', 0.2, save_dir_key=lambda val: f'v{val}'),
+        hyperparam('--max-hits', 48),
         
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
-
         hyperparam('--hidden-sdf', 128, save_dir_key=lambda val: f'sdfh{val}'),
-        hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
-        hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
-        # hyperparam('--raypos-features', 144, save_dir_key=lambda val: f'pos{val}'),
+        # hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
+        # hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
+        # hyperparam('--raypos-features', 0, save_dir_key=lambda val: f'pos{val}'),
         # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
         # hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
-
-        hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
-        hyperparam('--background-stop-gradient', True, binary_flag=True, save_dir_key=lambda val: f'bgsg'),
+        # hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
+        # hyperparam('--background-stop-gradient', True, binary_flag=True, save_dir_key=lambda val: f'bgsg'),
         hyperparam('--discrete-regularization', True, binary_flag=True, save_dir_key=lambda val: f'dis'),
         # hyperparam('--deterministic-step', True, binary_flag=True, save_dir_key=lambda val: 'dstep'),
 
@@ -69,8 +66,8 @@ def get_newlego_trans_grid(args):
         # hyperparam('--reduce-step-size-at', "5000,50000"),
 
         # evaluation with rendering
-        hyperparam('--rendering-every-steps', 1000),
-        hyperparam('--rendering-args', gen_args),
+        # hyperparam('--rendering-every-steps', 1000),
+        # hyperparam('--rendering-args', gen_args),
 
         # dataset arguments
         hyperparam('--no-load-binary', binary_flag=True),
@@ -78,7 +75,7 @@ def get_newlego_trans_grid(args):
 
         # training arguments
         hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p16384'),
-        hyperparam('--sampling-on-mask', 0.5),
+        hyperparam('--sampling-on-mask', 0.6),
         hyperparam('--sampling-on-bbox', binary_flag=True),
         hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', False, binary_flag=True),        
@@ -93,7 +90,7 @@ def get_newlego_trans_grid(args):
         # hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
         hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: f'lr_poly'),
         hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
-        hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
+        hyperparam('--lr', 0.0001, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
 
         hyperparam('--dropout', 0.0),
@@ -113,12 +110,12 @@ def get_newlego_trans_grid(args):
     return hyperparams
 
 
-@register_grid("geo_new_lego")
-def get_newlego_grid(args):
+@register_grid("geo_maria")
+def get_maria_grid(args):
     gen_args = {
-        'render_resolution': 400,
+        'render_resolution': 512,
         'render_output_types': ["hit", "rgb", "depth", "normal"],
-        'render_path_args': "{'radius': 3.5, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}",
+        'render_path_args': "{'radius': 3.0, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}",
     }
     gen_args = json.dumps(gen_args)
 
@@ -129,39 +126,37 @@ def get_newlego_grid(args):
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
         
         # task level
-        hyperparam('--view-resolution', 400, save_dir_key=lambda val: f'{val}x{val}'),
+        hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 2),
-        hyperparam('--max-train-view', 100),
-        hyperparam('--max-valid-view', 100),
+        hyperparam('--max-train-view', 50),
         
         # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
-        
-        hyperparam('--raymarching-stepsize', 0.02, save_dir_key=lambda val: f'ss{val}'),
-        hyperparam('--voxel-size', 0.24, save_dir_key=lambda val: f'v{val}'),
-        hyperparam('--max-hits', 36),
+        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/maria/initial_voxel.txt"),
+        hyperparam('--quantized-embed-dim', 378, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--raymarching-stepsize', 0.025, save_dir_key=lambda val: f'ss{val}'),
+        hyperparam('--voxel-size', 0.2, save_dir_key=lambda val: f'v{val}'),
+        hyperparam('--max-hits', 48),
         
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
-        hyperparam('--quantized-embed-dim', 378, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--hidden-sdf', 128, save_dir_key=lambda val: f'sdfh{val}'),
-        hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
-        hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
-        # hyperparam('--raypos-features', 144, save_dir_key=lambda val: f'pos{val}'),
+        # hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
+        # hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
+        # hyperparam('--raypos-features', 0, save_dir_key=lambda val: f'pos{val}'),
         # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
         # hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
-
-        hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
-        hyperparam('--background-stop-gradient', True, binary_flag=True, save_dir_key=lambda val: f'bgsg'),
+        # hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
+        # hyperparam('--background-stop-gradient', True, binary_flag=True, save_dir_key=lambda val: f'bgsg'),
         hyperparam('--discrete-regularization', True, binary_flag=True, save_dir_key=lambda val: f'dis'),
         # hyperparam('--deterministic-step', True, binary_flag=True, save_dir_key=lambda val: 'dstep'),
 
         # dynamic pruning
-        hyperparam('--pruning-every-steps', 2500, save_dir_key=lambda val: f'prune{val}'),
-        hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
-        hyperparam('--half-voxel-size-at', "5000,50000", save_dir_key=lambda val: f'dyvox'),
-        hyperparam('--reduce-step-size-at', "5000,50000"),
+        # hyperparam('--pruning-every-steps', 2500, save_dir_key=lambda val: f'prune{val}'),
+        # hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
+        # hyperparam('--half-voxel-size-at', "5000,50000", save_dir_key=lambda val: f'dyvox'),
+        # hyperparam('--reduce-step-size-at', "5000,50000"),
 
         # evaluation with rendering
         hyperparam('--rendering-every-steps', 1000),
@@ -173,7 +168,7 @@ def get_newlego_grid(args):
 
         # training arguments
         hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p16384'),
-        hyperparam('--sampling-on-mask', 0.5),
+        hyperparam('--sampling-on-mask', 0.6),
         hyperparam('--sampling-on-bbox', binary_flag=True),
         hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', False, binary_flag=True),        

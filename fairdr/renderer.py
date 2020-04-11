@@ -16,6 +16,7 @@ import imageio
 
 from torchvision.utils import save_image
 from fairdr.data import trajectory, geometry, data_utils
+from fairseq.meters import StopwatchMeter
 
 
 logger = logging.getLogger(__name__)
@@ -84,9 +85,11 @@ class NeuralRenderer(object):
         # model.field.backbone.points[model.field.backbone.points[:, 1] > 0.5, 1] += model.field.VOXEL_SIZE * 10
         logger.info("rendering starts. {}".format(model.text))
 
+        timer = StopwatchMeter(round=4)
         rgb_path = tempfile.mkdtemp()
         image_names = []
         sample, step = sample
+
         for shape in range(sample['shape'].size(0)):
             max_step = step + self.frames
             while step < max_step:
@@ -111,8 +114,11 @@ class NeuralRenderer(object):
                     'raymarching_steps': self.raymarching_steps,
                     'width': sample['shape'].new_ones(1, next_step-step) * self.resolution
                 }
+
+                timer.start()
                 _ = model(**_sample)
-            
+                timer.stop()
+
                 for k in range(step, next_step):
                     images = model.visualize(
                                 _sample, None, 0, k-step, 
@@ -131,6 +137,8 @@ class NeuralRenderer(object):
                             save_image(image, image_name, format=None)
                             image_names.append(image_name)
                 step = next_step
+
+        logger.info("total rendering time: {:.4f}s ({:.4f}s per frame)".format(timer.sum, timer.avg))
         return step, image_names
 
     def save_images(self, output_files, steps=None, combine_output=True):

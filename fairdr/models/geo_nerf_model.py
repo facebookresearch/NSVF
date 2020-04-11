@@ -111,7 +111,7 @@ class GEONERFModel(SRNModel):
         
     def _forward(self, ray_start, ray_dir, **kwargs):
         # get geometry features
-        feats, xyz = self.field.get_backbone_features()
+        feats, xyz, values = self.field.get_backbone_features()
 
         # coarse ray-intersection
         S, V, P, _ = ray_dir.size()
@@ -128,7 +128,7 @@ class GEONERFModel(SRNModel):
         if hits.sum() > 0:   # missed everything
             hits = hits.view(S * V * P).contiguous()
             _predicts, _depths, _missed, entropy = self.raymarcher(
-                self.field, _ray_start, _ray_dir, samples, state)
+                self.field, _ray_start, _ray_dir, samples, state, values)
             _predicts = _predicts + self.field.bg_color * _missed.unsqueeze(-1)  # fill background color
             _depths = _depths + BG_DEPTH * _missed
 
@@ -213,7 +213,7 @@ class GEORadianceField(Field):
         self.deterministic_step = getattr(args, "deterministic_step", False)
         self.inner_chunking = getattr(args, "inner_chunking", True)
         self.use_raydir = getattr(args, "use_raydir", False)
-        self.raydir_features = getattr(args, "raydir_features", 144)
+        self.raydir_features = getattr(args, "raydir_features", 0)
         self.raypos_features = getattr(args, "raypos_features", 0)
 
         # build layers
@@ -262,8 +262,10 @@ class GEORadianceField(Field):
     def get_backbone_features(self, *args, **kwargs):
         return self.backbone(*args, **kwargs)
 
-    def get_feature(self, xyz, point_feats, point_xyz):
-        point_feats = self.backbone.get_features(point_feats).view(point_feats.size(0), -1)
+    def get_feature(self, xyz, point_feats, point_xyz, values):
+        # extract real features here to save memory
+        point_feats = self.backbone.get_features(point_feats, values).view(
+            point_feats.size(0), -1)
 
         # tri-linear interpolation
         p = ((xyz - point_xyz) / self.VOXEL_SIZE + .5).unsqueeze(1)
@@ -276,10 +278,17 @@ class GEORadianceField(Field):
         return self.feature_field(point_feats)
 
     @chunking
-    def forward(self, xyz, point_feats, point_xyz, dir=None, features=None, outputs=['sigma', 'texture'], chunk_size=None):
+    def forward(self, 
+        xyz, point_feats, point_xyz, values,
+        dir=None, features=None, 
+        outputs=['sigma', 'texture'], 
+        chunk_size=None):
+        
+        values = values[0]  # HACK: make values a list to avoid chunking..
+
         _data = {}
         if features is None:
-            features = self.get_feature(xyz, point_feats, point_xyz)
+            features = self.get_feature(xyz, point_feats, point_xyz, values)
             _data['features'] = features
 
         if 'sigma' in outputs:
@@ -295,7 +304,9 @@ class GEORadianceField(Field):
 
     @torch.no_grad()
     def pruning(self, th=0.5, update=True):    
-        feats, xyz = [a[0] for a in self.backbone(None)]
+        feats, xyz, values = self.get_backbone_features()
+        feats, xyz = feats[0], xyz[0]
+        
         D = feats.size(-1)
         G = int(self.VOXEL_SIZE / self.MARCH_SIZE)  # how many microgrids to split
         
@@ -317,7 +328,7 @@ class GEORadianceField(Field):
         # query the field
         logger.info("evaluating {}x{}={} micro grids, th={}".format(
             xyz.size(0), G ** 3, queries.size(0), th))
-        sigma,  = self.forward(queries, point_feats, point_xyz, outputs=['sigma'], chunk_size=self.chunk_size)
+        sigma,  = self.forward(queries, point_feats, point_xyz, values, outputs=['sigma'], chunk_size=self.chunk_size)
         sigma_dist = torch.relu(sigma) * self.MARCH_SIZE
         sigma_dist = sigma_dist.reshape(-1, G ** 3)
 
@@ -402,7 +413,7 @@ class GEORaymarcher(Raymarcher):
 
         return hits, ray_start, ray_dir, (point_feats, point_xyz), (sampled_depth, sampled_idx, sampled_dists)
 
-    def _forward(self, field_fn, ray_start, ray_dir, samples, state=None):
+    def _forward(self, field_fn, ray_start, ray_dir, samples, state, values, early_stop=None):
         """
         chunks: set > 1 if out-of-memory. it can save some memory by time.
         """
@@ -415,6 +426,9 @@ class GEORaymarcher(Raymarcher):
 
         # only compute when the ray hits
         sample_mask = sampled_idx.ne(-1)
+        if early_stop is not None:
+            sample_mask = sample_mask & (~early_stop.unsqueeze(-1))
+        
         if sample_mask.sum() == 0:  # miss everything skip
             return torch.zeros_like(sampled_depth), sampled_depth.new_zeros(*sampled_depth.size(), 3)
 
@@ -427,7 +441,7 @@ class GEORaymarcher(Raymarcher):
         point_xyz = point_xyz.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), 3))
         point_feats = point_feats.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), D))
 
-        sigma, texture = field_fn(queries, point_feats, point_xyz, querie_dirs, chunk_size=chunk_size)
+        sigma, texture = field_fn(queries, point_feats, point_xyz, [values], querie_dirs, chunk_size=chunk_size)
         noise = 0 if not self.discrete_reg and (not self.training) \
             else torch.zeros_like(sigma).normal_()
         dists = self.MARCH_SIZE if self.deterministic_step \
@@ -439,33 +453,46 @@ class GEORaymarcher(Raymarcher):
 
         return sigma_dist, texture
 
-    def forward(self, field_fn, ray_start, ray_dir, samples, state=None):
+    def forward(self, field_fn, ray_start, ray_dir, samples, state, values, tolerance=0):
         sampled_depth, sampled_idx, sampled_dists = samples
+        early_stop = None
+        # tolerance, early_stop = 4.605170185988091, None
+        # tolerance, early_stop = 2.99573227355399, None
 
         if self.inner_chunking:
-            sigma_dist, texture = self._forward(field_fn, ray_start, ray_dir, samples, state)
+            sigma_dist, texture = self._forward(field_fn, ray_start, ray_dir, samples, state, values)
         
         else:
-            hits = sampled_idx.ne(-1).sum(0)
+            hits = sampled_idx.ne(-1).long()
             sigma_dist, texture = [], []
             size_so_far, start_step = 0, 0
-            for i in range(hits.size(0) + 1):
-                if (i == hits.size(0)) or (size_so_far + hits[i] > self.chunk_size):
+            accumulated_sigma_dist = 0
+
+            for i in range(hits.size(1) + 1):
+                if (i == hits.size(1)) or (size_so_far + hits[:, i].sum() > self.chunk_size):
                     _sigma_dist, _texture = self._forward(
                         field_fn, ray_start, ray_dir, (
                             sampled_depth[:, start_step: i], 
                             sampled_idx[:, start_step: i], 
-                            sampled_dists[:, start_step: i]), state)
-                    
+                            sampled_dists[:, start_step: i]), 
+                            state, values, early_stop=early_stop)
+
+                    accumulated_sigma_dist += _sigma_dist.sum(1)
+                    if tolerance > 0:
+                        early_stop = accumulated_sigma_dist > tolerance
+                        hits[early_stop] *= 0
+
                     sigma_dist += [_sigma_dist]
                     texture += [_texture]
                     start_step, size_so_far = i, 0
                 
-                if (i < hits.size(0)):
-                    size_so_far += hits[i]
+                if (i < hits.size(1)):
+                    size_so_far += hits[:, i].sum()
             
             sigma_dist = torch.cat(sigma_dist, 1)
             texture = torch.cat(texture, 1)
+
+        # from fairseq import pdb; pdb.set_trace()
 
         # aggregate along the ray
         shifted_sigma_dist = torch.cat([sigma_dist.new_zeros(sampled_depth.size(0), 1), sigma_dist[:, :-1]], dim=-1)  # shift one step
@@ -485,7 +512,7 @@ def plain_architecture(args):
     # field
     args.pos_embed = getattr(args, "pos_embed", False)
     args.use_raydir = getattr(args, "use_raydir", False)
-    args.raydir_features = getattr(args, "raydir_features", 144)
+    args.raydir_features = getattr(args, "raydir_features", 0)
     args.raypos_features = getattr(args, "raypos_features", 0)
     args.saperate_specular = getattr(args, "saperate_specular", False)
     args.specular_dropout = getattr(args, "specular_dropout", 0.0)
@@ -509,4 +536,20 @@ def geo_base_architecture(args):
     args.backbone = "dynamic_embedding"
     args.quantized_voxel_path = getattr(args, "quantized_voxel_path", None)
     args.quantized_embed_dim = getattr(args, "quantized_embed_dim", 256)
+    plain_architecture(args)
+
+@register_model_architecture("geo_nerf", "geo_nerf_transformer")
+def geo_transformer_architecture(args):
+    args.backbone = "transformer"
+    args.quantized_voxel_path = getattr(args, "quantized_voxel_path", None)
+    args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 384)
+    args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1536)
+    args.encoder_layers = getattr(args, "encoder_layers", 3)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
+    args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
+    args.attention_dropout = getattr(args, "attention_dropout", 0.0)
+    args.activation_dropout = getattr(args, "activation_dropout", 0.0)
+    args.activation_fn = getattr(args, "activation_fn", "relu")
+    args.dropout = getattr(args, "dropout", 0.0)
+    args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
     plain_architecture(args)

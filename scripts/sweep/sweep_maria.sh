@@ -1,15 +1,15 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=bulldozerbbox
+ROOT=/private/home/jgu/data/shapenet/maria
+DATA=0000
 WORK=/checkpoint/jgu/space/neuralrendering/debug_new_hotdog
 mkdir -p ${WORK}
 
-GRID=geo_new_lego_t
+GRID=geo_maria
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-# python fb_sweep/sweep_new.py \
+# python fb_sweep/sweep_maria.py \
 #     --data ${ROOT}/${DATA} \
 #     --grid $GRID \
 #     --user-dir "fairdr" \
@@ -17,7 +17,7 @@ pushd $ENGINE
 #     --tensorboard-logdir ${WORK}/tensorboard \
 #     --snapshot-code \
 #     --snapshot-root ${WORK}/snapshot \
-#     --prefix ${DATA}_NEWCODE \
+#     --prefix ${DATA}_Trans \
 #     --num-trials 1 \
 #     --num-gpus 8 \
 #     --num-nodes 1 \
@@ -31,7 +31,7 @@ pushd $ENGINE
    
 # popd
 
-python fb_sweep/sweep_new.py \
+python fb_sweep/sweep_maria.py \
     --data ${ROOT}/${DATA}  \
     --grid $GRID \
     --user-dir "fairdr" \
@@ -39,7 +39,7 @@ python fb_sweep/sweep_new.py \
     --no-tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_NEWCODE \
+    --prefix ${DATA}_Trans2 \
     --num-trials 1 \
     --num-gpus 1 \
     --num-nodes 1 \
