@@ -39,11 +39,12 @@ def chunking(func):
         if chunk_size is None:
             return func(*args, **kwargs)
 
+        full_size = [a for a in args if isinstance(a, torch.Tensor)][0].shape[0]
         outputs = zip(*[
                 func(*[a[i: i + chunk_size] 
                     if isinstance(a, torch.Tensor) else a 
                     for a in args], **kwargs) 
-            for i in range(0, args[-1].shape[0], chunk_size)])
+            for i in range(0, full_size, chunk_size)])
         
         outputs = [torch.cat(o, 0) 
                     if isinstance(o[0], torch.Tensor) 
@@ -109,13 +110,24 @@ class GEONERFModel(SRNModel):
                             help="if set, chunking in the field function, otherwise, chunking in the rays")
         parser.add_argument('--background-stop-gradient', action='store_true')
         
-    def _forward(self, ray_start, ray_dir, **kwargs):
+    def _forward(self, ray_start, ray_dir, id, **kwargs):
         # get geometry features
-        feats, xyz, values = self.field.get_backbone_features()
+        feats, xyz, values, predicts = self.field.get_backbone_features(id=id)
+        if predicts is not None:
+            alpha = self.field.pruning(id, update=False, features=(feats, xyz, values, predicts)).detach()
+            pruning_loss = F.binary_cross_entropy_with_logits(predicts.view(-1), alpha)
+        else:
+            pruning_loss = None
+
+        if not self.training:
+            alpha = alpha.view(*feats.size()[:2])
+            feats = feats[alpha > 0.5].view(*feats.size()[:2], -1)
+            xyz = xyz[alpha > 0.5].view(*xyz.size()[:2], -1)
 
         # coarse ray-intersection
+        bg_color = self.field.bg_color # * 0.0 - 0.8
         S, V, P, _ = ray_dir.size()
-        predicts = self.field.bg_color.unsqueeze(0).expand(S * V * P, 3)
+        predicts = bg_color.unsqueeze(0).expand(S * V * P, 3)
         depths = predicts.new_ones(S * V * P) * BG_DEPTH
         missed = predicts.new_ones(S * V * P)
         first_hits = predicts.new_ones(S * V * P).long().fill_(self.field.num_voxels)
@@ -129,7 +141,7 @@ class GEONERFModel(SRNModel):
             hits = hits.view(S * V * P).contiguous()
             _predicts, _depths, _missed, entropy = self.raymarcher(
                 self.field, _ray_start, _ray_dir, samples, state, values)
-            _predicts = _predicts + self.field.bg_color * _missed.unsqueeze(-1)  # fill background color
+            _predicts = _predicts + bg_color * _missed.unsqueeze(-1)  # fill background color
             _depths = _depths + BG_DEPTH * _missed
 
             predicts = predicts.masked_scatter(
@@ -142,7 +154,7 @@ class GEONERFModel(SRNModel):
                 hits, _missed
             )
             first_hits = first_hits.masked_scatter(
-                hits, samples[1][:, 0].long()
+                hits, samples[1][:, 0].long() % self.field.num_voxels
             )
 
         # model's output
@@ -153,6 +165,7 @@ class GEONERFModel(SRNModel):
             'missed': missed.view(S, V, P),
             'entropy': entropy,
             'bg_color': self.field.bg_color,
+            'pruning_loss': pruning_loss,
             'other_logs': {
                 'voxel_log': self.field.VOXEL_SIZE.item(),
                 'marchstep_log': self.raymarcher.MARCH_SIZE.item()}
@@ -162,6 +175,8 @@ class GEONERFModel(SRNModel):
     def adjust(self, action, *args, **kwargs):
         assert self.args.backbone == "dynamic_embedding", \
             "pruning currently only supports dynamic embedding"
+        assert self.args.task == "single_object_rendering", \
+            "only works for single-object rendering"
 
         if action == 'prune':
             self.field.pruning(*args, **kwargs)
@@ -283,7 +298,7 @@ class GEORadianceField(Field):
         dir=None, features=None, 
         outputs=['sigma', 'texture'], 
         chunk_size=None):
-        
+
         values = values[0]  # HACK: make values a list to avoid chunking..
 
         _data = {}
@@ -303,18 +318,23 @@ class GEORadianceField(Field):
         return tuple([_data[key] for key in outputs])
 
     @torch.no_grad()
-    def pruning(self, th=0.5, update=True):    
-        feats, xyz, values = self.get_backbone_features()
-        feats, xyz = feats[0], xyz[0]
-        
+    def pruning(self, id, th=0.5, update=True, features=None):    
+        if update:
+            feats, xyz, values, _ = self.get_backbone_features(id=id)
+            assert feats.size(0) == 1, "offline pruning only works for single objects"
+
+            feats, xyz = feats[0], xyz[0]
+        else:
+            feats, xyz, values, _ = self.get_backbone_features(id=id) \
+                if features is not None else features
+            feats, xyz = feats.reshape(-1, feats.size(-1)), xyz.reshape(-1, xyz.size(-1))
+
         D = feats.size(-1)
-        G = int(self.VOXEL_SIZE / self.MARCH_SIZE)  # how many microgrids to split
-        
-        logger.info("start pruning")
+        G = int(self.VOXEL_SIZE / self.MARCH_SIZE)  # how many microgrids to steps
+        voxel_size = self.VOXEL_SIZE
 
         # prepare queries for all the voxels
         c = torch.arange(1, 2 * G, 2, device=xyz.device)
-        voxel_size = self.VOXEL_SIZE
         ox, oy, oz = torch.meshgrid([c, c, c])
         offsets = (torch.cat([
                     ox.reshape(-1, 1), 
@@ -326,9 +346,10 @@ class GEORadianceField(Field):
         queries = xyz[:, None, :].repeat(1, G ** 3, 1).reshape(-1, 3)
 
         # query the field
-        logger.info("evaluating {}x{}={} micro grids, th={}".format(
-            xyz.size(0), G ** 3, queries.size(0), th))
-        sigma,  = self.forward(queries, point_feats, point_xyz, values, outputs=['sigma'], chunk_size=self.chunk_size)
+        if update:
+            logger.info("evaluating {}x{}={} micro grids, th={}".format(xyz.size(0), G ** 3, queries.size(0), th))
+        
+        sigma,  = self.forward(queries, point_feats, point_xyz, [values], outputs=['sigma'], chunk_size=self.chunk_size)
         sigma_dist = torch.relu(sigma) * self.MARCH_SIZE
         sigma_dist = sigma_dist.reshape(-1, G ** 3)
 
@@ -338,7 +359,8 @@ class GEORadianceField(Field):
         if update:
             logger.info("pruning done. before: {}, after: {} voxels".format(xyz.size(0), keep.sum()))
             self.backbone.pruning(keep=keep)
-        return keep
+        
+        return alpha
 
     @torch.no_grad()
     def splitting(self):
@@ -385,12 +407,15 @@ class GEORaymarcher(Raymarcher):
         min_depth, sorted_idx = min_depth.sort(dim=-1)
         max_depth = max_depth.gather(-1, sorted_idx)
         pts_idx = pts_idx.gather(-1, sorted_idx)
-        pts_idx = (pts_idx + H * torch.arange(S, 
-            device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None])
-        
+
         hits = pts_idx.ne(-1).any(-1)  # remove all points that completely miss the object
         if hits.sum() <= 0:            # missed everything
             return hits, None, None, None, None
+        
+        # extend the point-index to multiple shapes
+        pts_idx = (pts_idx + H * torch.arange(S, 
+            device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
+            ).masked_fill_(pts_idx.eq(-1), -1)
         
         pts_idx = pts_idx[hits]
         min_depth = min_depth[hits]
@@ -403,14 +428,13 @@ class GEORaymarcher(Raymarcher):
                 self.deterministic_step or (not self.training)
             )]
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
-        
+       
         # prepare output
         ray_start = ray_start[hits]
         ray_dir = ray_dir[hits]
 
         point_feats = point_feats.view(S * H, D)
         point_xyz = point_xyz.view(S * H, 3)
-
         return hits, ray_start, ray_dir, (point_feats, point_xyz), (sampled_depth, sampled_idx, sampled_dists)
 
     def _forward(self, field_fn, ray_start, ray_dir, samples, state, values, early_stop=None):
@@ -423,7 +447,7 @@ class GEORaymarcher(Raymarcher):
         chunk_size = self.chunk_size if self.inner_chunking else None
 
         H, D = point_feats.size()
-
+        
         # only compute when the ray hits
         sample_mask = sampled_idx.ne(-1)
         if early_stop is not None:
@@ -440,7 +464,6 @@ class GEORaymarcher(Raymarcher):
 
         point_xyz = point_xyz.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), 3))
         point_feats = point_feats.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), D))
-
         sigma, texture = field_fn(queries, point_feats, point_xyz, [values], querie_dirs, chunk_size=chunk_size)
         noise = 0 if not self.discrete_reg and (not self.training) \
             else torch.zeros_like(sigma).normal_()
@@ -534,8 +557,11 @@ def plain_architecture(args):
 @register_model_architecture("geo_nerf", "geo_nerf")
 def geo_base_architecture(args):
     args.backbone = "dynamic_embedding"
+    args.context = getattr(args, "context", None)
+    args.online_pruning = getattr(args, "online_pruning", False)
     args.quantized_voxel_path = getattr(args, "quantized_voxel_path", None)
     args.quantized_embed_dim = getattr(args, "quantized_embed_dim", 256)
+    args.quantized_pproj_dim = getattr(args, "quantized_pproj_dim", 64)
     plain_architecture(args)
 
 @register_model_architecture("geo_nerf", "geo_nerf_transformer")
@@ -545,7 +571,7 @@ def geo_transformer_architecture(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 384)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1536)
     args.encoder_layers = getattr(args, "encoder_layers", 3)
-    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 4)
+    args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 1)
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", False)
     args.attention_dropout = getattr(args, "attention_dropout", 0.0)
     args.activation_dropout = getattr(args, "activation_dropout", 0.0)

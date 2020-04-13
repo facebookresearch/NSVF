@@ -102,6 +102,7 @@ class NeuralRenderer(object):
         
                 voxels, points = sample.get('voxels', None), sample.get('points', None)
                 _sample = {
+                    'id': sample['id'][shape:shape+1],
                     'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
                     'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
                     'extrinsics': torch.stack(inv_RT, 0).unsqueeze(0),
@@ -112,7 +113,8 @@ class NeuralRenderer(object):
                     'voxels': voxels[shape:shape+1].clone() if voxels is not None else None,
                     'points': points[shape:shape+1].clone() if points is not None else None,
                     'raymarching_steps': self.raymarching_steps,
-                    'width': sample['shape'].new_ones(1, next_step-step) * self.resolution
+                    'width': sample['shape'].new_ones(1, next_step-step) * self.resolution,
+
                 }
 
                 timer.start()

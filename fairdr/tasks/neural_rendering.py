@@ -236,7 +236,7 @@ class SingleObjRenderingTask(FairseqTask):
             (self._num_updates % self.pruning_every_steps == 0) and \
             (self._num_updates > 0):
             model.eval()
-            model.adjust('prune', th=self.pruning_th)
+            model.adjust('prune', id=sample['id'], th=self.pruning_th)
 
         if self.rendering_every_steps is not None and \
             (self._num_updates % self.rendering_every_steps == 0) and \
@@ -288,11 +288,26 @@ class SequenceObjRenderingTask(SingleObjRenderingTask):
         SingleObjRenderingTask.add_args(parser)
 
     def repeat_dataset(self, split):
-        return 1
+        return 1 if split == 'train' else 5
 
     def load_dataset(self, split, **kwargs):
-        assert os.path.isfile(self.args.data), \
-            "a list of multiple objects must be saved in a document"
-        assert self.args.load_point, "for now only supports point condition"  # TODO
-
         super().load_dataset(split, **kwargs)
+
+    def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
+        self._num_updates = update_num
+
+        if self.rendering_every_steps is not None and \
+            (self._num_updates % self.rendering_every_steps == 0) and \
+            (self._num_updates > 0) and \
+            self.renderer is not None:
+
+            outputs = self.inference_step(self.renderer, [model], [sample, 0])[1]
+            if getattr(self.args, "distributed_rank", -1) == 0:  # save only for master
+                self.renderer.save_images(outputs, self._num_updates)
+        
+        if self.steps_to_reduce_step is not None and \
+            self._num_updates in self.steps_to_reduce_step:
+            model.adjust('reduce')
+
+        1 // 0
+        return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)

@@ -119,6 +119,7 @@ class SRNLossCriterion(RenderingCriterion):
         parser.add_argument('--freespace-weight', type=float, default=0.0)
         parser.add_argument('--occupancy-weight', type=float, default=0.0)
         parser.add_argument('--entropy-weight', type=float, default=0.0)
+        parser.add_argument('--pruning-weight', type=float, default=0.0)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
@@ -232,8 +233,11 @@ class SRNLossCriterion(RenderingCriterion):
             losses['vgg_loss'] = (self.vgg(
                 transform(inputs), transform(target), self.args.vgg_level) + 0.0 * self._dummy, self.args.vgg_weight)
 
+        if self.args.pruning_weight > 0:
+            assert 'pruning_loss' in net_output, "requires pruning loss to be computed."
+            losses['pruning_loss'] = (net_output['pruning_loss'], self.args.pruning_weight)
+
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
         logging_outputs = {key: item(losses[key][0]) for key in losses}
         logging_outputs.update(other_logs)
-        # from fairseq import pdb; pdb.set_trace()
         return loss, logging_outputs

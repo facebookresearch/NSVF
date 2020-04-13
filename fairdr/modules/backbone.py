@@ -16,7 +16,7 @@ from fairdr.modules.pointnet2.pointnet2_modules import (
 from fairdr.data.data_utils import load_matrix, unique_points
 from fairdr.data.geometry import trilinear_interp
 from fairdr.modules.pointnet2.pointnet2_utils import furthest_point_sample
-from fairdr.modules.linear import Linear, Embedding, PosEmbLinear, NeRFPosEmbLinear
+from fairdr.modules.linear import FCLayer, Linear, Embedding, PosEmbLinear, NeRFPosEmbLinear
 from fairseq import options, utils
 from fairseq.modules import (
     SinusoidalPositionalEmbedding,
@@ -44,12 +44,12 @@ class Backbone(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
+        self.use_context = getattr(args, "context", None)
+        self.online_pruning = getattr(args, "online_pruning", False)
 
     def forward(self, *args, **kwargs):
-        feats, xyz, values = self._forward(*args, **kwargs)
-
         # placeholder reserved for backbone independent functions
-        return feats, xyz, values
+        return self._forward(*args, **kwargs)
 
     def _forward(self, pointcloud):
         raise NotImplementedError
@@ -60,7 +60,9 @@ class Backbone(nn.Module):
     @staticmethod
     def add_args(parser):
         parser.add_argument('--quantized-voxel-path', type=str, help="path to a pre-computed voxels.")
-    
+        parser.add_argument('--context', choices=['id', 'image'], help='context for backbone model.')
+        parser.add_argument('--online-pruning', action='store_true', help='if set, model performs online pruning')
+
     @torch.no_grad()
     def pruning(self, *args, **kwargs):
         raise NotImplementedError
@@ -95,8 +97,8 @@ class DynamicEmbeddingBackbone(Backbone):
         offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
                             [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]]).long()
         init_keys0 = (init_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
-        init_keys  = unique_points(init_keys0)
-        init_feats = (init_keys0[:, None, :] - init_keys[None, :, :]).float().norm(dim=-1).min(1)[1].reshape(-1, 8)
+        init_keys, init_feats  = torch.unique(init_keys0, dim=0, sorted=True, return_inverse=True)
+        init_feats = init_feats.reshape(-1, 8)
         
         points[: init_length] = init_points
         feats[: init_length] = init_feats
@@ -108,58 +110,107 @@ class DynamicEmbeddingBackbone(Backbone):
         self.register_buffer("keys", keys)
         self.register_buffer("keep", keep)
         self.register_buffer("offset", offset)
-        self.register_buffer("num_keys", torch.scalar_tensor(init_keys.size(0)).long())
+        self.register_buffer("num_keys", 
+            torch.scalar_tensor(init_keys.size(0)).long())
 
         # voxel embeddings
         self.embed_dim = getattr(args, "quantized_embed_dim", None)
         if self.embed_dim is not None:
             self.values = Embedding(self.total_size, self.embed_dim, None)
-    
+
+        if self.use_context is not None and self.use_context == 'id':
+            assert self.args.total_num_context > 0, "index embeddings for different frames"
+            self.context_embed = Embedding(self.args.total_num_context, self.embed_dim, None)
+
+        if self.online_pruning:
+            self.pproj_dim = getattr(args, "quantized_pproj_dim", 64)
+            self.p1 = FCLayer(self.embed_dim, self.pproj_dim)
+            self.p2 = Linear(self.pproj_dim * 8, 1)
+
     @staticmethod
     def add_args(parser):
         parser.add_argument('--quantized-embed-dim', type=int, metavar='N', help="embedding size")
+        parser.add_argument('--quantized-pproj-dim', type=int, metavar='N', help="only useful if online_pruning set")
+        parser.add_argument('--total-num-context', type=int, metavar='N', help="if use id as inputs, unique embeddings")
 
-    def _forward(self, *args, **kwargs):
-        return self.feats[self.keep.bool()].unsqueeze(0), \
-               self.points[self.keep.bool()].unsqueeze(0), \
-               self.values.weight if self.values is not None else None
+    def _forward(self, id, *args, **kwargs):
+        feats  = self.feats[self.keep.bool()]
+        points = self.points[self.keep.bool()]
+        values = self.values.weight[: self.num_keys] if self.values is not None else None
 
+        # extend size to support multi-objects
+        feats  = feats.unsqueeze(0).expand(id.size(0), *feats.size()).contiguous()
+        points = points.unsqueeze(0).expand(id.size(0), *points.size()).contiguous()
+        values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous()
+        
+        # object dependent value
+        if self.use_context is not None:
+            if self.use_context == 'id':
+                values = values + self.context_embed(id).unsqueeze(1)
+            else:
+                raise NotImplementedError("only add-on condition for now.")
+
+        feats = feats + values.size(1) * torch.arange(values.size(0), 
+            device=feats.device, dtype=feats.dtype)[:, None, None]
+        values = values.view(-1, values.size(-1))  # reshape to 2D
+
+        if not self.online_pruning:
+            return feats, points, values, None
+
+        # predict keep or remove using central features
+        centers = self.get_features(feats, values)  # S x P x 8 x D
+        predicts = self.p2(self.p1(centers).view(*centers.size()[:2], -1)).squeeze(-1)
+
+        # feats = feats[predicts > 0].unsqueeze(0)
+        # points = points[predicts > 0].unsqueeze(0)
+        # predicts = predicts[predicts > 0].unsqueeze(0)
+        # from fairseq import pdb; pdb.set_trace()
+
+        # online split
+        # new_points, new_feats, new_values = self.splitting(self.voxel_size * .5, False, (points[0], feats[0], values[0]))
+        # from fairseq import pdb; pdb.set_trace()        
+        return feats, points, values, predicts
+              
     def get_features(self, x, values):
         return F.embedding(x, values)
 
-    @torch.no_grad()
     def pruning(self, keep):
         self.keep.masked_scatter_(self.keep.bool(), keep.long())
 
-    @torch.no_grad()
-    def splitting(self, half_voxel, update_buffer=True):
+    def splitting(self, half_voxel, update_buffer=True, features=None):
+        if features is not None:
+            point_xyz, feats, values = features
+            point_feats = F.embedding(feats, values)
+        else:
+            point_xyz, feats = self.points[self.keep.bool()], self.feats[self.keep.bool()]
+            point_feats = self.values(feats)
+
         offset = self.offset
-        point_xyz = self.points[self.keep.bool()]
-        point_feats = self.values(self.feats[self.keep.bool()])
-       
+        
         # generate new centers
         half_voxel = half_voxel * .5
         new_points = (point_xyz.unsqueeze(1) + offset.unsqueeze(0).type_as(point_xyz) * half_voxel).reshape(-1, 3)
         
         old_coords = (point_xyz / half_voxel).floor_().long()
         new_coords = (old_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
-        
         new_keys0 = (new_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
-        new_keys = unique_points(new_keys0)
-        new_feats = (new_keys0[:, None, :] - new_keys[None, :, :]).float().norm(dim=-1).min(1)[1].reshape(-1, 8)
-        
+
+        # get unique keys and inverse indices (for original key0, where it maps to in keys)
+        new_keys, new_feats = torch.unique(new_keys0, dim=0, sorted=True, return_inverse=True)
+        new_keys_idx = new_feats.new_zeros(new_keys.size(0)).scatter_(
+            0, new_feats, torch.arange(new_keys0.size(0), device=new_feats.device) // 64)
+         
         # recompute key vectors using trilinear interpolation 
-        new_keys_idx = (new_keys[:, None, :] - old_coords[None, :, :]).float().norm(dim=-1).min(1)[1]
+        new_feats = new_feats.reshape(-1, 8)
         p = (new_keys - old_coords[new_keys_idx]).type_as(point_xyz).unsqueeze(1) * .25 + 0.5 # (1/4 voxel size)
         q = (self.offset.type_as(p) * .5 + .5).unsqueeze(0)   # (1/2 voxel size)
         new_values = trilinear_interp(p, q, point_feats[new_keys_idx])
         
-        # assign to the parameters
-        # TODO: safe assignment. do not over write the original embeddings
-        new_num_keys = new_values.size(0)
-        new_point_length = new_points.size(0)
-
+        # assign to the parameters    
         if update_buffer:
+            new_num_keys = new_values.size(0)
+            new_point_length = new_points.size(0)
+
             self.values.weight.data.index_copy_(
                 0,
                 torch.arange(new_num_keys, device=new_values.device),
@@ -171,6 +222,8 @@ class DynamicEmbeddingBackbone(Backbone):
             self.keep = torch.zeros_like(self.keep)
             self.keep[: new_point_length] = 1
             self.num_keys += (new_num_keys - self.num_keys)
+
+        return new_points, new_feats, new_values
 
     @property
     def feature_dim(self):

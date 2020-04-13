@@ -16,7 +16,22 @@ import shutil
 import skimage
 import pandas as pd
 import pylab as plt
+import fairseq.distributed_utils as du
 
+
+def get_rank():    
+    try:
+        return du.get_rank()
+    except AssertionError:
+        return 0
+
+
+def get_world_size():
+    try:
+        return du.get_world_size()
+    except AssertionError:
+        return 1
+        
 
 def load_rgb(
     path, 
