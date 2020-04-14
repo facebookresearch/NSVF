@@ -220,7 +220,7 @@ def get_maria_seq_grid(args):
         
         # task level
         hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
-        hyperparam('--max-sentences', 2, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 1),
         hyperparam('--max-train-view', 50),
@@ -302,12 +302,14 @@ def get_maria_seq_grid(args):
 def get_maria_seqr_grid(args):
     hyperparams = get_maria_seq_grid(args)
     hyperparams += [
-        # hyperparam("--restore-file", 
-        #     "/checkpoint/jgu/space/neuralrendering/debug_new_mariaseq/maria_seq_small_PRUNE2.fp16.seq.512x512.s2.v1.geo_nerf.emb378.id.ss0.025.v0.2.posemb.sdfh128.dis.p16384.chk512.rgb200.0.ent0.0.vgg1.0.adam.lr_poly.max100000.lr0.001.clip0.0.wd0.0.seed20.pruning.p1.0.ngpu8/checkpoint_last.pt",
-        #     save_dir_key=lambda val: f'reload'),
+        hyperparam("--restore-file", 
+            "/checkpoint/jgu/space/neuralrendering/debug_new_mariaseq/maria_seq_small_PRUNE5.fp16.seq.512x512.s1.v1.geo_nerf.emb378.id.ss0.025.v0.2.posemb.sdfh128.dis.p16384.chk512.rgb200.0.ent0.0.vgg1.0.adam.lr_poly.max100000.lr0.001.clip0.0.wd0.0.seed20.reload.pruning.p1.0.dyvox.ngpu8/checkpoint_last.pt",
+            save_dir_key=lambda val: f'reload'),
         hyperparam('--online-pruning', binary_flag=True, save_dir_key=lambda val: f'pruning'),
         hyperparam('--pruning-weight', 1.0, save_dir_key=lambda val: f'p{val}'),
         hyperparam('--no-preload', binary_flag=True),
+        hyperparam('--half-voxel-size-at',  "5000,250000,500000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--reduce-step-size-at', "5000,250000,500000"),
     ]
     return hyperparams
 
@@ -328,7 +330,7 @@ def get_maria_seq2_grid(args):
         
         # task level
         hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
-        hyperparam('--max-sentences', 4, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--max-sentences', 2, save_dir_key=lambda val: f's4'),
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 2),
         hyperparam('--max-train-view', 50),
@@ -371,8 +373,8 @@ def get_maria_seq2_grid(args):
 
         # training arguments
         hyperparam('--pixel-per-view', 16384, save_dir_key=lambda val: f'p16384'),
-        hyperparam('--sampling-on-mask', 0.6),
-        hyperparam('--sampling-on-bbox', binary_flag=True),
+        # hyperparam('--sampling-on-mask', 0.8, save_dir_key=lambda val: f'smk{val}'),
+        # hyperparam('--sampling-on-bbox', binary_flag=True),
         hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', False, binary_flag=True),        
         
@@ -393,8 +395,8 @@ def get_maria_seq2_grid(args):
         hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),
         hyperparam('--criterion', 'srn_loss'),
         hyperparam('--num-workers', 0),
-        hyperparam('--seed', [20], save_dir_key=lambda val: f'seed{val}'),
-        hyperparam('--save-interval-updates', 200),
+        hyperparam('--seed', [2], save_dir_key=lambda val: f'seed{val}'),
+        hyperparam('--save-interval-updates', 1000),
         hyperparam('--max-update', 100000),
         hyperparam('--virtual-epoch-steps', 5000),
         hyperparam('--save-interval', 1),
@@ -404,6 +406,22 @@ def get_maria_seq2_grid(args):
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
     return hyperparams
+
+
+@register_grid("geo_maria_seq2_dyn")
+def get_maria_seq2r_grid(args):
+    hyperparams = get_maria_seq2_grid(args)
+    hyperparams += [
+        # hyperparam("--restore-file", 
+        #     "/checkpoint/jgu/space/neuralrendering/debug_new_mariaseq/maria_seq_small_PRUNE5.fp16.seq.512x512.s1.v1.geo_nerf.emb378.id.ss0.025.v0.2.posemb.sdfh128.dis.p16384.chk512.rgb200.0.ent0.0.vgg1.0.adam.lr_poly.max100000.lr0.001.clip0.0.wd0.0.seed20.reload.pruning.p1.0.dyvox.ngpu8/checkpoint_last.pt",
+        #     save_dir_key=lambda val: f'reload'),
+        hyperparam('--online-pruning', binary_flag=True, save_dir_key=lambda val: f'pruning'),
+        hyperparam('--pruning-weight', 1.0, save_dir_key=lambda val: f'p{val}'),
+        hyperparam('--half-voxel-size-at',  "10000,40000,80000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--reduce-step-size-at', "10000,40000,80000"),
+    ]
+    return hyperparams
+
 
 def postprocess_hyperparams(args, config):
     """Postprocess a given hyperparameter configuration."""

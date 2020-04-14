@@ -153,7 +153,6 @@ class SRNLossCriterion(RenderingCriterion):
                 masks, self.args.L1)
         
         losses['rgb_loss'] = (rgb_loss, self.args.rgb_weight)
-
         if self.args.reg_weight > 0:
             min_depths = net_output.get('min_depths', 0.0)
             reg_loss = utils.depth_regularization_loss(

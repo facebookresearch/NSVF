@@ -304,10 +304,13 @@ class SequenceObjRenderingTask(SingleObjRenderingTask):
             outputs = self.inference_step(self.renderer, [model], [sample, 0])[1]
             if getattr(self.args, "distributed_rank", -1) == 0:  # save only for master
                 self.renderer.save_images(outputs, self._num_updates)
-        
+
+        if self.steps_to_half_voxels is not None and \
+                self._num_updates in self.steps_to_half_voxels:
+            model.adjust('split')
+          
         if self.steps_to_reduce_step is not None and \
             self._num_updates in self.steps_to_reduce_step:
             model.adjust('reduce')
 
-        1 // 0
-        return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
+        return super(SingleObjRenderingTask, self).train_step(sample, model, criterion, optimizer, update_num, ignore_grad)

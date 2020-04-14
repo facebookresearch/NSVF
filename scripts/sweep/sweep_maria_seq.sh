@@ -1,11 +1,11 @@
 ROOT=/private/home/jgu/data/shapenet/maria/
 DATA=maria_seq_small
-# DATA=maria_seq
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_mariaseq
+DATA=maria_seq
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_mariaseq2
 mkdir -p ${WORK}
 
 GRID=geo_maria_seq_reload
-# GRID=geo_maria_seq2
+GRID=geo_maria_seq2_dyn
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -19,7 +19,7 @@ python fb_sweep/sweep_maria.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_PRUNE2 \
+    --prefix ${DATA}_PRUNE6 \
     --num-trials 1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -41,7 +41,7 @@ python fb_sweep/sweep_maria.py \
 #     --no-tensorboard \
 #     --snapshot-code \
 #     --snapshot-root ${WORK}/snapshot \
-#     --prefix ${DATA}_Trans5 \
+#     --prefix ${DATA}_Trans6 \
 #     --num-trials 1 \
 #     --num-gpus 1 \
 #     --num-nodes 1 \

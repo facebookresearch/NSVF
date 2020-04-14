@@ -17,6 +17,7 @@ from fairdr.data.data_utils import load_matrix, unique_points
 from fairdr.data.geometry import trilinear_interp
 from fairdr.modules.pointnet2.pointnet2_utils import furthest_point_sample
 from fairdr.modules.linear import FCLayer, Linear, Embedding, PosEmbLinear, NeRFPosEmbLinear
+from fairdr.modules.implicit import SignedDistanceField as SDF
 from fairseq import options, utils
 from fairseq.modules import (
     SinusoidalPositionalEmbedding,
@@ -26,7 +27,7 @@ from fairseq.modules import (
 
 
 BACKBONE_REGISTRY = {}
-
+INF = 1000.0
 
 def register_backnone(name):
     def register_backbone_cls(cls):
@@ -35,6 +36,49 @@ def register_backnone(name):
         BACKBONE_REGISTRY[name] = cls
         return cls
     return register_backbone_cls
+
+
+def padding_points(xs, pad):
+    if len(xs) == 1:
+        return xs[0].unsqueeze(0)
+    
+    maxlen = max([x.size(0) for x in xs])
+    xt = xs[0].new_ones(len(xs), maxlen, xs[0].size(1)).fill_(pad)
+    for i in range(len(xs)):
+        xt[i, :xs[i].size(0)] = xs[i]
+    return xt
+
+
+def pruning_points(feats, points, alpha):
+    feats = [feats[i][alpha[i]] for i in range(alpha.size(0))]
+    points = [points[i][alpha[i]] for i in range(alpha.size(0))]
+    points = padding_points(points, INF)
+    feats = padding_points(feats, 0)
+    return feats, points
+
+
+def splitting_points(point_xyz, point_feats, offset, half_voxel):        
+    # generate new centers
+    half_voxel = half_voxel * .5
+    new_points = (point_xyz.unsqueeze(1) + offset.unsqueeze(0).type_as(point_xyz) * half_voxel).reshape(-1, 3)
+
+    old_coords = (point_xyz / half_voxel).floor_().long()
+    new_coords = (old_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
+    new_keys0 = (new_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
+
+    # get unique keys and inverse indices (for original key0, where it maps to in keys)
+    new_keys, new_feats = torch.unique(new_keys0, dim=0, sorted=True, return_inverse=True)
+    new_keys_idx = new_feats.new_zeros(new_keys.size(0)).scatter_(
+        0, new_feats, torch.arange(new_keys0.size(0), device=new_feats.device) // 64)
+    
+    # recompute key vectors using trilinear interpolation 
+    new_feats = new_feats.reshape(-1, 8)
+    p = (new_keys - old_coords[new_keys_idx]).type_as(point_xyz).unsqueeze(1) * .25 + 0.5 # (1/4 voxel size)
+    q = (offset.type_as(p) * .5 + .5).unsqueeze(0)   # (1/2 voxel size)
+    new_values = trilinear_interp(p, q, point_feats[new_keys_idx])
+
+    return new_points, new_feats, new_values
+
 
 @register_backnone('base_backbone')
 class Backbone(nn.Module):
@@ -125,7 +169,7 @@ class DynamicEmbeddingBackbone(Backbone):
         if self.online_pruning:
             self.pproj_dim = getattr(args, "quantized_pproj_dim", 64)
             self.p1 = FCLayer(self.embed_dim, self.pproj_dim)
-            self.p2 = Linear(self.pproj_dim * 8, 1)
+            self.p2 = SDF(args, self.pproj_dim * 8, 128)
 
     @staticmethod
     def add_args(parser):
@@ -133,7 +177,7 @@ class DynamicEmbeddingBackbone(Backbone):
         parser.add_argument('--quantized-pproj-dim', type=int, metavar='N', help="only useful if online_pruning set")
         parser.add_argument('--total-num-context', type=int, metavar='N', help="if use id as inputs, unique embeddings")
 
-    def _forward(self, id, *args, **kwargs):
+    def _forward(self, id, step=0, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
         values = self.values.weight[: self.num_keys] if self.values is not None else None
@@ -149,27 +193,43 @@ class DynamicEmbeddingBackbone(Backbone):
                 values = values + self.context_embed(id).unsqueeze(1)
             else:
                 raise NotImplementedError("only add-on condition for now.")
+        
+        half_voxel = self.voxel_size
+        consistent_loss, predicts = 0, None
 
-        feats = feats + values.size(1) * torch.arange(values.size(0), 
-            device=feats.device, dtype=feats.dtype)[:, None, None]
-        values = values.view(-1, values.size(-1))  # reshape to 2D
+        for t in range(step + 1):
+            feats = feats + values.size(1) * torch.arange(values.size(0), 
+                device=feats.device, dtype=feats.dtype)[:, None, None]
+            values = values.view(-1, values.size(-1))  # reshape to 2D
+            masks = points[:, :, 0] < (INF * .5)
 
-        if not self.online_pruning:
-            return feats, points, values, None
+            if not self.online_pruning:
+                break
 
-        # predict keep or remove using central features
-        centers = self.get_features(feats, values)  # S x P x 8 x D
-        predicts = self.p2(self.p1(centers).view(*centers.size()[:2], -1)).squeeze(-1)
+            # predict keep or remove using central features
+            corner_features = self.get_features(feats, values)  # S x P x 8 x D
+            predicts = self.p2(self.p1(corner_features).view(*corner_features.size()[:2], -1))[0]
 
-        # feats = feats[predicts > 0].unsqueeze(0)
-        # points = points[predicts > 0].unsqueeze(0)
-        # predicts = predicts[predicts > 0].unsqueeze(0)
-        # from fairseq import pdb; pdb.set_trace()
+            if t < step:
+                # pruning
+                feats, points = pruning_points(feats, points, predicts > 0)
+                corner_features = self.get_features(feats, values)  # recompute features
 
-        # online split
-        # new_points, new_feats, new_values = self.splitting(self.voxel_size * .5, False, (points[0], feats[0], values[0]))
-        # from fairseq import pdb; pdb.set_trace()        
-        return feats, points, values, predicts
+                # consistency loss (avoid driftting)
+                consistent_loss += F.binary_cross_entropy_with_logits(
+                    predicts[masks], (predicts[masks] > 0).type_as(predicts))
+                
+                # splitting
+                half_voxel = half_voxel * .5
+                new_points, new_feats, new_values = zip(*[splitting_points(
+                    points[i], corner_features[i], self.offset, half_voxel
+                ) for i in range(feats.size(0))])
+                
+                points = padding_points(new_points, INF)
+                feats = padding_points(new_feats, 0)
+                values = padding_points(new_values, 0.0)
+     
+        return feats, points, values, (predicts, masks, consistent_loss)
               
     def get_features(self, x, values):
         return F.embedding(x, values)
@@ -181,30 +241,13 @@ class DynamicEmbeddingBackbone(Backbone):
         if features is not None:
             point_xyz, feats, values = features
             point_feats = F.embedding(feats, values)
+        
         else:
             point_xyz, feats = self.points[self.keep.bool()], self.feats[self.keep.bool()]
             point_feats = self.values(feats)
 
-        offset = self.offset
-        
-        # generate new centers
-        half_voxel = half_voxel * .5
-        new_points = (point_xyz.unsqueeze(1) + offset.unsqueeze(0).type_as(point_xyz) * half_voxel).reshape(-1, 3)
-        
-        old_coords = (point_xyz / half_voxel).floor_().long()
-        new_coords = (old_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
-        new_keys0 = (new_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
-
-        # get unique keys and inverse indices (for original key0, where it maps to in keys)
-        new_keys, new_feats = torch.unique(new_keys0, dim=0, sorted=True, return_inverse=True)
-        new_keys_idx = new_feats.new_zeros(new_keys.size(0)).scatter_(
-            0, new_feats, torch.arange(new_keys0.size(0), device=new_feats.device) // 64)
-         
-        # recompute key vectors using trilinear interpolation 
-        new_feats = new_feats.reshape(-1, 8)
-        p = (new_keys - old_coords[new_keys_idx]).type_as(point_xyz).unsqueeze(1) * .25 + 0.5 # (1/4 voxel size)
-        q = (self.offset.type_as(p) * .5 + .5).unsqueeze(0)   # (1/2 voxel size)
-        new_values = trilinear_interp(p, q, point_feats[new_keys_idx])
+        # split points
+        new_points, new_feats, new_values = splitting_points(point_xyz, point_feats, self.offset, half_voxel)
         
         # assign to the parameters    
         if update_buffer:

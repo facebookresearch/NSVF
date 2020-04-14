@@ -25,7 +25,7 @@ from fairdr.modules.linear import Linear, NeRFPosEmbLinear
 from fairdr.modules.implicit import (
     ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField
 )
-from fairdr.modules.backbone import BACKBONE_REGISTRY
+from fairdr.modules.backbone import BACKBONE_REGISTRY, pruning_points
 
 BG_DEPTH = 5.0
 MAX_DEPTH = 10000.0
@@ -112,17 +112,19 @@ class GEONERFModel(SRNModel):
         
     def _forward(self, ray_start, ray_dir, id, **kwargs):
         # get geometry features
-        feats, xyz, values, predicts = self.field.get_backbone_features(id=id)
+        steps = torch.log2(self.field.backbone.voxel_size / self.field.VOXEL_SIZE).long().item()
+        feats, xyz, values, outputs = self.field.get_backbone_features(id=id, step=steps)
+        predicts, masks, consistent_loss = outputs
+
         if predicts is not None:
-            alpha = self.field.pruning(id, update=False, features=(feats, xyz, values, predicts)).detach()
-            pruning_loss = F.binary_cross_entropy_with_logits(predicts.view(-1), alpha)
+            alpha = self.field.pruning(id, update=False, features=(feats, xyz, values)).detach()
+            pruning_loss = F.binary_cross_entropy_with_logits(predicts[masks], alpha[masks]) + consistent_loss * 0.05
+            
         else:
             pruning_loss = None
 
-        if not self.training:
-            alpha = alpha.view(*feats.size()[:2])
-            feats = feats[alpha > 0.5].view(*feats.size()[:2], -1)
-            xyz = xyz[alpha > 0.5].view(*xyz.size()[:2], -1)
+        # if not self.training:
+        #     feats, xyz = pruning_points(feats, xyz, alpha > 0.5)
 
         # coarse ray-intersection
         bg_color = self.field.bg_color # * 0.0 - 0.8
@@ -130,12 +132,12 @@ class GEONERFModel(SRNModel):
         predicts = bg_color.unsqueeze(0).expand(S * V * P, 3)
         depths = predicts.new_ones(S * V * P) * BG_DEPTH
         missed = predicts.new_ones(S * V * P)
-        first_hits = predicts.new_ones(S * V * P).long().fill_(self.field.num_voxels)
+        first_hits = predicts.new_ones(S * V * P).long().fill_(values.size(0) / id.size(0))
         entropy = 0.0
 
         hits, _ray_start, _ray_dir, state, samples = \
             self.raymarcher.ray_intersection(ray_start, ray_dir, xyz, feats)
-        
+
         # fine-grained raymarching + rendering
         if hits.sum() > 0:   # missed everything
             hits = hits.view(S * V * P).contiguous()
@@ -175,14 +177,18 @@ class GEONERFModel(SRNModel):
     def adjust(self, action, *args, **kwargs):
         assert self.args.backbone == "dynamic_embedding", \
             "pruning currently only supports dynamic embedding"
-        assert self.args.task == "single_object_rendering", \
-            "only works for single-object rendering"
+        # assert self.args.task == "single_object_rendering", \
+        #     "only works for single-object rendering"
 
         if action == 'prune':
             self.field.pruning(*args, **kwargs)
         
         elif action == 'split':
-            self.field.splitting()
+            logger.info("half the global voxel size {} -> {}".format(
+                self.field.VOXEL_SIZE.item(), self.field.VOXEL_SIZE.item() * .5))
+            
+            if not self.field.backbone.online_pruning:
+                self.field.splitting()   # offline voxel pruning
             
             # adjust sizes
             self.field.VOXEL_SIZE *= .5
@@ -195,8 +201,8 @@ class GEONERFModel(SRNModel):
                 self.field.MARCH_SIZE.item(), self.field.MARCH_SIZE.item() * .5))
             
             # adjust sizes
-            self.raymarcher.MARCH_SIZE *= 0.5
-            self.field.MARCH_SIZE *= 0.5
+            self.raymarcher.MARCH_SIZE *= .5
+            self.field.MARCH_SIZE *= .5
         
         else:
             raise NotImplementedError("please specify 'prune, split, shrink' actions")
@@ -325,8 +331,8 @@ class GEORadianceField(Field):
 
             feats, xyz = feats[0], xyz[0]
         else:
-            feats, xyz, values, _ = self.get_backbone_features(id=id) \
-                if features is not None else features
+            assert features is not None
+            feats, xyz, values = features
             feats, xyz = feats.reshape(-1, feats.size(-1)), xyz.reshape(-1, xyz.size(-1))
 
         D = feats.size(-1)
@@ -360,12 +366,10 @@ class GEORadianceField(Field):
             logger.info("pruning done. before: {}, after: {} voxels".format(xyz.size(0), keep.sum()))
             self.backbone.pruning(keep=keep)
         
-        return alpha
+        return alpha.reshape(id.size(0), -1)
 
     @torch.no_grad()
     def splitting(self):
-        logger.info("half the voxel size {} -> {}".format(
-            self.VOXEL_SIZE.item(), self.VOXEL_SIZE.item() * .5))
         self.backbone.splitting(self.VOXEL_SIZE * .5)
         logger.info("Total voxel number increases to {}".format(self.num_voxels))
     
