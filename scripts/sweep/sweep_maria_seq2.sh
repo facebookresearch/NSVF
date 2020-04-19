@@ -20,7 +20,7 @@ python fb_sweep/sweep_maria.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_PATCH \
+    --prefix ${DATA}_TRAMv7 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -28,7 +28,7 @@ python fb_sweep/sweep_maria.py \
     --constraint volta32gb \
     --exclusive \
     --comment "NeurIPS2020 deadline." \
-    --partition priority \
+    --partition learnfair \
     --resume-failed \
     # --local \
    
@@ -44,7 +44,7 @@ python fb_sweep/sweep_maria.py \
 #     --snapshot-root ${WORK}/snapshot \
 #     --prefix ${DATA}_Trans9 \
 #     --num-trials 1 \
-#     --num-gpus 8 \
+#     --num-gpus 1 \
 #     --num-nodes 1 \
 #     --mem 500gb \
 #     --constraint volta32gb \

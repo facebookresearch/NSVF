@@ -153,11 +153,16 @@ class SRNLossCriterion(RenderingCriterion):
                 masks, self.args.L1)
         
         losses['rgb_loss'] = (rgb_loss, self.args.rgb_weight)
+        
         if self.args.reg_weight > 0:
-            min_depths = net_output.get('min_depths', 0.0)
-            reg_loss = utils.depth_regularization_loss(
-                net_output['depths'], min_depths)
-            losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
+            if 'latent' in net_output:
+                losses['reg_loss'] = (net_output['latent'], self.args.reg_weight)
+
+            else:
+                min_depths = net_output.get('min_depths', 0.0)
+                reg_loss = utils.depth_regularization_loss(
+                    net_output['depths'], min_depths)
+                losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
 
         if self.args.entropy_weight > 0:
             losses['ent_loss'] = (net_output['entropy'], self.args.entropy_weight)

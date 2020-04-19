@@ -45,6 +45,8 @@ class SingleObjRenderingTask(FairseqTask):
                             help="number of views sampled for training, can be unlimited if set -1")
         parser.add_argument("--max-valid-view", type=int, default=50,
                             help="number of views sampled for validation, can be unlimited if set -1")
+        parser.add_argument("--subsample-valid", type=int, default=-1,
+                            help="if set > -1, subsample the validation (when training set is too large)")
         parser.add_argument("--view-per-batch", type=int, default=6,
                             help="number of views training each batch (each GPU)")
         parser.add_argument("--valid-view-per-batch", type=int, default=6,
@@ -55,6 +57,8 @@ class SingleObjRenderingTask(FairseqTask):
                             help="this value determined the probability of sampling rays on masks")
         parser.add_argument("--sampling-on-bbox", action='store_true',
                             help="sampling points to close to the mask")
+        parser.add_argument("--sampling-patch-size", type=int, default=1, 
+                            help="sample pixels based on patches instead of independent pixels")
         parser.add_argument("--view-resolution", type=int, default=64,
                             help="width for the squared image. downsampled from the original.")       
         parser.add_argument("--min-color", choices=(0, -1), default=-1, type=int,
@@ -128,12 +132,14 @@ class SingleObjRenderingTask(FairseqTask):
         """
         Load a given dataset split (train, valid, test)
         """
-
+        
         if split != 'test':
             self.datasets[split] = ShapeViewDataset(
                 self.args.data,
                 max_train_view=self.args.max_train_view,
                 max_valid_view=self.args.max_valid_view,
+                subsample_valid=self.args.subsample_valid 
+                    if split == 'valid' else -1,
                 num_view=self.args.view_per_batch 
                     if split == 'train' 
                     else self.args.valid_view_per_batch,
@@ -154,18 +160,18 @@ class SingleObjRenderingTask(FairseqTask):
                     self.args.pixel_per_view,
                     self.args.sampling_on_mask,
                     self.args.sampling_on_bbox,
-                    self.args.view_resolution)
+                    self.args.view_resolution,
+                    self.args.sampling_patch_size)
             self.datasets[split] = WorldCoordDataset(
                 self.datasets[split]
             )
 
             if split == 'train':   # infinite sampler
                 max_step = getattr(self.args, "virtual_epoch_steps", None)
-                if max_step is None:
-                    max_step = self.args.max_update
-                total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
-                self.datasets[split] = InfiniteDataset(
-                    self.datasets[split], total_num_models)
+                if max_step is not None:
+                    total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
+                    self.datasets[split] = InfiniteDataset(
+                        self.datasets[split], total_num_models)
 
         else:
             self.datasets[split] = ShapeDataset(
@@ -288,7 +294,7 @@ class SequenceObjRenderingTask(SingleObjRenderingTask):
         SingleObjRenderingTask.add_args(parser)
 
     def repeat_dataset(self, split):
-        return 1 if split == 'train' else 5
+        return 1
 
     def load_dataset(self, split, **kwargs):
         super().load_dataset(split, **kwargs)
@@ -307,10 +313,6 @@ class SequenceObjRenderingTask(SingleObjRenderingTask):
 
         if self.steps_to_half_voxels is not None and \
                 self._num_updates in self.steps_to_half_voxels:
-            model.adjust('split')
-          
-        if self.steps_to_reduce_step is not None and \
-            self._num_updates in self.steps_to_reduce_step:
-            model.adjust('reduce')
+            model.adjust('level')
 
         return super(SingleObjRenderingTask, self).train_step(sample, model, criterion, optimizer, update_num, ignore_grad)

@@ -17,7 +17,9 @@ parser.add_argument('--extent', type=float, default=5.0)
 parser.add_argument('--marching_cube', action='store_true')
 parser.add_argument('--downsample', type=float, default=4.0)
 parser.add_argument('--load_mask', action='store_true')
+parser.add_argument('--white-bg', action='store_true')
 parser.add_argument('--boundingbox', action='store_true')
+parser.add_argument('--visualhull_only', action='store_true')
 args = parser.parse_args()
 
 
@@ -88,7 +90,10 @@ for i, data in enumerate(packed_data):
     # image_mask = 1 - np.all(np.logical_and(
     #     data['rgb'] > (background - tau),
     #     data['rgb'] < (background + tau)), 0).reshape(imgW, imgH).astype(np.int)
-    if not args.load_mask:
+    
+    if args.white_bg:
+        image_mask = 1 - (data['rgb'] == 1.0).all(0).reshape(imgH, imgW).astype(np.int)
+    elif args.load_mask:
         image_mask = data['alpha'].reshape(imgH, imgW).astype(np.int)
     else:
         image_mask = data['mask'].reshape(imgH, imgW).astype(np.int)
@@ -156,20 +161,21 @@ else:
     save_mesh(verts, faces, normals, os.path.join(DIR, 'visualhull_mc.ply'))
     # verts = downsample_pcd(verts, voxd, os.path.join(DIR, 'visualhull_down.ply'))
 
-if args.boundingbox:
-    ovoxels = voxelize_bbx(verts, voxd, os.path.join(DIR, 'visualhull_bbox{}.ply'.format(voxd)))
-else:
-    ovoxels = voxelize_pcd(verts, voxd, os.path.join(DIR, 'visualhull_voxel{}.ply'.format(voxd)))
+if not args.visualhull_only:
+    if args.boundingbox:
+        ovoxels = voxelize_bbx(verts, voxd, os.path.join(DIR, 'visualhull_bbox{}.ply'.format(voxd)))
+    else:
+        ovoxels = voxelize_pcd(verts, voxd, os.path.join(DIR, 'visualhull_voxel{}.ply'.format(voxd)))
 
-o = np.floor(ovoxels / voxd).astype(int)
-ox, oy, oz = o[:, 0], o[:, 1], o[:, 2]
+    o = np.floor(ovoxels / voxd).astype(int)
+    ox, oy, oz = o[:, 0], o[:, 1], o[:, 2]
 
-# save data
-fname = os.path.join(DIR, 'voxel.txt')
-with open(fname, 'w') as f:
-    for i in range(ox.shape[0]):
-        print('{} {} {} {} {} {}'.format(
-            ox[i], oy[i], oz[i], 
-            ovoxels[i, 0], ovoxels[i, 1], ovoxels[i, 2]), 
-        file=f)
+    # save data
+    fname = os.path.join(DIR, 'voxel.txt')
+    with open(fname, 'w') as f:
+        for i in range(ox.shape[0]):
+            print('{} {} {} {} {} {}'.format(
+                ox[i], oy[i], oz[i], 
+                ovoxels[i, 0], ovoxels[i, 1], ovoxels[i, 2]), 
+            file=f)
 

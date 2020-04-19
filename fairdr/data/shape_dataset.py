@@ -25,13 +25,15 @@ class ShapeDataset(FairseqDataset):
                 paths, 
                 load_point=False,
                 preload=True,
-                repeat=1):
+                repeat=1,
+                subsample_valid=-1):
         
         if os.path.isdir(paths):
             self.paths = [paths]
         else:
             self.paths = [line.strip() for line in open(paths)]
 
+        self.subsample_valid = subsample_valid
         self.load_point = load_point
         self.total_num_shape = len(self.paths)
         self.cache = None
@@ -44,6 +46,12 @@ class ShapeDataset(FairseqDataset):
             _data_per_shape['pts'] = self.find_point()
         _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
 
+        if self.subsample_valid > -1:
+            for key in _data_per_shape:
+                _data_per_shape[key] = _data_per_shape[key][::self.subsample_valid]
+            self.paths = self.paths[::self.subsample_valid]
+            self.total_num_shape = len(self.paths)
+        
         # group the data..
         data_list = []
         for r in range(repeat):
@@ -162,6 +170,7 @@ class ShapeViewDataset(ShapeDataset):
                 max_train_view, 
                 num_view,
                 max_valid_view=None, 
+                subsample_valid=-1,
                 resolution=None, 
                 load_depth=False,
                 load_mask=False,
@@ -173,7 +182,7 @@ class ShapeViewDataset(ShapeDataset):
                 bg_color=-0.8,
                 min_color=-1):
         
-        super().__init__(paths, load_point, False, repeat)
+        super().__init__(paths, load_point, False, repeat, subsample_valid)
 
         self.train = train
         self.load_depth = load_depth
@@ -268,7 +277,7 @@ class ShapeViewDataset(ShapeDataset):
             return list
         
         return [is_empty(files[:self.max_train_view]) if self.train else 
-                is_empty(files[24:24+self.max_valid_view]) for files in file_list]
+                is_empty(files[:self.max_valid_view]) for files in file_list]
 
     def find_rgb(self):
         try:
@@ -353,7 +362,6 @@ class ShapeViewDataset(ShapeDataset):
         results = super().collater(samples)
         if results is None:
             return results
-
         for key in samples[0][2][0]:
             results[key] = torch.from_numpy(
                 np.array([[d[key] for d in s[2]] for s in samples])
@@ -366,11 +374,12 @@ class SampledPixelDataset(BaseWrapperDataset):
     A wrapper dataset, which split rendered images into pixels
     """
 
-    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0, sampling_on_bbox=False, resolution=512):
+    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0, sampling_on_bbox=False, resolution=512, patch_size=1):
         super().__init__(dataset)
         self.num_sample = num_sample
         self.sampling_on_mask = sampling_on_mask
         self.sampling_on_bbox = sampling_on_bbox
+        self.patch_size = patch_size
         self.res = resolution
 
     def __getitem__(self, index):
@@ -386,7 +395,8 @@ class SampledPixelDataset(BaseWrapperDataset):
                     else data.get('alpha', None),
                 self.sampling_on_mask,
                 self.sampling_on_bbox,
-                width=data['width'])
+                width=data['width'],
+                patch_size=self.patch_size)
             for data in data_per_view
         ]
         

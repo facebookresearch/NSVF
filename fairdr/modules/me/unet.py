@@ -251,42 +251,42 @@ class MinkUNet34C(MinkUNet34):
     PLANES = (32, 64, 128, 256, 256, 128, 96, 96)
 
 
-# if __name__ == '__main__':
-#     # loss and network
-#     criterion = nn.CrossEntropyLoss()
-#     net = MinkUNet14A(in_channels=3, out_channels=5, D=2)
-#     print(net)
+if __name__ == '__main__':
+    # loss and network
+    criterion = nn.CrossEntropyLoss()
+    net = MinkUNet14A(in_channels=3, out_channels=5, D=2)
+    print(net)
 
-#     from fairseq import pdb; pdb.set_trace()
+    from fairseq import pdb; pdb.set_trace()
 
-#     # a data loader must return a tuple of coords, features, and labels.
-#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # a data loader must return a tuple of coords, features, and labels.
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-#     net = net.to(device)
-#     optimizer = SGD(net.parameters(), lr=1e-2)
+    net = net.to(device)
+    optimizer = SGD(net.parameters(), lr=1e-2)
 
-#     pdb.set_trace()
+    pdb.set_trace()
 
-#     for i in range(10):
-#         optimizer.zero_grad()
+    for i in range(10):
+        optimizer.zero_grad()
 
-#         # Get new data
-#         coords, feat, label = data_loader(is_classification=False)
+        # Get new data
+        coords, feat, label = data_loader(is_classification=False)
         
-#         pdb.set_trace()
-#         input = ME.SparseTensor(feat, coords=coords).to(device)
-#         label = label.to(device)
+        pdb.set_trace()
+        input = ME.SparseTensor(feat, coords=coords).to(device)
+        label = label.to(device)
 
-#         # Forward
-#         output = net(input)
+        # Forward
+        output = net(input)
 
-#         # Loss
-#         loss = criterion(output.F, label)
-#         print('Iteration: ', i, ', Loss: ', loss.item())
+        # Loss
+        loss = criterion(output.F, label)
+        print('Iteration: ', i, ', Loss: ', loss.item())
 
-#         # Gradient
-#         loss.backward()
-#         optimizer.step()
+        # Gradient
+        loss.backward()
+        optimizer.step()
 
 #     # Saving and loading a network
 #     torch.save(net.state_dict(), 'test.pth')
