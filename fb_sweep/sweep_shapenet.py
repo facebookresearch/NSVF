@@ -148,8 +148,8 @@ def get_shapenet_seq_grid(args):
         hyperparam('--max-valid-view', 50),
 
         # model arguments
-        hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
-        # hyperparam('--arch', 'geo_nerf_transformer', save_dir_key=lambda val: val),
+        # hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
+        hyperparam('--arch', 'geo_nerf_transformer', save_dir_key=lambda val: val),
 
         # hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/shapenet_chair/initial_voxel.txt"),
         hyperparam('--quantized-voxel-path', voxel_name),
@@ -157,10 +157,12 @@ def get_shapenet_seq_grid(args):
         hyperparam('--context', 'id', save_dir_key=lambda val: f'{val}'),
         hyperparam('--total-num-context', 5000),
         
+        # -- transformer params
         # hyperparam('--over-residual', False, binary_flag=True, save_dir_key=lambda val: f'tres'),
-        # hyperparam('--encoder-attention-heads', 1),
-        # hyperparam('--encoder-layers', [1], save_dir_key=lambda val: f'enc{val}'),
-
+        hyperparam('--encoder-attention-heads', 1),
+        hyperparam('--encoder-layers', [1], save_dir_key=lambda val: f'enc{val}'),
+        hyperparam('--cross-attention-context', binary_flag=True, save_dir_key=lambda val: f'cac'),
+    
         hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
         hyperparam('--voxel-size', 0.25, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 48),
@@ -176,7 +178,7 @@ def get_shapenet_seq_grid(args):
         hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
         hyperparam('--background-stop-gradient', True, binary_flag=True),
         hyperparam('--discrete-regularization', True, binary_flag=True, save_dir_key=lambda val: f'dis'),
-        # hyperparam('--deterministic-step', True, binary_flag=True, save_dir_key=lambda val: 'dstep'),
+        hyperparam('--deterministic-step', True, binary_flag=True, save_dir_key=lambda val: 'dstep'),
 
         # dynamic pruning
         hyperparam('--online-pruning', binary_flag=True, save_dir_key=lambda val: f'pruning'),
@@ -199,8 +201,8 @@ def get_shapenet_seq_grid(args):
         hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', False, binary_flag=True),        
         
-        # hyperparam('--rgb-weight', 200.0, save_dir_key=lambda val: f'rgb{val}'),
-        hyperparam('--rgb-weight', 1.0, save_dir_key=lambda val: f'rgb{val}'),
+        hyperparam('--rgb-weight', 200.0, save_dir_key=lambda val: f'rgb{val}'),
+        hyperparam('--alpha-weight', 1.0, save_dir_key=lambda val: f'alpha{val}'),
         # hyperparam('--entropy-weight', [10.0], save_dir_key=lambda val: f'ent{val}'),
         hyperparam('--reg-weight', 0.0), # , save_dir_key=lambda val: f'latent{val}'),
         hyperparam('--vgg-weight', 0.0, save_dir_key=lambda val: f'vgg{val}'),

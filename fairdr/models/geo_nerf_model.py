@@ -469,8 +469,9 @@ class GEORaymarcher(Raymarcher):
                 pts_idx.unsqueeze(0), min_depth.unsqueeze(0), max_depth.unsqueeze(0),
                 self.deterministic_step or (not self.training)
             )]
+        sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
-       
+
         # prepare output
         ray_start = ray_start[hits]
         ray_dir = ray_dir[hits]
@@ -559,8 +560,9 @@ class GEORaymarcher(Raymarcher):
 
         # aggregate along the ray
         shifted_sigma_dist = torch.cat([sigma_dist.new_zeros(sampled_depth.size(0), 1), sigma_dist[:, :-1]], dim=-1)  # shift one step
-        probs = ((1 - torch.exp(-sigma_dist.float())) * torch.exp(-torch.cumsum(shifted_sigma_dist.float(), dim=-1))).type_as(sigma_dist)
-    
+        a = 1 - torch.exp(-sigma_dist.float())
+        b = torch.exp(-torch.cumsum(shifted_sigma_dist.float(), dim=-1))
+        probs = (a * b).type_as(sigma_dist)
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
         rgb = (texture * probs.unsqueeze(-1)).sum(-2)

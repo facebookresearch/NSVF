@@ -120,6 +120,7 @@ class SRNLossCriterion(RenderingCriterion):
         parser.add_argument('--occupancy-weight', type=float, default=0.0)
         parser.add_argument('--entropy-weight', type=float, default=0.0)
         parser.add_argument('--pruning-weight', type=float, default=0.0)
+        parser.add_argument('--alpha-weight', type=float, default=0.0)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
@@ -153,7 +154,7 @@ class SRNLossCriterion(RenderingCriterion):
                 masks, self.args.L1)
         
         losses['rgb_loss'] = (rgb_loss, self.args.rgb_weight)
-        
+
         if self.args.reg_weight > 0:
             if 'latent' in net_output:
                 losses['reg_loss'] = (net_output['latent'], self.args.reg_weight)
@@ -166,6 +167,15 @@ class SRNLossCriterion(RenderingCriterion):
 
         if self.args.entropy_weight > 0:
             losses['ent_loss'] = (net_output['entropy'], self.args.entropy_weight)
+
+        if self.args.alpha_weight > 0:
+            alpha = net_output['missed'].reshape(-1)
+            # alpha_loss = torch.log(0.1 + alpha) + torch.log(0.1 + 1 - alpha) - math.log(0.11)
+            # alpha_loss = alpha_loss.float().mean().type_as(alpha_loss)
+            alpha_loss = torch.log1p(
+                1. / 0.11 * alpha.float() * (1 - alpha.float())
+            ).mean().type_as(alpha)
+            losses['alpha_loss'] = (alpha_loss, self.args.alpha_weight)
 
         if self.args.depth_weight > 0:
             if sample['depths'] is not None:
