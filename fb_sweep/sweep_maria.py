@@ -455,7 +455,7 @@ def get_maria_seq2tt_grid(args):
         hyperparam('--context', 'id', save_dir_key=lambda val: f'{val}'),
         hyperparam('--total-num-context', 200),
         hyperparam('--encoder-attention-heads', 1),
-        hyperparam('--encoder-layers', [1], save_dir_key=lambda val: f'enc{val}'),
+        hyperparam('--encoder-layers', [2], save_dir_key=lambda val: f'enc{val}'),
         hyperparam('--attention-context', binary_flag=True, save_dir_key=lambda val: 'ac'),
         hyperparam('--cross-attention-context', binary_flag=True, save_dir_key=lambda val: f'cac'),
         # hyperparam('--quantized-pos-embed', binary_flag=True, save_dir_key=lambda val: f'qpos'),
@@ -512,7 +512,7 @@ def get_maria_seq2tt_grid(args):
         hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--end-learning-rate', 0.0001),
-        hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
+        hyperparam('--clip-norm', 20.0, save_dir_key=lambda val: f'clip{val}'),
 
         hyperparam('--dropout', 0.0, save_dir_key=lambda val: f'drop{val}'),
         hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),
@@ -527,6 +527,17 @@ def get_maria_seq2tt_grid(args):
         hyperparam('--keep-interval-updates', 2),
         hyperparam('--log-format', 'simple'),
         hyperparam('--log-interval', 10 if not args.local else 1),
+    ]
+    return hyperparams
+
+
+@register_grid("geo_maria_seq_transformer_reload")
+def get_maria_seq2ttr_grid(args):
+    hyperparams = get_maria_seq2tt_grid(args)
+    hyperparams += [
+        hyperparam("--restore-file", 
+            "/checkpoint/jgu/space/neuralrendering/debug_new_mariaseq2/maria_seq_TRAMv7.fp16.seq.512x512.s4.v1.geo_nerf_transformer.emb384.id.enc1.ac.cac.ss0.025.v0.2.posemb.sdfh128.dis.pruning.cm.dyvox2.p16384.smk0.5.patch4.chk512.rgb200.0.ent0.vgg1.0.l3.adam.lr_poly.max100000.lr0.001.clip0.0.drop0.0.wd0.0.seed2.ngpu8/checkpoint2.pt"),
+        hyperparam('--post-context', binary_flag=True, save_dir_key=lambda val: f'post'),
     ]
     return hyperparams
 

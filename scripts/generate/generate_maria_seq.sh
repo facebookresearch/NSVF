@@ -18,6 +18,7 @@ python render.py ${DATASET} \
     --render-resolution 512 \
     --render-path-args "{'radius': 3.0, 'h': 0.5, 'axis': 'z', 't0': -2, 'r':-1}" \
     --render-output /private/home/jgu/data/test_images/output4 \
-    --render-output-types "rgb" "hit"\
+    --render-output-types "target" "rgb" "hit"\
+    --render-combine-output
     # "hit" "normal" "depth"
     

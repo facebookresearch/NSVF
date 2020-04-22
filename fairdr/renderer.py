@@ -17,7 +17,7 @@ import imageio
 from torchvision.utils import save_image
 from fairdr.data import trajectory, geometry, data_utils
 from fairseq.meters import StopwatchMeter
-
+from fairdr.data.data_utils import recover_image
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +101,11 @@ class NeuralRenderer(object):
                 ])
         
                 voxels, points = sample.get('voxels', None), sample.get('points', None)
+                real_images = sample['full_rgb'] if 'full_rgb' in sample else sample['rgb']
+                real_images = real_images.transpose(2, 3) if real_images.size(-1) != 3 else real_images
                 _sample = {
                     'id': sample['id'][shape:shape+1],
+                    'rgb': torch.cat([real_images[shape:shape+1] for _ in range(step, next_step)], 1),
                     'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
                     'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
                     'extrinsics': torch.stack(inv_RT, 0).unsqueeze(0),
@@ -124,7 +127,7 @@ class NeuralRenderer(object):
                 for k in range(step, next_step):
                     images = model.visualize(
                                 _sample, None, 0, k-step, 
-                                target_map=False, 
+                                target_map=True, 
                                 depth_map=('depth' in self.output_type),
                                 normal_map=('normal' in self.output_type),
                                 hit_map=True)

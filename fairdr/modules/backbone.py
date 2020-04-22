@@ -186,6 +186,7 @@ class DynamicEmbeddingBackbone(Backbone):
         # voxel embeddings
         self.embed_dim = getattr(args, "quantized_embed_dim", None)
         self.use_pos_embed = getattr(args, "quantized_pos_embed", False)
+        self.post_context = getattr(args, "post_context", False)
 
         if self.embed_dim is not None:
             self.values = Embedding(self.total_size, self.embed_dim, None)
@@ -213,6 +214,7 @@ class DynamicEmbeddingBackbone(Backbone):
         parser.add_argument('--quantized-pproj-dim', type=int, metavar='N', help="only useful if online_pruning set")
         parser.add_argument('--total-num-context', type=int, metavar='N', help="if use id as inputs, unique embeddings")
         parser.add_argument('--quantized-pos-embed', action='store_true', help="instead of standard embeddings, use positional embeddings")
+        parser.add_argument('--post-context', action='store_true', help='redo contexturalization every time voxels splitted')
 
     def latent_regularization(self):
         data = self.context_embed.weight 
@@ -242,17 +244,26 @@ class DynamicEmbeddingBackbone(Backbone):
         points = points.unsqueeze(0).expand(id.size(0), *points.size()).contiguous()
         values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous()
         
-        # object dependent value (contexturalization)
-        values, context = self.contexturalization(id, values, keys)
-        if context is not None:
-            values = values + context
-
         # pruning (optional)
         voxel_size, march_size = self.voxel_size, self.march_size
         for t in range(step + 1):
-            feats = feats + values.size(1) * torch.arange(values.size(0), 
+
+            # object dependent value (contexturalization)
+            if (t == 0) or (self.post_context):
+                out_values, context = self.contexturalization(id, values, keys)
+                if context is not None:
+                    out_values = out_values + context
+            
+            if not self.post_context:
+                if t == 0:
+                    values = out_values.clone()   # out_values are contexturalized
+                else:
+                    out_values = values.clone()   # value has been pruned
+
+            feats = feats + out_values.size(1) * torch.arange(values.size(0), 
                 device=feats.device, dtype=feats.dtype)[:, None, None]
             values = values.view(-1, values.size(-1))  # reshape to 2D
+            out_values = out_values.view(-1, out_values.size(-1))  # reshape to 2D
             masks = points[:, :, 0] < (INF * .5)
 
             if not self.online_pruning:
@@ -263,7 +274,7 @@ class DynamicEmbeddingBackbone(Backbone):
                 with torch.no_grad():
                     predicts = pruner(
                         id=id, update=False, 
-                        features=(feats, points, values),
+                        features=(feats, points, out_values),
                         sizes=(voxel_size, march_size)).detach()
                     
                 feats, points = pruning_points(feats, points, predicts > 0.5)
@@ -280,7 +291,7 @@ class DynamicEmbeddingBackbone(Backbone):
                 feats = padding_points(new_feats, 0)
                 values = padding_points(new_values, 0.0)
      
-        return feats, points, values, masks
+        return feats, points, out_values, masks
               
     def get_features(self, x, values):
         return F.embedding(x, values)
@@ -388,16 +399,20 @@ class TransformerBackbone(DynamicEmbeddingBackbone):
         parser.add_argument('--cross-attention-context', action='store_true')
 
     def contexturalization(self, id, values, keys=None):
+        m0 = values.eq(0.0).all(-1)
         x0, c = super().contexturalization(id, values, keys=None)
+
         if not self.attention_context:
             x = x0 + c
+            m = m0
         else:
             x = torch.cat([c, x0], 1)
+            m = torch.cat([m0.new_zeros(m0.size(0), 1), m0], 1)
         
         x = x.transpose(0, 1)
         x0 = x0.transpose(0, 1)
         for layer in self.layers:
-            x = layer(x, None, x0)
+            x = layer(x, m, x0, m0)
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
@@ -472,7 +487,7 @@ class TransformerEncoderLayer(nn.Module):
         else:
             self.cross_attn = None
 
-    def forward(self, x, encoder_padding_mask, context=None):
+    def forward(self, x, encoder_padding_mask, context=None, context_mask=None):
         """
         Args:
             x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
@@ -492,7 +507,7 @@ class TransformerEncoderLayer(nn.Module):
         if self.cross_attn is not None:
             residual = x
             x = self.maybe_layer_norm(0, x, before=True)
-            x, _ = self.cross_attn(query=x, key=context, value=context, key_padding_mask=None)
+            x, _ = self.cross_attn(query=x, key=context, value=context, key_padding_mask=context_mask)
             x = F.dropout(x, p=self.dropout, training=self.training)
             x = residual + x
             x = self.maybe_layer_norm(0, x, after=True)

@@ -123,8 +123,8 @@ def get_maria_seq2_grid(args):
 @register_grid("geo_shapenet_seq")
 def get_shapenet_seq_grid(args):
     gen_args = {
-        'render_resolution': 128,
-        'render_output_types': ["hit", "rgb", "depth", "normal"],
+        'render_resolution': 512,
+        'render_output_types': ["target", "hit", "rgb", "depth", "normal"],
         'render_path_args': "{'radius': 3.0, 'h': 1.5, 'axis': 'z', 't0': -2, 'r':-1}",
     }
     gen_args = json.dumps(gen_args)
@@ -138,9 +138,11 @@ def get_shapenet_seq_grid(args):
         hyperparam('--task', "sequence_object_rendering", save_dir_key=lambda val: "seq"),
         
         # task level
-        # hyperparam('--view-resolution', 256, save_dir_key=lambda val: f'{val}x{val}'),
-        hyperparam('--view-resolution', 128, save_dir_key=lambda val: f'{val}x{val}'),
-        hyperparam('--max-sentences', 16, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--view-resolution', 512, save_dir_key=lambda val: f'{val}x{val}'),
+        # hyperparam('--view-resolution', 128, save_dir_key=lambda val: f'{val}x{val}'),
+        # hyperparam('--max-sentences', 16, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--max-sentences', 4, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--max-sentences-valid', 4),
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 2),
         hyperparam('--subsample-valid', 100),
@@ -186,7 +188,7 @@ def get_shapenet_seq_grid(args):
         hyperparam('--half-voxel-size-at', "10000,50000", save_dir_key=lambda val: f'dyvox'),
         
         # evaluation with rendering
-        hyperparam('--rendering-every-steps', 1000),
+        hyperparam('--rendering-every-steps', 2500),
         hyperparam('--rendering-args', gen_args),
 
         # dataset arguments
@@ -194,7 +196,8 @@ def get_shapenet_seq_grid(args):
         # hyperparam('--load-point', binary_flag=True, save_dir_key=lambda val: 'p'),
 
         # training arguments
-        hyperparam('--pixel-per-view', 2048, save_dir_key=lambda val: f'p16384'),
+        hyperparam('--pixel-per-view', 4096, save_dir_key=lambda val: f'p{val}'),
+        # hyperparam('--pixel-per-view', 2048, save_dir_key=lambda val: f'p16384'),
         hyperparam('--sampling-on-mask', 0.9, save_dir_key=lambda val: f'smk{val}'),
         hyperparam('--sampling-on-bbox', binary_flag=True),
         # hyperparam('--sampling-patch-size', 4, save_dir_key=lambda val: f'patch{val}'),
@@ -215,7 +218,7 @@ def get_shapenet_seq_grid(args):
         hyperparam('--total-num-update', 200000, save_dir_key=lambda val: f'max{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--end-learning-rate', 0.0001),
-        hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
+        hyperparam('--clip-norm', 50.0, save_dir_key=lambda val: f'clip0.0'),
 
         hyperparam('--dropout', 0.0),
         hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),

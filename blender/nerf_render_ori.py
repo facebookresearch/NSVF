@@ -6,14 +6,14 @@ import numpy as np
 
 DEBUG = False
 
-VIEWS = 100
-RESOLUTION = 800
+VIEWS = 200
+RESOLUTION = 1024
 RESULTS_PATH = 'results'
 DEPTH_SCALE = 1.4
 COLOR_DEPTH = 8
 FORMAT = 'PNG'
 RANDOM_VIEWS = True
-UPPER_VIEWS = True
+UPPER_VIEWS = False
 CIRCLE_FIXED_START = (.3,0,0)
 
 
@@ -29,7 +29,6 @@ def listify_matrix(matrix):
 if not os.path.exists(fp):
     os.makedirs(fp)
 
-# bpy.data.objects['Camera'].data.angle_x *= 2
 # Data to store in JSON file
 out_data = {
     'camera_angle_x': bpy.data.objects['Camera'].data.angle_x,
@@ -102,7 +101,7 @@ scene.render.resolution_y = RESOLUTION
 scene.render.resolution_percentage = 100
 
 cam = scene.objects['Camera']
-cam.location = (0.0, 1.5, 0.0)
+cam.location = (8, -8, 4)
 cam_constraint = cam.constraints.new(type='TRACK_TO')
 cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
 cam_constraint.up_axis = 'UP_Y'
@@ -115,7 +114,6 @@ from math import radians
 
 stepsize = 360.0 / VIEWS
 rotation_mode = 'XYZ'
-np.random.seed(2)
 
 if not DEBUG:
     for output_node in [depth_file_output, normal_file_output]:
@@ -144,11 +142,12 @@ for i in range(0, VIEWS):
 
     # depth_file_output.file_slots[0].path = scene.render.filepath + "_depth_"
     # normal_file_output.file_slots[0].path = scene.render.filepath + "_normal_"
-
+    print('BEFORE RENDER')
     if DEBUG:
         break
     else:
         bpy.ops.render.render(write_still=True)  # render still
+    print('AFTER RENDER')
 
     frame_data = {
         'file_path': scene.render.filepath,

@@ -607,6 +607,7 @@ def geo_base_architecture(args):
     args.quantized_voxel_path = getattr(args, "quantized_voxel_path", None)
     args.quantized_embed_dim = getattr(args, "quantized_embed_dim", 384)
     args.quantized_pos_embed = getattr(args, "quantized_pos_embed", False)
+    args.post_context = getattr(args, "post_context", False)
     plain_architecture(args)
 
 @register_model_architecture("geo_nerf", "geo_nerf_transformer")

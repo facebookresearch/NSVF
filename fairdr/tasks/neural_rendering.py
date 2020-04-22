@@ -174,9 +174,21 @@ class SingleObjRenderingTask(FairseqTask):
                         self.datasets[split], total_num_models)
 
         else:
-            self.datasets[split] = ShapeDataset(
+            self.datasets[split] = ShapeViewDataset(
                 self.args.data,
-                load_point=self.args.load_point)
+                max_train_view=1,
+                max_valid_view=1,
+                num_view=1, 
+                resolution=self.args.render_resolution,
+                train=(split == 'train'),
+                preload=False, binarize=False,
+                load_point=self.args.load_point,
+                bg_color=getattr(self.args, "transparent_background", -0.8),
+                min_color=getattr(self.args, "min_color", -1))
+
+            # self.datasets[split] = ShapeDataset(
+            #     self.args.data,
+            #     load_point=self.args.load_point)
 
     def build_generator(self, args):
         """
