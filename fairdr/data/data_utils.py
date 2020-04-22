@@ -16,7 +16,22 @@ import shutil
 import skimage
 import pandas as pd
 import pylab as plt
+import fairseq.distributed_utils as du
 
+
+def get_rank():    
+    try:
+        return du.get_rank()
+    except AssertionError:
+        return 0
+
+
+def get_world_size():
+    try:
+        return du.get_world_size()
+    except AssertionError:
+        return 1
+        
 
 def load_rgb(
     path, 
@@ -48,8 +63,8 @@ def load_rgb(
         img[:, :, :3] -= 0.5
         img[:, :, :3] *= 2.
 
-    # if alpha == 0, make it white (chair)
-    img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + bg_color * (1 - img[:, :, 3:])     
+    img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + bg_color * (1 - img[:, :, 3:])
+    img[:, :, 3] = (img[:, :, :3] != bg_color).any(-1).astype('float32')     
     img = img.transpose(2, 0, 1)
     return img, uv
 
@@ -106,28 +121,28 @@ def load_intrinsics(filepath, resized_width=None, invert_y=False):
     # Get camera intrinsics
     with open(filepath, 'r') as file:
         f, cx, cy, _ = map(float, file.readline().split())
-        grid_barycenter = torch.Tensor(list(map(float, file.readline().split())))
-        scale = float(file.readline())
-        #print(file.readline())
-        file.readline()#what's this ? skip
-        height, width = map(float, file.readline().split())
+    #     grid_barycenter = torch.Tensor(list(map(float, file.readline().split())))
+    #     scale = float(file.readline())
+    #     #print(file.readline())
+    #     file.readline()#what's this ? skip
+    #     height, width = map(float, file.readline().split())
 
-        try:
-            world2cam_poses = int(file.readline())
-        except ValueError:
-            world2cam_poses = None
+    #     try:
+    #         world2cam_poses = int(file.readline())
+    #     except ValueError:
+    #         world2cam_poses = None
 
-    if world2cam_poses is None:
-        world2cam_poses = False
+    # if world2cam_poses is None:
+    #     world2cam_poses = False
 
-    world2cam_poses = bool(world2cam_poses)
+    # world2cam_poses = bool(world2cam_poses)
     
-    if resized_width is not None:
-        resized_height = int(height/float(width)*resized_width)
+    # if resized_width is not None:
+    #     resized_height = int(height/float(width)*resized_width)
 
-        cx = cx/width * resized_width
-        cy = cy/height * resized_height
-        f = resized_width / width * f
+    #     cx = cx/width * resized_width
+    #     cy = cy/height * resized_height
+    #     f = resized_width / width * f
 
     fx = f
     if invert_y:
@@ -160,7 +175,27 @@ def square_crop_img(img):
     return img
 
 
-def sample_pixel_from_image(num_pixel, num_sample, mask=None, ratio=1.0, use_bbox=False, width=512):
+def sample_pixel_from_image(
+    num_pixel, num_sample, 
+    mask=None, ratio=1.0, 
+    use_bbox=False, width=512,
+    patch_size=1):
+
+    if patch_size > 1:
+        assert (num_pixel % (patch_size * patch_size) == 0) \
+            and (num_sample % (patch_size * patch_size) == 0), "size must match"
+        _num_pixel = num_pixel // (patch_size * patch_size)
+        _num_sample = num_sample // (patch_size * patch_size)
+        _mask = None if mask is None else mask.reshape(-1, width)[::patch_size, ::patch_size]
+        _width = width // patch_size
+        _out = sample_pixel_from_image(_num_pixel, _num_sample, _mask, ratio, use_bbox, _width)
+        _x, _y = _out % _width, _out // _width
+        x, y = _x * patch_size, _y * patch_size
+        x = x[:, None, None] + np.arange(patch_size)[None, :, None] 
+        y = y[:, None, None] + np.arange(patch_size)[None, None, :]
+        out = x + y * width
+        return out.reshape(-1)
+
     if mask is None or ratio <= 0.0 or mask.sum() == 0 or (1 - mask).sum() == 0:
         return np.random.choice(num_pixel, num_sample)
 

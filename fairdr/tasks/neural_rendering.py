@@ -45,6 +45,8 @@ class SingleObjRenderingTask(FairseqTask):
                             help="number of views sampled for training, can be unlimited if set -1")
         parser.add_argument("--max-valid-view", type=int, default=50,
                             help="number of views sampled for validation, can be unlimited if set -1")
+        parser.add_argument("--subsample-valid", type=int, default=-1,
+                            help="if set > -1, subsample the validation (when training set is too large)")
         parser.add_argument("--view-per-batch", type=int, default=6,
                             help="number of views training each batch (each GPU)")
         parser.add_argument("--valid-view-per-batch", type=int, default=6,
@@ -55,6 +57,8 @@ class SingleObjRenderingTask(FairseqTask):
                             help="this value determined the probability of sampling rays on masks")
         parser.add_argument("--sampling-on-bbox", action='store_true',
                             help="sampling points to close to the mask")
+        parser.add_argument("--sampling-patch-size", type=int, default=1, 
+                            help="sample pixels based on patches instead of independent pixels")
         parser.add_argument("--view-resolution", type=int, default=64,
                             help="width for the squared image. downsampled from the original.")       
         parser.add_argument("--min-color", choices=(0, -1), default=-1, type=int,
@@ -128,12 +132,14 @@ class SingleObjRenderingTask(FairseqTask):
         """
         Load a given dataset split (train, valid, test)
         """
-
+        
         if split != 'test':
             self.datasets[split] = ShapeViewDataset(
                 self.args.data,
                 max_train_view=self.args.max_train_view,
                 max_valid_view=self.args.max_valid_view,
+                subsample_valid=self.args.subsample_valid 
+                    if split == 'valid' else -1,
                 num_view=self.args.view_per_batch 
                     if split == 'train' 
                     else self.args.valid_view_per_batch,
@@ -154,23 +160,35 @@ class SingleObjRenderingTask(FairseqTask):
                     self.args.pixel_per_view,
                     self.args.sampling_on_mask,
                     self.args.sampling_on_bbox,
-                    self.args.view_resolution)
+                    self.args.view_resolution,
+                    self.args.sampling_patch_size)
             self.datasets[split] = WorldCoordDataset(
                 self.datasets[split]
             )
 
             if split == 'train':   # infinite sampler
                 max_step = getattr(self.args, "virtual_epoch_steps", None)
-                if max_step is None:
-                    max_step = self.args.max_update
-                total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
-                self.datasets[split] = InfiniteDataset(
-                    self.datasets[split], total_num_models)
+                if max_step is not None:
+                    total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
+                    self.datasets[split] = InfiniteDataset(
+                        self.datasets[split], total_num_models)
 
         else:
-            self.datasets[split] = ShapeDataset(
+            self.datasets[split] = ShapeViewDataset(
                 self.args.data,
-                load_point=self.args.load_point)
+                max_train_view=1,
+                max_valid_view=1,
+                num_view=1, 
+                resolution=self.args.render_resolution,
+                train=(split == 'train'),
+                preload=False, binarize=False,
+                load_point=self.args.load_point,
+                bg_color=getattr(self.args, "transparent_background", -0.8),
+                min_color=getattr(self.args, "min_color", -1))
+
+            # self.datasets[split] = ShapeDataset(
+            #     self.args.data,
+            #     load_point=self.args.load_point)
 
     def build_generator(self, args):
         """
@@ -230,13 +248,13 @@ class SingleObjRenderingTask(FairseqTask):
                         optimizer.optimizer.state[p][key] *= 0.0
             
             # set safe steps. do not update parameters, accumulate Adam state
-            self._safe_steps = 100
+            self._safe_steps = 0
 
         if self.pruning_every_steps is not None and \
             (self._num_updates % self.pruning_every_steps == 0) and \
             (self._num_updates > 0):
             model.eval()
-            model.adjust('prune', th=self.pruning_th)
+            model.adjust('prune', id=sample['id'], th=self.pruning_th)
 
         if self.rendering_every_steps is not None and \
             (self._num_updates % self.rendering_every_steps == 0) and \
@@ -291,8 +309,22 @@ class SequenceObjRenderingTask(SingleObjRenderingTask):
         return 1
 
     def load_dataset(self, split, **kwargs):
-        assert os.path.isfile(self.args.data), \
-            "a list of multiple objects must be saved in a document"
-        assert self.args.load_point, "for now only supports point condition"  # TODO
-
         super().load_dataset(split, **kwargs)
+
+    def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
+        self._num_updates = update_num
+
+        if self.rendering_every_steps is not None and \
+            (self._num_updates % self.rendering_every_steps == 0) and \
+            (self._num_updates > 0) and \
+            self.renderer is not None:
+
+            outputs = self.inference_step(self.renderer, [model], [sample, 0])[1]
+            if getattr(self.args, "distributed_rank", -1) == 0:  # save only for master
+                self.renderer.save_images(outputs, self._num_updates)
+
+        if self.steps_to_half_voxels is not None and \
+                self._num_updates in self.steps_to_half_voxels:
+            model.adjust('level')
+
+        return super(SingleObjRenderingTask, self).train_step(sample, model, criterion, optimizer, update_num, ignore_grad)

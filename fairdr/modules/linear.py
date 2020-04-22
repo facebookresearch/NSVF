@@ -28,7 +28,7 @@ def Embedding(num_embeddings, embedding_dim, padding_idx=None):
 
 class PosEmbLinear(nn.Module):
 
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, no_linear=False, scale=1024):
         super().__init__()
         assert out_dim % (2 * in_dim) == 0, "dimension must be dividable"
         half_dim = out_dim // 2 // in_dim
@@ -36,8 +36,8 @@ class PosEmbLinear(nn.Module):
         emb = torch.exp(torch.arange(half_dim, dtype=torch.float) * -emb)
         
         self.emb = nn.Parameter(emb, requires_grad=False)
-        self.linear = Linear(out_dim, out_dim)
-        self.scale = 1024
+        self.linear = Linear(out_dim, out_dim) if not no_linear else None
+        self.scale = scale
         self.in_dim = in_dim
         self.out_dim = out_dim
 
@@ -47,12 +47,14 @@ class PosEmbLinear(nn.Module):
         x = self.scale * x.unsqueeze(-1) @ self.emb.unsqueeze(0)
         x = torch.cat([torch.sin(x), torch.cos(x)], dim=-1)
         x = x.view(*sizes[:-1], self.out_dim)
-        return self.linear(x)
+        if self.linear is not None:
+            return self.linear(x)
+        return x
 
 
 class NeRFPosEmbLinear(nn.Module):
 
-    def __init__(self, in_dim, out_dim, angular=False):
+    def __init__(self, in_dim, out_dim, angular=False, no_linear=False):
         super().__init__()
         assert out_dim % (2 * in_dim) == 0, "dimension must be dividable"
         L = out_dim // 2 // in_dim
@@ -62,7 +64,7 @@ class NeRFPosEmbLinear(nn.Module):
 
         self.emb = nn.Parameter(emb, requires_grad=False)
         self.angular = angular
-        self.linear = Linear(out_dim, out_dim)
+        self.linear = Linear(out_dim, out_dim) if not no_linear else None
         self.in_dim = in_dim
         self.out_dim = out_dim
 
@@ -74,8 +76,9 @@ class NeRFPosEmbLinear(nn.Module):
         x = x.unsqueeze(-1) @ self.emb.unsqueeze(0)
         x = torch.cat([torch.sin(x), torch.cos(x)], dim=-1)
         x = x.view(*sizes[:-1], self.out_dim)
-        return self.linear(x)
-
+        if self.linear is not None:
+            return self.linear(x)
+        return x
 
 
 class FCLayer(nn.Module):

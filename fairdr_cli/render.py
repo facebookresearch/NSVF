@@ -102,7 +102,7 @@ def _main(args, output_file):
             
             step, _output_files = task.inference_step(generator, models, [sample, step])
             output_files += _output_files
-
+        
             gen_timer.stop(500)
             wps_meter.update(500)
             t.log({'wps': round(wps_meter.avg)})

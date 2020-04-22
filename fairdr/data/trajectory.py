@@ -25,3 +25,27 @@ def circle(radius=3.5, h=0.0, axis='z', t0=0, r=1):
         return lambda t: [radius * np.cos(r * t+t0), h, radius * np.sin(r * t+t0)]
     else:
         return lambda t: [h, radius * np.cos(r * t+t0), radius * np.sin(r * t+t0)]
+
+
+@register_traj('zoomin_circle')
+def zoomin_circle(radius=3.5, h=0.0, axis='z', t0=0, r=1):
+    ra = lambda t: 0.1 + abs(4.0 - t * 2 / np.pi)
+
+    if axis == 'z':
+        return lambda t: [radius * ra(t) * np.cos(r * t+t0), radius * ra(t) * np.sin(r * t+t0), h]
+    elif axis == 'y':
+        return lambda t: [radius * ra(t) * np.cos(r * t+t0), h, radius * ra(t) * np.sin(r * t+t0)]
+    else:
+        return lambda t: [h, radius * (4.2 - t * 2 / np.pi) * np.cos(r * t+t0), radius * (4.2 - t * 2 / np.pi) * np.sin(r * t+t0)]
+
+
+@register_traj('zoomin_line')
+def zoomin_line(radius=3.5, h=0.0, axis='z', t0=0, r=1):
+    ra = lambda t: 0.1 + abs(4.0 - t * 2 / np.pi)
+
+    if axis == 'z':
+        return lambda t: [radius * ra(t) * np.cos(t0), radius * ra(t) * np.sin(t0), h]
+    elif axis == 'y':
+        return lambda t: [radius * ra(t) * np.cos(t0), h, radius * ra(t) * np.sin(t0)]
+    else:
+        return lambda t: [h, radius * (4.2 - t * 2 / np.pi) * np.cos(r * t+t0), radius * (4.2 - t * 2 / np.pi) * np.sin(r * t+t0)]

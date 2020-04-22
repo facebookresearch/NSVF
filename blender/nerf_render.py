@@ -29,7 +29,7 @@ def listify_matrix(matrix):
 if not os.path.exists(fp):
     os.makedirs(fp)
 
-bpy.data.objects['Camera'].data.angle_x *= 2
+# bpy.data.objects['Camera'].data.angle_x *= 2
 # Data to store in JSON file
 out_data = {
     'camera_angle_x': bpy.data.objects['Camera'].data.angle_x,

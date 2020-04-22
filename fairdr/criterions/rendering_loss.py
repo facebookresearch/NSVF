@@ -118,7 +118,9 @@ class SRNLossCriterion(RenderingCriterion):
                                 """)
         parser.add_argument('--freespace-weight', type=float, default=0.0)
         parser.add_argument('--occupancy-weight', type=float, default=0.0)
-        parser.add_argument('--density-weight', type=float, default=0.0)
+        parser.add_argument('--entropy-weight', type=float, default=0.0)
+        parser.add_argument('--pruning-weight', type=float, default=0.0)
+        parser.add_argument('--alpha-weight', type=float, default=0.0)
         parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
@@ -154,13 +156,26 @@ class SRNLossCriterion(RenderingCriterion):
         losses['rgb_loss'] = (rgb_loss, self.args.rgb_weight)
 
         if self.args.reg_weight > 0:
-            min_depths = net_output.get('min_depths', 0.0)
-            reg_loss = utils.depth_regularization_loss(
-                net_output['depths'], min_depths)
-            losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
+            if 'latent' in net_output:
+                losses['reg_loss'] = (net_output['latent'], self.args.reg_weight)
 
-        if self.args.density_weight > 0:
-            losses['den_loss'] = (net_output['density'], self.args.density_weight)
+            else:
+                min_depths = net_output.get('min_depths', 0.0)
+                reg_loss = utils.depth_regularization_loss(
+                    net_output['depths'], min_depths)
+                losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
+
+        if self.args.entropy_weight > 0:
+            losses['ent_loss'] = (net_output['entropy'], self.args.entropy_weight)
+
+        if self.args.alpha_weight > 0:
+            alpha = net_output['missed'].reshape(-1)
+            # alpha_loss = torch.log(0.1 + alpha) + torch.log(0.1 + 1 - alpha) - math.log(0.11)
+            # alpha_loss = alpha_loss.float().mean().type_as(alpha_loss)
+            alpha_loss = torch.log1p(
+                1. / 0.11 * alpha.float() * (1 - alpha.float())
+            ).mean().type_as(alpha)
+            losses['alpha_loss'] = (alpha_loss, self.args.alpha_weight)
 
         if self.args.depth_weight > 0:
             if sample['depths'] is not None:
@@ -232,8 +247,11 @@ class SRNLossCriterion(RenderingCriterion):
             losses['vgg_loss'] = (self.vgg(
                 transform(inputs), transform(target), self.args.vgg_level) + 0.0 * self._dummy, self.args.vgg_weight)
 
+        if self.args.pruning_weight > 0:
+            assert 'pruning_loss' in net_output, "requires pruning loss to be computed."
+            losses['pruning_loss'] = (net_output['pruning_loss'], self.args.pruning_weight)
+
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
         logging_outputs = {key: item(losses[key][0]) for key in losses}
         logging_outputs.update(other_logs)
-        # from fairseq import pdb; pdb.set_trace()
         return loss, logging_outputs

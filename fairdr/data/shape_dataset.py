@@ -10,7 +10,6 @@ import torch
 import logging
 
 from collections import defaultdict
-from fairseq.distributed_utils import get_rank
 from fairseq.data import FairseqDataset, BaseWrapperDataset
 from . import data_utils, geometry, trajectory
 
@@ -26,13 +25,15 @@ class ShapeDataset(FairseqDataset):
                 paths, 
                 load_point=False,
                 preload=True,
-                repeat=1):
+                repeat=1,
+                subsample_valid=-1):
         
         if os.path.isdir(paths):
             self.paths = [paths]
         else:
             self.paths = [line.strip() for line in open(paths)]
 
+        self.subsample_valid = subsample_valid
         self.load_point = load_point
         self.total_num_shape = len(self.paths)
         self.cache = None
@@ -45,6 +46,12 @@ class ShapeDataset(FairseqDataset):
             _data_per_shape['pts'] = self.find_point()
         _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
 
+        if self.subsample_valid > -1:
+            for key in _data_per_shape:
+                _data_per_shape[key] = _data_per_shape[key][::self.subsample_valid]
+            self.paths = self.paths[::self.subsample_valid]
+            self.total_num_shape = len(self.paths)
+        
         # group the data..
         data_list = []
         for r in range(repeat):
@@ -92,8 +99,8 @@ class ShapeDataset(FairseqDataset):
             voxels, points = voxels[:, :3].astype('int32'), voxels[:, 3:]
         else:
             voxels, points = None, None
-
-        return {'intrinsics': intrinsics, 'voxels': voxels, 'points': points}
+        shape_id = packed_data['shape']
+        return {'intrinsics': intrinsics, 'voxels': voxels, 'points': points, 'id': shape_id}
 
     def _load_batch(self, data, index):
         return index, self._load_shape(data[index])
@@ -110,9 +117,9 @@ class ShapeDataset(FairseqDataset):
     def num_tokens(self, index):
         return 1
 
-    def collater(self, samples):
+    def _collater(self, samples):
         results = {}
-        
+
         results['shape'] = torch.from_numpy(np.array([s[0] for s in samples]))    
         for key in samples[0][1]:
             if samples[0][1][key] is not None:
@@ -144,9 +151,14 @@ class ShapeDataset(FairseqDataset):
                         np.array([s[1][key] for s in samples]))
             else:
                 results[key] = None
-
         return results
 
+    def collater(self, samples):
+        try:
+            results = self._collater(samples)
+        except IndexError:
+            results = None
+        return results
 
 class ShapeViewDataset(ShapeDataset):
     """
@@ -158,6 +170,7 @@ class ShapeViewDataset(ShapeDataset):
                 max_train_view, 
                 num_view,
                 max_valid_view=None, 
+                subsample_valid=-1,
                 resolution=None, 
                 load_depth=False,
                 load_mask=False,
@@ -169,7 +182,7 @@ class ShapeViewDataset(ShapeDataset):
                 bg_color=-0.8,
                 min_color=-1):
         
-        super().__init__(paths, load_point, False, repeat)
+        super().__init__(paths, load_point, False, repeat, subsample_valid)
 
         self.train = train
         self.load_depth = load_depth
@@ -197,7 +210,6 @@ class ShapeViewDataset(ShapeDataset):
         
         _data_per_view['view'] = self.summary_view_data(_data_per_view)
 
-
         # group the data.
         _index = 0
         for r in range(repeat):
@@ -215,11 +227,11 @@ class ShapeViewDataset(ShapeDataset):
                 self.data[_index].update(element)
 
                 if r == 0 and preload:
-                    phase_name = f"{'train' if self.train else 'valid'}." + \
-                                f"{resolution}x{resolution}." + \
-                                f"{'d' if load_depth else ''}." + \
-                                f"{'m' if load_mask else ''}." + \
-                                f"{'p' if load_point else ''}"
+                    phase_name = f"{'train' if self.train else 'valid'}" + \
+                                f".{resolution}x{resolution}" + \
+                                f"{'.d' if load_depth else ''}" + \
+                                f"{'.m' if load_mask else ''}" + \
+                                f"{'.p' if load_point else ''}"
                     logger.info("preload {}-{}".format(id, phase_name))
                     if binarize:
                         cache = self._load_binary(id, np.arange(total_num_view), phase_name)
@@ -253,7 +265,7 @@ class ShapeViewDataset(ShapeDataset):
                 return f['cache']
         except Exception:
             cache = self._load_batch(self.data, id, views)
-            if get_rank() == 0:
+            if data_utils.get_rank() == 0:
                 np.savez(npzfile, cache=cache)
             return cache
 
@@ -265,7 +277,7 @@ class ShapeViewDataset(ShapeDataset):
             return list
         
         return [is_empty(files[:self.max_train_view]) if self.train else 
-                is_empty(files[24:24+self.max_valid_view]) for files in file_list]
+                is_empty(files[:self.max_valid_view]) for files in file_list]
 
     def find_rgb(self):
         try:
@@ -348,6 +360,8 @@ class ShapeViewDataset(ShapeDataset):
 
     def collater(self, samples):
         results = super().collater(samples)
+        if results is None:
+            return results
         for key in samples[0][2][0]:
             results[key] = torch.from_numpy(
                 np.array([[d[key] for d in s[2]] for s in samples])
@@ -360,11 +374,12 @@ class SampledPixelDataset(BaseWrapperDataset):
     A wrapper dataset, which split rendered images into pixels
     """
 
-    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0, sampling_on_bbox=False, resolution=512):
+    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0, sampling_on_bbox=False, resolution=512, patch_size=1):
         super().__init__(dataset)
         self.num_sample = num_sample
         self.sampling_on_mask = sampling_on_mask
         self.sampling_on_bbox = sampling_on_bbox
+        self.patch_size = patch_size
         self.res = resolution
 
     def __getitem__(self, index):
@@ -380,7 +395,8 @@ class SampledPixelDataset(BaseWrapperDataset):
                     else data.get('alpha', None),
                 self.sampling_on_mask,
                 self.sampling_on_bbox,
-                width=data['width'])
+                width=data['width'],
+                patch_size=self.patch_size)
             for data in data_per_view
         ]
         
@@ -433,6 +449,9 @@ class WorldCoordDataset(BaseWrapperDataset):
         
     def collater(self, samples):
         results = self.dataset.collater(samples)
+        if results is None:
+            return results
+
         results['ray_start'] = results['ray_start'].unsqueeze(-2)
         results['ray_dir'] = results['ray_dir'].transpose(2, 3)
         results['rgb'] = results['rgb'].transpose(2, 3)

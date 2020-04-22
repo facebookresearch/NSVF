@@ -1,7 +1,8 @@
-import sys, os
+import sys, os, argparse
 import json
 import bpy
 import mathutils
+from mathutils import Vector
 import numpy as np
 
 DEBUG = False
@@ -15,7 +16,17 @@ FORMAT = 'PNG'
 RANDOM_VIEWS = True
 UPPER_VIEWS = True
 CIRCLE_FIXED_START = (.3,0,0)
-MODEL_NAME = "de2bb45b7e200d6916d102513d0383c0"
+
+parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
+parser.add_argument('--model', type=str, help='path where obj files can be found')
+argv = sys.argv
+argv = argv[argv.index("--") + 1:]
+args = parser.parse_args(argv)
+
+MODEL_NAME = args.model.split('/')[-3]
+# print(MODEL_NAME)
+# 1 // 0
+# MODEL_NAME = "de2bb45b7e200d6916d102513d0383c0"
 
 fp = bpy.path.abspath(f"//{RESULTS_PATH}_{RESOLUTION}/{MODEL_NAME}")
 
@@ -106,6 +117,11 @@ new_objects = set(new_current_objects)-set(prior_objects)
 for obj_name in new_objects:
     obj = bpy.context.scene.objects[obj_name]
     obj.location.z += 0.2
+
+    bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+    with open(fp + '/' + 'boundingbox.txt', 'w') as fb:
+        for vec in bbox_corners:
+            print(" ".join([str(v) for v in vec]), file=fb) 
 
 cam = scene.objects['Camera']
 cam.location = (0.0, 1.5, 0.0)
