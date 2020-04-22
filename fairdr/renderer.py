@@ -7,7 +7,7 @@
 This file is to simulate "generator" in fairseq
 """
 
-import os, tempfile
+import os, tempfile, shutil
 import time
 import torch
 import numpy as np
@@ -163,3 +163,13 @@ class NeuralRenderer(object):
             images = [np.concatenate([images[j][i] for j, _ in enumerate(self.output_type)], 1) for i in range(len(images[0]))]
             imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=8)
             # imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=10)
+
+        logger.info("cleaning the temple files..")
+        try:
+            for mydir in set([os.path.dirname(path) for path in output_files]):
+                shutil.rmtree(mydir)
+        except OSError as e:
+            print ("Error: %s - %s." % (e.filename, e.strerror))
+            raise OSError    
+        
+        

@@ -26,7 +26,8 @@ class ShapeDataset(FairseqDataset):
                 load_point=False,
                 preload=True,
                 repeat=1,
-                subsample_valid=-1):
+                subsample_valid=-1,
+                ids=None):
         
         if os.path.isdir(paths):
             self.paths = [paths]
@@ -44,8 +45,12 @@ class ShapeDataset(FairseqDataset):
         _data_per_shape['ixt'] = self.find_intrinsics()
         if self.load_point:
             _data_per_shape['pts'] = self.find_point()
-        _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
 
+        if ids is None:
+            _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
+        else:
+            _data_per_shape['shape'] = [ids[path.split('/')[-1]] for path in self.paths]
+            
         if self.subsample_valid > -1:
             for key in _data_per_shape:
                 _data_per_shape[key] = _data_per_shape[key][::self.subsample_valid]
@@ -180,9 +185,11 @@ class ShapeViewDataset(ShapeDataset):
                 repeat=1,
                 binarize=True,
                 bg_color=-0.8,
-                min_color=-1):
+                min_color=-1,
+                ids=None):
         
-        super().__init__(paths, load_point, False, repeat, subsample_valid)
+        super().__init__(
+            paths, load_point, False, repeat, subsample_valid, ids)
 
         self.train = train
         self.load_depth = load_depth

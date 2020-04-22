@@ -80,6 +80,19 @@ class SingleObjRenderingTask(FairseqTask):
     def __init__(self, args):
         super().__init__(args)
         
+        # check dataset
+        self.train_data = self.val_data = self.test_data = args.data
+        self.object_ids = None
+        if os.path.isdir(args.data):
+            if os.path.exists(args.data + '/train.txt'):
+                self.train_data = args.data + '/train.txt'
+            if os.path.exists(args.data + '/val.txt'):
+                self.val_data = args.data + '/val.txt'
+            if os.path.exists(args.data + '/test.txt'):
+                self.test_data = args.data + '/test.txt'
+            if os.path.exists(args.data + '/object_ids.txt'):
+                self.object_ids = {line.strip(): i for i, line in enumerate(open(args.data + '/object_ids.txt'))}
+
         if len(self.args.tensorboard_logdir) > 0 and getattr(args, "distributed_rank", -1) == 0:
             from tensorboardX import SummaryWriter
             self.writer = SummaryWriter(self.args.tensorboard_logdir + '/images')
@@ -135,7 +148,7 @@ class SingleObjRenderingTask(FairseqTask):
         
         if split != 'test':
             self.datasets[split] = ShapeViewDataset(
-                self.args.data,
+                self.train_data if split == 'train' else self.val_data,
                 max_train_view=self.args.max_train_view,
                 max_valid_view=self.args.max_valid_view,
                 subsample_valid=self.args.subsample_valid 
@@ -152,7 +165,8 @@ class SingleObjRenderingTask(FairseqTask):
                 preload=(not getattr(self.args, "no_preload", False)),
                 binarize=(not getattr(self.args, "no_load_binary", False)),
                 bg_color=getattr(self.args, "transparent_background", -0.8),
-                min_color=getattr(self.args, "min_color", -1))
+                min_color=getattr(self.args, "min_color", -1),
+                ids=self.object_ids)
 
             if split == 'train' and (self.args.pixel_per_view is not None):
                 self.datasets[split] = SampledPixelDataset(
@@ -175,16 +189,16 @@ class SingleObjRenderingTask(FairseqTask):
 
         else:
             self.datasets[split] = ShapeViewDataset(
-                self.args.data,
+                self.test_data,
                 max_train_view=1,
                 max_valid_view=1,
                 num_view=1, 
                 resolution=self.args.render_resolution,
-                train=(split == 'train'),
-                preload=False, binarize=False,
+                train=False, preload=False, binarize=False,
                 load_point=self.args.load_point,
                 bg_color=getattr(self.args, "transparent_background", -0.8),
-                min_color=getattr(self.args, "min_color", -1))
+                min_color=getattr(self.args, "min_color", -1),
+                ids=self.object_ids)
 
             # self.datasets[split] = ShapeDataset(
             #     self.args.data,

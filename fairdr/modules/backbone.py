@@ -479,7 +479,7 @@ class TransformerEncoderLayer(nn.Module):
         self.fc2 = nn.Linear(args.encoder_ffn_embed_dim, self.embed_dim)
         self.layer_norms = nn.ModuleList([LayerNorm(self.embed_dim) for i in range(2)])
 
-        if args.cross_attention_context:
+        if getattr(args, "cross_attention_context", False):
             self.cross_attn = MultiheadAttention(
                 self.embed_dim, args.encoder_attention_heads,
                 dropout=args.attention_dropout
