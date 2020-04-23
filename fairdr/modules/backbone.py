@@ -216,21 +216,14 @@ class DynamicEmbeddingBackbone(Backbone):
         parser.add_argument('--quantized-pos-embed', action='store_true', help="instead of standard embeddings, use positional embeddings")
         parser.add_argument('--post-context', action='store_true', help='redo contexturalization every time voxels splitted')
 
-    def latent_regularization(self):
-        data = self.context_embed.weight 
-        return (data.float() ** 2).mean().type_as(data)
-
-    def contexturalization(self, id, values, keys=None):
+    def contexturalization(self, context, values, keys=None):
         if self.use_pos_embed:
             values = self.values_proj(values)
-        context = None
-        if self.use_context is not None:
-            if self.use_context == 'id':
-                context = self.context_embed(id).unsqueeze(1)
-                if self.use_pos_embed:
-                    context = self.context_proj(context)
+        if context is not None:
+            if self.use_pos_embed:
+                context = self.context_proj(context)
             else:
-                raise NotImplementedError("only add-on condition for now.")
+                context = context.clone()
         return values, context
 
     def _forward(self, id, step=0, pruner=None, *args, **kwargs):
@@ -238,19 +231,20 @@ class DynamicEmbeddingBackbone(Backbone):
         points = self.points[self.keep.bool()]
         values = self.values.weight[: self.num_keys] if self.values is not None else None
         keys   = self.keys[: self.num_keys]
-
+        
         # extend size to support multi-objects
         feats  = feats.unsqueeze(0).expand(id.size(0), *feats.size()).contiguous()
         points = points.unsqueeze(0).expand(id.size(0), *points.size()).contiguous()
         values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous()
-        
+        codes = self.get_context_features(id)
+
         # pruning (optional)
         voxel_size, march_size = self.voxel_size, self.march_size
         for t in range(step + 1):
 
             # object dependent value (contexturalization)
             if (t == 0) or (self.post_context):
-                out_values, context = self.contexturalization(id, values, keys)
+                out_values, context = self.contexturalization(codes, values, keys)
                 if context is not None:
                     out_values = out_values + context
             
@@ -291,10 +285,20 @@ class DynamicEmbeddingBackbone(Backbone):
                 feats = padding_points(new_feats, 0)
                 values = padding_points(new_values, 0.0)
      
-        return feats, points, out_values, masks
+        
+        return feats, points, out_values, codes
               
     def get_features(self, x, values):
         return F.embedding(x, values)
+
+    def get_context_features(self, id):
+        context = None
+        if self.use_context is not None:
+            if self.use_context == 'id':
+                context = self.context_embed(id).unsqueeze(1)
+            else:
+                raise NotImplementedError("only add-on condition for now.")
+        return context
 
     def pruning(self, keep):
         self.keep.masked_scatter_(self.keep.bool(), keep.long())
@@ -398,9 +402,9 @@ class TransformerBackbone(DynamicEmbeddingBackbone):
         parser.add_argument('--attention-context', action='store_true')
         parser.add_argument('--cross-attention-context', action='store_true')
 
-    def contexturalization(self, id, values, keys=None):
+    def contexturalization(self, context, values, keys=None):
         m0 = values.eq(0.0).all(-1)
-        x0, c = super().contexturalization(id, values, keys=None)
+        x0, c = super().contexturalization(context, values, keys=None)
 
         if not self.attention_context:
             x = x0 + c

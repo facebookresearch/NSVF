@@ -132,8 +132,11 @@ class GEONERFModel(SRNModel):
     def _forward(self, ray_start, ray_dir, id, **kwargs):
         # from fairseq import pdb; pdb.set_trace()
         # get geometry features
-        feats, xyz, values, _ = self.field.get_backbone_features(
+        feats, xyz, values, codes = self.field.get_backbone_features(
             id=id, step=self.set_level(), pruner=self.field.pruning)
+
+        # latent regularization
+        latent_loss = torch.mean(codes ** 2)
 
         # coarse ray-intersection
         bg_color = self.field.bg_color # * 0.0 - 0.8
@@ -176,7 +179,7 @@ class GEONERFModel(SRNModel):
             'missed': missed.view(S, V, P),
             'entropy': entropy,
             'bg_color': self.field.bg_color,
-            'latent': self.field.backbone.latent_regularization(),
+            'latent': latent_loss,
             'other_logs': {
                 'voxel_log': self.field.VOXEL_SIZE.item(),
                 'marchstep_log': self.raymarcher.MARCH_SIZE.item()}
