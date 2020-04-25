@@ -13,7 +13,7 @@ from glob import glob
 import os
 import copy
 import shutil
-import skimage
+import skimage.metrics
 import pandas as pd
 import pylab as plt
 import fairseq.distributed_utils as du
@@ -238,6 +238,19 @@ def write_images(writer, images, updates):
         img = images[tag]
         tag, dataform = tag.split(':')
         writer.add_image(tag, img, updates, dataformats=dataform)
+
+
+def compute_psnr(predicts, targets, width=512):
+    """Compute PSNR of model image predictions.
+    :param prediction: Return value of forward pass.
+    :param ground_truth: Ground truth.
+    :return: (psnr, ssim): tuple of floats
+    """
+    p = recover_image(predicts, width=width).numpy()
+    t = recover_image(targets, width=width).numpy()
+    ssim = skimage.metrics.structural_similarity(p, t, multichannel=True, data_range=1)
+    psnr = skimage.metrics.peak_signal_noise_ratio(p, t, data_range=1)
+    return ssim, psnr
 
 
 def unique_points(points, old_points=None):

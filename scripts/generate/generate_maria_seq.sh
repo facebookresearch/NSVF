@@ -8,6 +8,7 @@ CUDA_VISIBLE_DEVICES=${GPU} \
 python render.py ${DATASET} \
     --user-dir fairdr \
     --task single_object_rendering \
+    --test-views 25 \
     --load-point \
     --path ${MODEL_PATH}/checkpoint_last.pt \
     --render-beam 1 \

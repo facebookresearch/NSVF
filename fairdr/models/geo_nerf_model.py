@@ -112,6 +112,11 @@ class GEONERFModel(SRNModel):
                             help="if set, chunking in the field function, otherwise, chunking in the rays")
         parser.add_argument('--background-stop-gradient', action='store_true')
         
+        # few-shot learning
+        parser.add_argument('--freeze-networks', action='store_true', 
+                            help='if set, freeze the pre-trained network weights except for context embeddings.')
+        parser.add_argument('--reset-context-embed', action='store_true')
+
     def set_level(self):
         if self.field.MAX_LEVEL == 0:
             return 0
@@ -130,7 +135,7 @@ class GEONERFModel(SRNModel):
         return level
 
     def _forward(self, ray_start, ray_dir, id, **kwargs):
-        # from fairseq import pdb; pdb.set_trace()
+       
         # get geometry features
         feats, xyz, values, codes = self.field.get_backbone_features(
             id=id, step=self.set_level(), pruner=self.field.pruning)
@@ -228,7 +233,6 @@ class GEONERFModel(SRNModel):
         return "GEONERF model (voxel size: {:.4f} ({} voxels), march step: {:.4f})".format(
             self.field.VOXEL_SIZE, self.field.num_voxels, self.raymarcher.MARCH_SIZE)
 
-
 class GEORadianceField(Field):
     
     def __init__(self, args):
@@ -246,6 +250,8 @@ class GEORadianceField(Field):
             requires_grad=(not getattr(args, "background_stop_gradient", False)))
 
         # arguments
+        self.freeze_networks = getattr(args, "freeze_networks", False)
+        self.reset_context_embed = getattr(args, "reset_context_embed", False)
         self.chunk_size = 256 * getattr(args, "chunk_size", 256)
         self.deterministic_step = getattr(args, "deterministic_step", False)
         self.inner_chunking = getattr(args, "inner_chunking", True)
@@ -253,7 +259,6 @@ class GEORadianceField(Field):
         self.raydir_features = getattr(args, "raydir_features", 0)
         self.raypos_features = getattr(args, "raypos_features", 0)
         self.condition_on_marchsize = getattr(args, "condition_on_marchsize", False)
-
         if self.condition_on_marchsize:
             self.cond_emb = Embedding(10, self.backbone.feature_dim)
 
@@ -300,6 +305,19 @@ class GEORadianceField(Field):
         self.register_buffer("VOXEL_SIZE", torch.scalar_tensor(args.voxel_size))
         self.register_buffer("MARCH_SIZE", torch.scalar_tensor(args.raymarching_stepsize))
         self.register_buffer("MAX_LEVEL", torch.scalar_tensor(0).long())
+
+        if self.freeze_networks:
+            for name, param in self.named_parameters():
+                if not '.'.join(name.split('.')[1:]) in self.backbone.networks_not_freeze:
+                    param.requires_grad = False
+    
+    def upgrade_state_dict_named(self, state_dict, name):
+        model_state_dict = self.state_dict()
+        for key in state_dict:
+            if self.reset_context_embed and \
+                ('.'.join(key.split('.')[2:]) in self.backbone.networks_not_freeze 
+                or '.'.join(key.split('.')[1:]) in ["MAX_HITS", "VOXEL_SIZE", "MARCH_SIZE", "MAX_LEVEL"]):    
+                state_dict[key] = model_state_dict['.'.join(key.split('.')[1:])]
 
     def get_backbone_features(self, *args, **kwargs):
         return self.backbone(*args, **kwargs)
@@ -600,6 +618,9 @@ def plain_architecture(args):
     args.chunk_size = getattr(args, "chunk_size", 100)
     args.outer_chunk_size = getattr(args, "outer_chunk_size", 400 * 400)
     args.inner_chunking = getattr(args, "inner_chunking", False)
+
+    args.freeze_networks = getattr(args, "freeze_networks", False)
+    args.reset_context_embed = getattr(args, "reset_context_embed", False)
     base_architecture(args)
 
 @register_model_architecture("geo_nerf", "geo_nerf")

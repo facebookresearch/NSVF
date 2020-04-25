@@ -172,9 +172,8 @@ class ShapeViewDataset(ShapeDataset):
 
     def __init__(self, 
                 paths, 
-                max_train_view, 
+                views,
                 num_view,
-                max_valid_view=None, 
                 subsample_valid=-1,
                 resolution=None, 
                 load_depth=False,
@@ -194,10 +193,7 @@ class ShapeViewDataset(ShapeDataset):
         self.train = train
         self.load_depth = load_depth
         self.load_mask = load_mask
-        self.max_train_view = max_train_view
-        self.max_valid_view = max_valid_view \
-            if max_valid_view is not None \
-            else max_train_view 
+        self.views = views
         self.num_view = num_view
         self.resolution = resolution
         self.world2camera = True
@@ -276,41 +272,37 @@ class ShapeViewDataset(ShapeDataset):
                 np.savez(npzfile, cache=cache)
             return cache
 
-    def cutoff(self, file_list):
-
-        def is_empty(list):
-            if len(list) == 0:
-                raise FileNotFoundError
-            return list
+    def select(self, file_list):
+        if len(file_list[0]) == 0:
+            raise FileNotFoundError
         
-        return [is_empty(files[:self.max_train_view]) if self.train else 
-                is_empty(files[:self.max_valid_view]) for files in file_list]
-
+        return [[files[i] for i in self.views] for files in file_list]
+    
     def find_rgb(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/rgb/*.*')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/rgb/*.*')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find rendered images.")
     
     def find_depth(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/depth/*.exr')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/depth/*.exr')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find estimated depths images") 
 
     def find_mask(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/mask/*')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/mask/*')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find precomputed mask images")
 
     def find_extrinsics(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/extrinsic/*.txt')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/extrinsic/*.txt')) for path in self.paths])
         except FileNotFoundError:
             try:
                 self.world2camera = False
-                return self.cutoff([sorted(glob.glob(path + '/pose/*.txt')) for path in self.paths])
+                return self.select([sorted(glob.glob(path + '/pose/*.txt')) for path in self.paths])
             except FileNotFoundError:
                 raise FileNotFoundError('world2camera or camera2world matrices not found.')   
 

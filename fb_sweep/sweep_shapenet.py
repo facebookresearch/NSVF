@@ -261,8 +261,8 @@ def get_shapenet_seq128_grid(args):
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 2),
         hyperparam('--subsample-valid', 10),
-        hyperparam('--max-train-view', 50),
-        hyperparam('--max-valid-view', 10),
+        hyperparam('--train-views', "0..50"),
+        hyperparam('--valid-views', "0..10"),
 
         # model arguments
         # hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
@@ -333,10 +333,10 @@ def get_shapenet_seq128_grid(args):
         hyperparam('--total-num-update', 200000, save_dir_key=lambda val: f'max{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--end-learning-rate', 0.0001),
-        hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip0.0'),
+        hyperparam('--clip-norm', 0.0),
 
         hyperparam('--dropout', 0.0),
-        hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),
+        hyperparam('--weight-decay', 0.0),
         hyperparam('--criterion', 'srn_loss'),
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [2], save_dir_key=lambda val: f'seed{val}'),
@@ -353,6 +353,60 @@ def get_shapenet_seq128_grid(args):
     return hyperparams
 
 
+@register_grid("geo_shapenet_seq128_fewshot")
+def get_shapenet_seq128fs_grid(args):
+    hyperparams = get_shapenet_seq128_grid(args)
+    hyperparams += [
+        hyperparam('--train-views', "64,104", save_dir_key=lambda val: f'fs{val}'),
+        hyperparam('--valid-views', "0..251"),
+        hyperparam('--subsample-valid', 1),
+        # hyperparam('--valid-views', "0,50,100,150,200,250"),
+        hyperparam("--restore-file", 
+            "/checkpoint/jgu/space/neuralrendering/debug_new_chairs/srn_data_128z.fp16.seq.128x128.s16.v1.geo_nerf_transformer.emb384.id.enc1.cac.ss0.05.v0.25.posemb.sdfh128.bg1.0.dis.dstep.pruning.cm.dyvox.p2048.smk0.9.chk512.rgb128.0.alpha1.0.latent1.0.vgg0.0.adam.lr_poly.max200000.lr0.001.clip0.0.wd0.0.seed2.ngpu8/checkpoint_best.pt"),
+        hyperparam("--freeze-networks", binary_flag=True),
+        hyperparam("--reset-context-embed", binary_flag=True),
+        hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
+        hyperparam('--max-update', 100000),
+        
+        hyperparam('--online-pruning', binary_flag=True, save_dir_key=lambda val: f'pruning'),
+        hyperparam('--condition-on-marchsize', binary_flag=True, save_dir_key=lambda val: f'cm'),
+        hyperparam('--half-voxel-size-at', "5000,25000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--save-interval-updates', 500),
+        hyperparam('--reset-optimizer', binary_flag=True),
+        hyperparam('--reset-meters', binary_flag=True),
+        hyperparam('--reset-dataloader', binary_flag=True),
+        hyperparam('--reset-lr-scheduler', binary_flag=True),
+    ]
+    return hyperparams
+
+
+@register_grid("geo_shapenet_seq128_fewshot2")
+def get_shapenet_seq128fs2_grid(args):
+    hyperparams = get_shapenet_seq128_grid(args)
+    hyperparams += [
+        hyperparam('--train-views', "64", save_dir_key=lambda val: f'fs{val}'),
+        hyperparam('--valid-views', "0..251"),
+        hyperparam('--subsample-valid', 1),
+        # hyperparam('--valid-views', "0,50,100,150,200,250"),
+        hyperparam("--restore-file", 
+            "/checkpoint/jgu/space/neuralrendering/debug_new_chairs/train_bigbatch.fp16.seq.128x128.s16.v1.geo_nerf.emb384.id.ss0.05.v0.25.posemb.sdfh128.bg1.0.dis.dstep.pruning.cm.dyvox.p16384.smk0.9.chk512.rgb200.0.alpha1.0.vgg0.0.adam.lr_poly.max200000.lr0.001.clip0.0.wd0.0.seed2.ngpu8/checkpoint_last.pt"),
+        
+        hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
+        hyperparam("--freeze-networks", binary_flag=True),
+        hyperparam("--reset-context-embed", binary_flag=True),
+        hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
+        hyperparam('--max-update', 100000),
+        
+        hyperparam('--online-pruning', binary_flag=True, save_dir_key=lambda val: f'pruning'),
+        hyperparam('--condition-on-marchsize', binary_flag=True, save_dir_key=lambda val: f'cm'),
+        hyperparam('--half-voxel-size-at', "5000,25000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--save-interval-updates', 500),
+        hyperparam('--reset-optimizer', binary_flag=True),
+        hyperparam('--reset-meters', binary_flag=True),
+        hyperparam('--reset-dataloader', binary_flag=True),
+        hyperparam('--reset-lr-scheduler', binary_flag=True),
+    ]
+    return hyperparams
 
 def postprocess_hyperparams(args, config):
     """Postprocess a given hyperparameter configuration."""

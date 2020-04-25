@@ -338,6 +338,13 @@ class DynamicEmbeddingBackbone(Backbone):
     def feature_dim(self):
         return self.embed_dim
 
+    @property
+    def networks_not_freeze(self):
+        if self.use_context is not None and self.use_context == 'id':
+            return ["context_embed.weight"]
+        else:
+            raise NotImplementedError
+        
 
 @register_backnone("transformer")
 class TransformerBackbone(DynamicEmbeddingBackbone):
