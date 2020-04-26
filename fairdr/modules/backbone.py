@@ -232,8 +232,17 @@ class DynamicEmbeddingBackbone(Backbone):
         else:
             self.values = Embedding(self.total_size, self.embed_dim, None)
             if self.use_context is not None and self.use_hypernetwork:
-                raise NotImplementedError
-            self.values_proj = None
+                self.values_hyper = HyperFC(
+                        hyper_in_ch=self.embed_dim,
+                        hyper_num_hidden_layers=1,
+                        hyper_hidden_ch=self.embed_dim,
+                        hidden_ch=self.embed_dim,
+                        num_hidden_layers=1,
+                        in_ch=self.embed_dim, 
+                        out_ch=self.embed_dim,
+                        outermost_linear=True)
+            else:
+                self.values_proj = None
 
     @staticmethod
     def add_args(parser):
@@ -246,16 +255,18 @@ class DynamicEmbeddingBackbone(Backbone):
         parser.add_argument('--use-hypernetwork', action='store_true')
         parser.add_argument('--post-context', action='store_true', help='redo contexturalization every time voxels splitted')
 
-
     def contexturalization(self, context, values, keys=None):
         if self.use_hypernetwork:
             values_proj, context = self.values_hyper(context.squeeze(1)), None
         else:
             values_proj = self.values_proj
+        
         if values_proj is not None:
             values = values_proj(values)
+
         if (context is not None) and self.use_context_proj:
             context = self.context_proj(context)
+        
         return values, context
 
     def _forward(self, id, step=0, pruner=None, *args, **kwargs):
@@ -270,27 +281,23 @@ class DynamicEmbeddingBackbone(Backbone):
         values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous()
         codes = self.get_context_features(id)
 
-        # pruning (optional)
+        # contexturalization (potential)
         voxel_size, march_size = self.voxel_size, self.march_size
-        for t in range(step + 1):
+        values, context = self.contexturalization(codes, values, keys)
 
-            # object dependent value (contexturalization)
-            if (t == 0) or (self.post_context):
-                out_values, context = self.contexturalization(codes, values, keys)
-                if context is not None:
-                    out_values = out_values + context
-            
-            if not self.post_context:
-                if t == 0:
-                    values = out_values.clone()   # out_values are contexturalized
+        def combine(values, context):
+            if context is not None:
+                if not self.post_context:   
+                    out_values = values + context
                 else:
-                    out_values = values.clone()   # value has been pruned
+                    out_values = torch.cat([values, context], 1)
+                return out_values
+            return values
 
-            feats = feats + out_values.size(1) * torch.arange(values.size(0), 
+        for t in range(step + 1):
+            feats = feats + values.size(1) * torch.arange(values.size(0), 
                 device=feats.device, dtype=feats.dtype)[:, None, None]
-            values = values.view(-1, values.size(-1))  # reshape to 2D
-            out_values = out_values.view(-1, out_values.size(-1))  # reshape to 2D
-            # masks = points[:, :, 0] < (INF * .5)
+            out_values = combine(values, context)
 
             if not self.online_pruning:
                 break
@@ -302,9 +309,9 @@ class DynamicEmbeddingBackbone(Backbone):
                         id=id, update=False, 
                         features=(feats, points, out_values),
                         sizes=(voxel_size, march_size)).detach()
-                    
+                
                 feats, points = pruning_points(feats, points, predicts > 0.5)
-                corner_features = self.get_features(feats, values)  # recompute features
+                corner_features = self.get_features(feats, values.view(-1, values.size(-1)))  # recompute features
                 
                 # splitting
                 voxel_size = voxel_size * .5
@@ -316,8 +323,7 @@ class DynamicEmbeddingBackbone(Backbone):
                 points = padding_points(new_points, INF)
                 feats = padding_points(new_feats, 0)
                 values = padding_points(new_values, 0.0)
-     
-        
+
         return feats, points, out_values, codes
               
     def get_features(self, x, values):

@@ -265,14 +265,15 @@ def get_shapenet_seq128_grid(args):
         hyperparam('--valid-views', "0..10"),
 
         # model arguments
-        # hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
-        hyperparam('--arch', 'geo_nerf_transformer', save_dir_key=lambda val: val),
+        hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
+        # hyperparam('--arch', 'geo_nerf_transformer', save_dir_key=lambda val: val),
 
         # -- dynamic embedding params
         # hyperparam('--quantized-pos-embed', binary_flag=True, save_dir_key=lambda val: f'qpos'),
-        hyperparam('--quantized-xyz-embed', binary_flag=True, save_dir_key=lambda val: f'qxyz'),
+        # hyperparam('--quantized-xyz-embed', binary_flag=True, save_dir_key=lambda val: f'qxyz'),
         # hyperparam('--quantized-context-proj', binary_flag=True, save_dir_key=lambda val: f'cp'),
         hyperparam('--use-hypernetwork', binary_flag=True, save_dir_key=lambda val: f'hyper'),
+        # hyperparam('--post-context', binary_flag=True, save_dir_key=lambda val: f'hpc'),
         hyperparam('--quantized-voxel-path', voxel_name),
         hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--context', 'id', save_dir_key=lambda val: f'{val}'),
@@ -280,8 +281,8 @@ def get_shapenet_seq128_grid(args):
         
         # -- transformer params
         # hyperparam('--over-residual', False, binary_flag=True, save_dir_key=lambda val: f'tres'),
-        hyperparam('--encoder-attention-heads', 1),
-        hyperparam('--encoder-layers', [1], save_dir_key=lambda val: f'enc{val}'),
+        # hyperparam('--encoder-attention-heads', 1),
+        # hyperparam('--encoder-layers', [1], save_dir_key=lambda val: f'enc{val}'),
         # hyperparam('--cross-attention-context', binary_flag=True, save_dir_key=lambda val: f'cac'),
         # hyperparam('--attention-context', binary_flag=True, save_dir_key=lambda val: f'ac'),
 

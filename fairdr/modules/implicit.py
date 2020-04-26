@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from fairseq.utils import get_activation_fn
 from fairdr.modules.utils import FCLayer, ResFCLayer
-
+from fairdr.modules.hyper import HyperFC
 
 class ImplicitField(nn.Module):
     
@@ -39,6 +39,45 @@ class ImplicitField(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+
+class HyperImplicitField(nn.Module):
+
+    def __init__(self, args, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False):
+        super().__init__()
+
+        self.args = args
+        self.net = HyperFC(
+            hyper_in_dim,
+            1, 256, 
+            hidden_dim,
+            num_layers,
+            in_dim,
+            out_dim,
+            outermost_linear=outmost_linear
+        )
+
+    def forward(self, x, i, c):
+        net = self.net(c)
+        
+        def flat2mx(x, i):
+            batch_size = c.size(0)
+            x_slices = [x[i==b] for b in range(batch_size)]
+            max_size = max([xi.size(0) for xi in x_slices])
+            new_x = x.new_zeros(batch_size, max_size, x.size(-1))
+            for b in range(batch_size):
+                new_x[b, :x_slices[b].size(0)] = x_slices[b]
+            return new_x
+
+        def mx2flat(x, i):
+            batch_size = c.size(0)
+            new_x = x.new_zeros(i.size(0), x.size(-1))
+            for b in range(batch_size):
+                size = (i == b).sum()
+                new_x[i == b] = x[b, : size]
+            return new_x
+
+        return mx2flat(net(flat2mx(x, i)), i)
 
 
 class SignedDistanceField(nn.Module):

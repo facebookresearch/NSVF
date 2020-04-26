@@ -184,7 +184,8 @@ class BatchLinear(nn.Module):
         self.biases = biases
 
     def __repr__(self):
-        return "BatchLinear(in_ch=%d, out_ch=%d)"%(self.weights.shape[-1], self.weights.shape[-2])
+        return "BatchLinear(batch=%d, in_ch=%d, out_ch=%d)"%(
+           self.weights.shape[0], self.weights.shape[-1], self.weights.shape[-2])
 
     def forward(self, input):
         output = input.matmul(self.weights.permute(*[i for i in range(len(self.weights.shape)-2)], -1, -2))

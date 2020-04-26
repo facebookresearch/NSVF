@@ -41,7 +41,7 @@ python fb_sweep/sweep_shapenet.py \
 #     --snapshot-root ${WORK}/snapshot \
 #     --prefix ${DATA}v2 \
 #     --num-trials 1 \
-#     --num-gpus 8 \
+#     --num-gpus 1 \
 #     --num-nodes 1 \
 #     --mem 500gb \
 #     --constraint volta32gb \

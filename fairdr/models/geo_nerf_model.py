@@ -23,7 +23,8 @@ from fairdr.models.srn_model import SRNModel, base_architecture
 from fairdr.models.fairdr_model import Field, Raymarcher
 from fairdr.modules.linear import Linear, NeRFPosEmbLinear, Embedding
 from fairdr.modules.implicit import (
-    ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField
+    ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField,
+    HyperImplicitField
 )
 from fairdr.modules.backbone import BACKBONE_REGISTRY, pruning_points
 
@@ -249,6 +250,7 @@ class GEORadianceField(Field):
             requires_grad=(not getattr(args, "background_stop_gradient", False)))
 
         # arguments
+        self.post_context = getattr(self.backbone, 'post_context', False)
         self.freeze_networks = getattr(args, "freeze_networks", False)
         self.reset_context_embed = getattr(args, "reset_context_embed", False)
         self.chunk_size = 256 * getattr(args, "chunk_size", 256)
@@ -262,12 +264,23 @@ class GEORadianceField(Field):
             self.cond_emb = Embedding(10, self.backbone.feature_dim)
 
         # build layers
-        self.feature_field = ImplicitField(
-                args, 
+        if not self.post_context:
+            self.feature_field = ImplicitField(
+                    args, 
+                    self.backbone.feature_dim + self.raypos_features, 
+                    args.output_features, 
+                    args.hidden_features, 
+                    args.num_layer_features - 1)
+        else:
+            self.feature_field = HyperImplicitField(
+                args,
+                self.backbone.feature_dim,  # currently assume latent dim = feature dim
                 self.backbone.feature_dim + self.raypos_features, 
                 args.output_features, 
                 args.hidden_features, 
-                args.num_layer_features - 1)
+                args.num_layer_features - 1
+            )
+
         self.predictor = SignedDistanceField(
                 args,
                 args.output_features,
@@ -323,6 +336,10 @@ class GEORadianceField(Field):
 
     def get_feature(self, xyz, point_feats, point_xyz, values, voxel_size, march_size):
         # extract real features here to save memory
+        if self.post_context:
+            codes, values = values[:, -1], values[:, :-1]
+            indices = point_feats[:, 0] // values.size(1)
+        values = values.reshape(-1, values.size(-1))
         point_feats = self.backbone.get_features(point_feats, values).view(
             point_feats.size(0), -1)
         
@@ -342,8 +359,12 @@ class GEORadianceField(Field):
         # absolute coordinate features
         if self.raypos_features > 0:
             point_feats = torch.cat([point_feats, self.point_proj(xyz)], -1)
-        return self.feature_field(point_feats)
-
+        
+        if self.post_context:
+            return self.feature_field(point_feats, indices, codes)
+        else:
+            return self.feature_field(point_feats)
+        
     @chunking
     def forward(self, 
         xyz, point_feats, point_xyz, values,
