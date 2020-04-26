@@ -368,6 +368,39 @@ class ShapeViewDataset(ShapeDataset):
         return results
 
 
+class ShapeViewStreamDataset(ShapeViewDataset):
+    """
+    Different from ShapeViewDataset.
+    We merge all the views together into one dataset regardless of the shapes.
+
+    ** HACK **: trying to adapt to the original ShapeViewDataset
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        assert self.repeat == 1, "Comboned dataset does not support repeating"
+        assert self.num_view == 1, "StreamDataset only supports one view per shape at a time."
+
+        # reset the data_index
+        self.data_index = []
+        for i, d in enumerate(self.data):
+            for j, _ in enumerate(d['rgb']):
+                self.data_index.append((i, j))   # shape i, view j
+
+    def __len__(self):
+        return len(self.data_index)
+
+    def _load_batch(self, data, shape_id, view_id):
+        return shape_id, self._load_shape(data[shape_id]), [self._load_view(data[shape_id], view_id)]
+
+    def __getitem__(self, index):
+        shape_id, view_id = self.data_index[index]
+        if self.cache is not None:
+            return copy.deepcopy(self.cache[shape_id % self.total_num_shape][0]), \
+                   copy.deepcopy(self.cache[shape_id % self.total_num_shape][1]), \
+                  [copy.deepcopy(self.cache[shape_id % self.total_num_shape][2][view_id])]
+        return self._load_batch(self.data, shape_id, view_id)
+
 class SampledPixelDataset(BaseWrapperDataset):
     """
     A wrapper dataset, which split rendered images into pixels

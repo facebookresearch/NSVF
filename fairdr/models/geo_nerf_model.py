@@ -135,7 +135,6 @@ class GEONERFModel(SRNModel):
         return level
 
     def _forward(self, ray_start, ray_dir, id, **kwargs):
-       
         # get geometry features
         feats, xyz, values, codes = self.field.get_backbone_features(
             id=id, step=self.set_level(), pruner=self.field.pruning)
@@ -631,6 +630,9 @@ def geo_base_architecture(args):
     args.quantized_voxel_path = getattr(args, "quantized_voxel_path", None)
     args.quantized_embed_dim = getattr(args, "quantized_embed_dim", 384)
     args.quantized_pos_embed = getattr(args, "quantized_pos_embed", False)
+    args.quantized_xyz_embed = getattr(args, "quantized_xyz_embed", False)
+    args.quantized_context_proj = getattr(args, "quantized_context_proj", False)
+    args.use_hypernetwork = getattr(args, "use_hypernetwork", False)
     args.post_context = getattr(args, "post_context", False)
     plain_architecture(args)
 

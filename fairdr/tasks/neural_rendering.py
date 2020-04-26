@@ -14,7 +14,7 @@ from fairseq.tasks import FairseqTask, register_task
 from fairseq.optim.fp16_optimizer import FP16Optimizer
 
 from fairdr.data import (
-    ShapeViewDataset, SampledPixelDataset, 
+    ShapeViewDataset, SampledPixelDataset, ShapeViewStreamDataset,
     WorldCoordDataset, ShapeDataset, InfiniteDataset
 )
 from fairdr.data.data_utils import write_images, compute_psnr
@@ -31,6 +31,7 @@ class SingleObjRenderingTask(FairseqTask):
     def add_args(parser):
         """Add task-specific arguments to the parser"""
         parser.add_argument("data", help='data-path or data-directoy')
+        parser.add_argument("--object-id-path", type=str, help='path to object indices', default=None)
         parser.add_argument("--no-preload", action="store_true")
         parser.add_argument("--no-load-binary", action="store_true")
         parser.add_argument("--load-depth", action="store_true", 
@@ -84,7 +85,9 @@ class SingleObjRenderingTask(FairseqTask):
         
         # check dataset
         self.train_data = self.val_data = self.test_data = args.data
-        self.object_ids = None
+        self.object_ids = None if args.object_id_path is None else \
+            {line.strip(): i for i, line in enumerate(open(args.object_id_path))}
+            
         if os.path.isdir(args.data):
             if os.path.exists(args.data + '/train.txt'):
                 self.train_data = args.data + '/train.txt'
@@ -92,7 +95,7 @@ class SingleObjRenderingTask(FairseqTask):
                 self.val_data = args.data + '/val.txt'
             if os.path.exists(args.data + '/test.txt'):
                 self.test_data = args.data + '/test.txt'
-            if os.path.exists(args.data + '/object_ids.txt'):
+            if self.object_ids is None and os.path.exists(args.data + '/object_ids.txt'):
                 self.object_ids = {line.strip(): i for i, line in enumerate(open(args.data + '/object_ids.txt'))}
 
         if len(self.args.tensorboard_logdir) > 0 and getattr(args, "distributed_rank", -1) == 0:
@@ -167,17 +170,13 @@ class SingleObjRenderingTask(FairseqTask):
         Load a given dataset split (train, valid, test)
         """
         
-        if split != 'test':
+        if split == 'train':
             self.datasets[split] = ShapeViewDataset(
-                self.train_data if split == 'train' else self.val_data,
-                views=self.train_views if split == 'train' else self.valid_views,
-                subsample_valid=self.args.subsample_valid 
-                    if split == 'valid' else -1,
-                num_view=self.args.view_per_batch 
-                    if split == 'train' 
-                    else self.args.valid_view_per_batch,
+                self.train_data,
+                views=self.train_views,
+                num_view=self.args.view_per_batch,
                 resolution=self.args.view_resolution,
-                train=(split == 'train'),
+                train=True,
                 load_depth=self.args.load_depth,
                 load_mask=self.args.load_mask,
                 load_point=self.args.load_point,
@@ -188,7 +187,7 @@ class SingleObjRenderingTask(FairseqTask):
                 min_color=getattr(self.args, "min_color", -1),
                 ids=self.object_ids)
 
-            if split == 'train' and (self.args.pixel_per_view is not None):
+            if self.args.pixel_per_view is not None:
                 self.datasets[split] = SampledPixelDataset(
                     self.datasets[split],
                     self.args.pixel_per_view,
@@ -196,16 +195,36 @@ class SingleObjRenderingTask(FairseqTask):
                     self.args.sampling_on_bbox,
                     self.args.view_resolution,
                     self.args.sampling_patch_size)
+            
             self.datasets[split] = WorldCoordDataset(
                 self.datasets[split]
             )
 
-            if split == 'train':   # infinite sampler
-                max_step = getattr(self.args, "virtual_epoch_steps", None)
-                if max_step is not None:
-                    total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
-                    self.datasets[split] = InfiniteDataset(
-                        self.datasets[split], total_num_models)
+            max_step = getattr(self.args, "virtual_epoch_steps", None)
+            if max_step is not None:
+                total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
+                self.datasets[split] = InfiniteDataset(
+                    self.datasets[split], total_num_models)
+
+        elif split == 'valid':
+            self.datasets[split] = ShapeViewStreamDataset(
+                self.val_data,
+                views=self.valid_views,
+                subsample_valid=self.args.subsample_valid,
+                num_view=1,
+                resolution=self.args.view_resolution,
+                train=False,
+                load_depth=self.args.load_depth,
+                load_mask=self.args.load_mask,
+                load_point=self.args.load_point,
+                preload=(not getattr(self.args, "no_preload", False)),
+                binarize=(not getattr(self.args, "no_load_binary", False)),
+                bg_color=getattr(self.args, "transparent_background", -0.8),
+                min_color=getattr(self.args, "min_color", -1),
+                ids=self.object_ids)
+            self.datasets[split] = WorldCoordDataset(
+                self.datasets[split]
+            )
 
         else:
             self.datasets[split] = ShapeViewDataset(

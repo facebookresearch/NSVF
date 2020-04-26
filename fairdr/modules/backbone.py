@@ -20,6 +20,7 @@ from fairdr.data.data_utils import load_matrix, unique_points
 from fairdr.data.geometry import trilinear_interp
 from fairdr.modules.pointnet2.pointnet2_utils import furthest_point_sample
 from fairdr.modules.linear import FCLayer, Linear, Embedding
+from fairdr.modules.hyper import HyperFC
 from fairdr.modules.implicit import SignedDistanceField as SDF
 from fairdr.modules.me import unet
 from fairseq import options, utils
@@ -186,27 +187,53 @@ class DynamicEmbeddingBackbone(Backbone):
         # voxel embeddings
         self.embed_dim = getattr(args, "quantized_embed_dim", None)
         self.use_pos_embed = getattr(args, "quantized_pos_embed", False)
+        self.use_xyz_embed = getattr(args, "quantized_xyz_embed", False)
+        self.use_context_proj = getattr(args, "quantized_context_proj", False)
+        self.use_hypernetwork = getattr(args, "use_hypernetwork", False)
         self.post_context = getattr(args, "post_context", False)
+        
+        if self.use_context is not None:
+            if self.use_context == 'id':
+                assert self.args.total_num_context > 0, "index embeddings for different frames"
+                self.context_embed = Embedding(self.args.total_num_context, self.embed_dim, None)
 
-        if self.embed_dim is not None:
-            self.values = Embedding(self.total_size, self.embed_dim, None)
-
-        if self.use_context is not None and self.use_context == 'id':
-            assert self.args.total_num_context > 0, "index embeddings for different frames"
-            self.context_embed = Embedding(self.args.total_num_context, self.embed_dim, None)
+            if self.use_context_proj:
+                self.context_proj = Linear(self.embed_dim, self.embed_dim)
 
         if self.use_pos_embed:
             assert self.embed_dim is not None and self.embed_dim % 3 == 0, "size mismatch!"
             # -- positional embeddings --
+            self.values = Embedding(self.total_size, self.embed_dim, None)
             self.values.weight.data = positional_encoding(self.embed_dim // 3, init_keys.float())
             self.values.weight.requires_grad = False
-            self.values_proj = Linear(self.embed_dim, self.embed_dim)
-            if self.use_context is not None and self.use_context == 'id':
-                # -- positional embeddings --
-                self.context_embed.weight.data = positional_encoding(
-                    self.embed_dim, torch.arange(self.args.total_num_context).float())
-                self.context_embed.weight.requires_grad = False
-                self.context_proj = Linear(self.embed_dim, self.embed_dim)
+
+            if self.use_context is not None and self.use_hypernetwork:
+                raise NotImplementedError
+            else:
+                self.values_proj = Linear(self.embed_dim, self.embed_dim)
+        
+        elif self.use_xyz_embed:
+            self.values = Embedding(init_keys.shape[0], 3, None)
+            self.values.weight.data = (init_keys.float() / abs(init_keys.float()).max())
+            self.values.weight.requires_grad = False
+
+            if self.use_context is not None and self.use_hypernetwork:
+                self.values_hyper = HyperFC(
+                        hyper_in_ch=self.embed_dim,
+                        hyper_num_hidden_layers=1,
+                        hyper_hidden_ch=self.embed_dim,
+                        hidden_ch=self.embed_dim,
+                        num_hidden_layers=1,
+                        in_ch=3, out_ch=self.embed_dim,
+                        outermost_linear=True)
+            else:
+                self.values_proj = Linear(3, self.embed_dim)
+            
+        else:
+            self.values = Embedding(self.total_size, self.embed_dim, None)
+            if self.use_context is not None and self.use_hypernetwork:
+                raise NotImplementedError
+            self.values_proj = None
 
     @staticmethod
     def add_args(parser):
@@ -214,16 +241,21 @@ class DynamicEmbeddingBackbone(Backbone):
         parser.add_argument('--quantized-pproj-dim', type=int, metavar='N', help="only useful if online_pruning set")
         parser.add_argument('--total-num-context', type=int, metavar='N', help="if use id as inputs, unique embeddings")
         parser.add_argument('--quantized-pos-embed', action='store_true', help="instead of standard embeddings, use positional embeddings")
+        parser.add_argument('--quantized-xyz-embed', action='store_true', help='instead of positional embedding, use actual xyz as inputs')
+        parser.add_argument('--quantized-context-proj', action='store_true')
+        parser.add_argument('--use-hypernetwork', action='store_true')
         parser.add_argument('--post-context', action='store_true', help='redo contexturalization every time voxels splitted')
 
+
     def contexturalization(self, context, values, keys=None):
-        if self.use_pos_embed:
-            values = self.values_proj(values)
-        if context is not None:
-            if self.use_pos_embed:
-                context = self.context_proj(context)
-            else:
-                context = context.clone()
+        if self.use_hypernetwork:
+            values_proj, context = self.values_hyper(context.squeeze(1)), None
+        else:
+            values_proj = self.values_proj
+        if values_proj is not None:
+            values = values_proj(values)
+        if (context is not None) and self.use_context_proj:
+            context = self.context_proj(context)
         return values, context
 
     def _forward(self, id, step=0, pruner=None, *args, **kwargs):
@@ -258,7 +290,7 @@ class DynamicEmbeddingBackbone(Backbone):
                 device=feats.device, dtype=feats.dtype)[:, None, None]
             values = values.view(-1, values.size(-1))  # reshape to 2D
             out_values = out_values.view(-1, out_values.size(-1))  # reshape to 2D
-            masks = points[:, :, 0] < (INF * .5)
+            # masks = points[:, :, 0] < (INF * .5)
 
             if not self.online_pruning:
                 break
@@ -344,7 +376,7 @@ class DynamicEmbeddingBackbone(Backbone):
             return ["context_embed.weight"]
         else:
             raise NotImplementedError
-        
+
 
 @register_backnone("transformer")
 class TransformerBackbone(DynamicEmbeddingBackbone):
@@ -413,7 +445,10 @@ class TransformerBackbone(DynamicEmbeddingBackbone):
         m0 = values.eq(0.0).all(-1)
         x0, c = super().contexturalization(context, values, keys=None)
 
-        if not self.attention_context:
+        if c is None:
+            x = x0
+            m = m0
+        elif not self.attention_context:
             x = x0 + c
             m = m0
         else:

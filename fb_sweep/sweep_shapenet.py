@@ -257,9 +257,9 @@ def get_shapenet_seq128_grid(args):
         # task level
         hyperparam('--view-resolution', 128, save_dir_key=lambda val: f'{val}x{val}'),
         hyperparam('--max-sentences', 16, save_dir_key=lambda val: f's{val}'),
-        hyperparam('--max-sentences-valid', 4),
+        hyperparam('--max-sentences-valid', 8),
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
-        hyperparam('--valid-view-per-batch', 2),
+        hyperparam('--valid-view-per-batch', 1),
         hyperparam('--subsample-valid', 10),
         hyperparam('--train-views', "0..50"),
         hyperparam('--valid-views', "0..10"),
@@ -268,7 +268,11 @@ def get_shapenet_seq128_grid(args):
         # hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
         hyperparam('--arch', 'geo_nerf_transformer', save_dir_key=lambda val: val),
 
-        # hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/shapenet_chair/initial_voxel.txt"),
+        # -- dynamic embedding params
+        # hyperparam('--quantized-pos-embed', binary_flag=True, save_dir_key=lambda val: f'qpos'),
+        hyperparam('--quantized-xyz-embed', binary_flag=True, save_dir_key=lambda val: f'qxyz'),
+        # hyperparam('--quantized-context-proj', binary_flag=True, save_dir_key=lambda val: f'cp'),
+        hyperparam('--use-hypernetwork', binary_flag=True, save_dir_key=lambda val: f'hyper'),
         hyperparam('--quantized-voxel-path', voxel_name),
         hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--context', 'id', save_dir_key=lambda val: f'{val}'),
@@ -278,8 +282,9 @@ def get_shapenet_seq128_grid(args):
         # hyperparam('--over-residual', False, binary_flag=True, save_dir_key=lambda val: f'tres'),
         hyperparam('--encoder-attention-heads', 1),
         hyperparam('--encoder-layers', [1], save_dir_key=lambda val: f'enc{val}'),
-        hyperparam('--cross-attention-context', binary_flag=True, save_dir_key=lambda val: f'cac'),
-    
+        # hyperparam('--cross-attention-context', binary_flag=True, save_dir_key=lambda val: f'cac'),
+        # hyperparam('--attention-context', binary_flag=True, save_dir_key=lambda val: f'ac'),
+
         hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
         hyperparam('--voxel-size', 0.25, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 48),
@@ -340,7 +345,7 @@ def get_shapenet_seq128_grid(args):
         hyperparam('--criterion', 'srn_loss'),
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [2], save_dir_key=lambda val: f'seed{val}'),
-        hyperparam('--save-interval-updates', 1000),
+        hyperparam('--save-interval-updates', 500),
         hyperparam('--max-update', 200000),
         
         hyperparam('--virtual-epoch-steps', 5000),

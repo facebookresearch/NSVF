@@ -98,6 +98,40 @@ class FCLayer(nn.Module):
         return self.net(x) 
 
 
+class FCBlock(nn.Module):
+    def __init__(self,
+                 hidden_ch,
+                 num_hidden_layers,
+                 in_features,
+                 out_features,
+                 outermost_linear=False):
+        super().__init__()
+
+        self.net = []
+        self.net.append(FCLayer(in_features, hidden_ch))
+
+        for i in range(num_hidden_layers):
+            self.net.append(FCLayer(hidden_ch, hidden_ch))
+
+        if outermost_linear:
+            self.net.append(Linear(hidden_ch, out_features))
+        else:
+            self.net.append(FCLayer(hidden_ch, out_features))
+
+        self.net = nn.Sequential(*self.net)
+        self.net.apply(self.init_weights)
+
+    def __getitem__(self,item):
+        return self.net[item]
+
+    def init_weights(self, m):
+        if type(m) == nn.Linear:
+            nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity='relu', mode='fan_in')
+
+    def forward(self, input):
+        return self.net(input)
+
+
 class ResFCLayer(nn.Module):
     """
     Reference:
