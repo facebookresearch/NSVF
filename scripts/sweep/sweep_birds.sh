@@ -1,23 +1,23 @@
-ROOT=/private/home/jgu/data/
-DATA=srn_data
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv2
+ROOT=/private/home/jgu/data/shapenet/differentiable_volumetric_rendering/data/DTU/scan106/
+DATA=scan106
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_birds
 mkdir -p ${WORK}
 
-GRID=geo_shapenet_seq128
+GRID=geo_birds
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-python fb_sweep/sweep_shapenet.py \
-    --data ${ROOT}/${DATA}/training_set \
+python fb_sweep/sweep_birds.py \
+    --data ${ROOT}/${DATA}/  \
     --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
-    --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
+    --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_pos \
+    --prefix ${DATA}_v2 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -31,8 +31,8 @@ python fb_sweep/sweep_shapenet.py \
    
 # popd
 
-# python fb_sweep/sweep_shapenet.py \
-#     --data ${ROOT}/${DATA}/training_set  \
+# python fb_sweep/sweep_birds.py \
+#     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \
 #     --user-dir "fairdr" \
 #     --checkpoints-dir ${WORK} \

@@ -160,10 +160,11 @@ class SingleObjRenderingTask(FairseqTask):
         return cls(args)
 
     def repeat_dataset(self, split):
-        max_view = self.args.max_train_view if split == 'train' \
-                else self.args.max_valid_view
-        return int(np.ceil(max_view / self.args.view_per_batch / 
-            self.args.distributed_world_size) * self.args.distributed_world_size)
+        return 1
+        # max_view = self.args.max_train_view if split == 'train' \
+        #         else self.args.max_valid_view
+        # return int(np.ceil(max_view / self.args.view_per_batch / 
+        #     self.args.distributed_world_size) * self.args.distributed_world_size)
 
     def load_dataset(self, split, **kwargs):
         """
@@ -284,7 +285,7 @@ class SingleObjRenderingTask(FairseqTask):
 
     def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
         self._num_updates = update_num
-    
+        
         if self.steps_to_half_voxels is not None and \
             self._num_updates in self.steps_to_half_voxels:
             
@@ -336,7 +337,7 @@ class SingleObjRenderingTask(FairseqTask):
         ssims, psnrs = [], []
         for s in range(predicts.size(0)):
             for v in range(predicts.size(1)):
-                ssim, psnr = compute_psnr(predicts[s, v], targets[s, v], sample['width'][s, v])
+                ssim, psnr = compute_psnr(predicts[s, v], targets[s, v], int(sample['size'][s, v][1]))
                 ssims.append(ssim)
                 psnrs.append(psnr)
         logging_output['ssim_loss'] = np.mean(ssims)

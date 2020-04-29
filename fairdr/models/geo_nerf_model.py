@@ -141,7 +141,7 @@ class GEONERFModel(SRNModel):
             id=id, step=self.set_level(), pruner=self.field.pruning)
 
         # latent regularization
-        latent_loss = torch.mean(codes ** 2)
+        latent_loss = torch.mean(codes ** 2) if codes is not None else 0
 
         # coarse ray-intersection
         bg_color = self.field.bg_color # * 0.0 - 0.8
@@ -655,6 +655,7 @@ def geo_base_architecture(args):
     args.quantized_context_proj = getattr(args, "quantized_context_proj", False)
     args.use_hypernetwork = getattr(args, "use_hypernetwork", False)
     args.post_context = getattr(args, "post_context", False)
+    args.normalize_context = getattr(args, "normalize_context", False)
     plain_architecture(args)
 
 @register_model_architecture("geo_nerf", "geo_nerf_transformer")

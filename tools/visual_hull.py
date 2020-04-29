@@ -31,9 +31,9 @@ print(DIR)
 
 # DIR = "/private/home/jgu/data/shapenet/ShapeNetCore.v2/03001627/debug/debug"
 dataset = ShapeViewDataset(
-    DIR, args.frames, args.frames, 
+    DIR, list(range(args.frames)), args.frames, 
     load_mask=args.load_mask, binarize=False,
-    resolution=None)
+    resolution=[args.image_res_H, args.image_res])
 
 # visual-hull parameters
 s = args.voxel_res     # voxel resolution
@@ -94,9 +94,9 @@ for i, data in enumerate(packed_data):
     if args.white_bg:
         image_mask = 1 - (data['rgb'] == 1.0).all(0).reshape(imgH, imgW).astype(np.int)
     elif args.load_mask:
-        image_mask = data['alpha'].reshape(imgH, imgW).astype(np.int)
-    else:
         image_mask = data['mask'].reshape(imgH, imgW).astype(np.int)
+    else:
+        image_mask = data['alpha'].reshape(imgH, imgW).astype(np.int)
 
     res = image_mask[sub_uvs[1, :], sub_uvs[0, :]]
     occupancy[indices] += res
@@ -133,7 +133,7 @@ def voxelize_pcd(verts, voxel_size, fname):
     return ovoxels
 
 def voxelize_bbx(verts, voxel_size, fname):
-    xyz_min, xyz_max = verts.min(0) - voxd * .5, verts.max(0) + voxel_size * .5
+    xyz_min, xyz_max = verts.min(0) - voxel_size, verts.max(0) + voxel_size
     x, y, z = np.mgrid[
         range(int((xyz_max[0] - xyz_min[0]) / voxel_size) + 1),
         range(int((xyz_max[1] - xyz_min[1]) / voxel_size) + 1),
@@ -171,7 +171,7 @@ if not args.visualhull_only:
     ox, oy, oz = o[:, 0], o[:, 1], o[:, 2]
 
     # save data
-    fname = os.path.join(DIR, 'voxel.txt')
+    fname = os.path.join(DIR, 'voxel2.txt')
     with open(fname, 'w') as f:
         for i in range(ox.shape[0]):
             print('{} {} {} {} {} {}'.format(

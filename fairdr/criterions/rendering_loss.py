@@ -239,7 +239,7 @@ class SRNLossCriterion(RenderingCriterion):
 
             def transform(x):
                 S, V, D, _ = x.size()
-                H, W = sample['height'][0, 0], sample['width'][0, 0]
+                H, W = int(sample['size'][0, 0, 0]), int(sample['size'][0, 0, 1])
                 x = x.transpose(2, 3).view(S * V, 3, H, W)
                 return x / 2 + 0.5
 

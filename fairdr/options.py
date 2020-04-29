@@ -27,7 +27,8 @@ def add_rendering_args(parser):
     options.add_common_eval_args(group)
     group.add_argument("--render-beam", default=5, type=int, metavar="N",
                        help="beam size for parallel rendering")
-    group.add_argument("--render-resolution", default=512, type=int, metavar="N")
+    group.add_argument("--render-resolution", default=512, type=int, metavar="N",
+                        nargs='*', help='if provide two numbers, means H x W')
     group.add_argument("--render-angular-speed", default=1, type=float, metavar="D",
                        help="angular speed when rendering around the object")
     group.add_argument("--render-num-frames", default=500, type=int, metavar="N")

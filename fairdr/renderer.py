@@ -17,7 +17,7 @@ import imageio
 from torchvision.utils import save_image
 from fairdr.data import trajectory, geometry, data_utils
 from fairseq.meters import StopwatchMeter
-from fairdr.data.data_utils import recover_image
+from fairdr.data.data_utils import recover_image, get_uv
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,8 @@ class NeuralRenderer(object):
         self.speed = speed
         self.raymarching_steps = raymarching_steps
         self.path_gen = path_gen
-        self.resolution = resolution
+        self.resolution = resolution if isinstance(resolution, list) \
+            else [resolution, resolution] 
         self.beam = beam
         self.output_dir = output_dir
         self.output_type = output_type
@@ -54,7 +55,7 @@ class NeuralRenderer(object):
         if self.output_type is None:
             self.output_type = ["rgb"]
 
-    def generate_rays(self, t, intrinsics):
+    def generate_rays(self, t, intrinsics, img_size):
         cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
                     device=intrinsics.device, dtype=intrinsics.dtype)
         cam_rot = geometry.look_at_rotation(cam_pos, at=self.at, up=self.up, inverse=True, cv=True)
@@ -64,13 +65,8 @@ class NeuralRenderer(object):
         inv_RT[:3, 3] = cam_pos
         inv_RT[3, 3] = 1
 
-        _, _, cx, cy = geometry.parse_intrinsics(intrinsics)
-        hw, hh = int(cx), int(cy)
-        # from fairseq import pdb; pdb.set_trace()
-        v, u = torch.meshgrid([torch.arange(2 * hh), torch.arange(2 * hw)])
-        uv = torch.stack([u, v], 0).type_as(intrinsics)
-        ratio = 2 * hw // self.resolution
-        uv = uv[:, ::ratio, ::ratio]
+        h, w, rh, rw = img_size[0], img_size[1], img_size[2], img_size[3]
+        uv = torch.from_numpy(get_uv(h * rh, w * rw, h, w)[0]).type_as(intrinsics)
         uv = uv.reshape(2, -1)
     
         ray_start = inv_RT[:3, 3]
@@ -95,8 +91,9 @@ class NeuralRenderer(object):
             while step < max_step:
                 next_step = min(step + self.beam, max_step)
                 logger.info("rendering frames: {}".format(step))
+                
                 ray_start, ray_dir, inv_RT = zip(*[
-                    self.generate_rays(k, sample['intrinsics'][shape])
+                    self.generate_rays(k, sample['intrinsics'][shape], sample['size'][shape, 0])
                     for k in range(step, next_step)
                 ])
         
@@ -116,8 +113,7 @@ class NeuralRenderer(object):
                     'voxels': voxels[shape:shape+1].clone() if voxels is not None else None,
                     'points': points[shape:shape+1].clone() if points is not None else None,
                     'raymarching_steps': self.raymarching_steps,
-                    'width': sample['shape'].new_ones(1, next_step-step) * self.resolution,
-
+                    'size': torch.cat([sample['size'][shape:shape+1] for _ in range(step, next_step)], 1),
                 }
 
                 timer.start()

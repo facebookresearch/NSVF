@@ -195,7 +195,8 @@ class ShapeViewDataset(ShapeDataset):
         self.load_mask = load_mask
         self.views = views
         self.num_view = num_view
-        self.resolution = resolution
+        self.resolution = resolution if isinstance(resolution, list) \
+            else [resolution, resolution] 
         self.world2camera = True
         self.cache_view = None
         self.bg_color = bg_color  # only useful if image is transparent
@@ -231,7 +232,7 @@ class ShapeViewDataset(ShapeDataset):
 
                 if r == 0 and preload:
                     phase_name = f"{'train' if self.train else 'valid'}" + \
-                                f".{resolution}x{resolution}" + \
+                                f".{self.resolution[0]}x{self.resolution[1]}" + \
                                 f"{'.d' if load_depth else ''}" + \
                                 f"{'.m' if load_mask else ''}" + \
                                 f"{'.p' if load_point else ''}"
@@ -314,10 +315,13 @@ class ShapeViewDataset(ShapeDataset):
         return [list(range(len(_data_per_view[keys[0]][k]))) for k in range(num_of_objects)]
 
     def num_tokens(self, index):
-        return self.num_view * self.resolution ** 2  
+        return self.num_view
+        # if isinstance(self.resolution, list):
+        #     return self.num_view * np.prod(self.resolution) 
+        # return self.num_view * self.resolution ** 2  
 
     def _load_view(self, packed_data, view_idx):
-        image, uv = data_utils.load_rgb(
+        image, uv, ratio = data_utils.load_rgb(
             packed_data['rgb'][view_idx], 
             resolution=self.resolution,
             bg_color=self.bg_color,
@@ -331,7 +335,7 @@ class ShapeViewDataset(ShapeDataset):
         if packed_data.get('mask', None) is not None:
             mask = data_utils.load_mask(packed_data['mask'][view_idx], resolution=self.resolution)
             rgb = rgb * mask[None, :, :] + (1 - mask[None, :, :]) * self.bg_color
-            
+        
         return {
             'view': view_idx,
             'uv': uv.reshape(2, -1), 
@@ -340,8 +344,7 @@ class ShapeViewDataset(ShapeDataset):
             'extrinsics': extrinsics,
             'depths': z.reshape(-1) if z is not None else None,
             'mask': mask.reshape(-1) if mask is not None else None,
-            'height': rgb.shape[1],
-            'width': rgb.shape[2]
+            'size': np.array([rgb.shape[1], rgb.shape[2]] + ratio, dtype=np.float32)
         }
 
     def _load_batch(self, data, index, view_ids=None):
@@ -401,6 +404,20 @@ class ShapeViewStreamDataset(ShapeViewDataset):
                   [copy.deepcopy(self.cache[shape_id % self.total_num_shape][2][view_id])]
         return self._load_batch(self.data, shape_id, view_id)
 
+    def _load_binary(self, id, views, phase='train'):
+        root = os.path.dirname(self.data[id]['ixt'])
+        npzfile = os.path.join(root, '{}.npz'.format(phase))
+        try:
+            with np.load(npzfile, allow_pickle=True) as f:
+                return f['cache']
+        except Exception:
+            caches = [self._load_batch(self.data, id, view_id) for view_id in views]
+            cache = [caches[0][0], caches[0][1], [caches[i][2][0] for i in range(len(views))]]
+           
+            if data_utils.get_rank() == 0:
+                np.savez(npzfile, cache=cache)
+            return cache
+
 class SampledPixelDataset(BaseWrapperDataset):
     """
     A wrapper dataset, which split rendered images into pixels
@@ -427,7 +444,7 @@ class SampledPixelDataset(BaseWrapperDataset):
                     else data.get('alpha', None),
                 self.sampling_on_mask,
                 self.sampling_on_bbox,
-                width=data['width'],
+                width=int(data['size'][1]),
                 patch_size=self.patch_size)
             for data in data_per_view
         ]
@@ -437,7 +454,6 @@ class SampledPixelDataset(BaseWrapperDataset):
             for key in data:
                 if data[key] is not None \
                     and (key != 'extrinsics' and key != 'view' and key != 'full_rgb') \
-                    and (key != 'height') and (key != 'width') \
                     and data[key].shape[-1] > self.num_sample:
 
                     if len(data[key].shape) == 2:

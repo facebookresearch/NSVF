@@ -272,8 +272,9 @@ def get_shapenet_seq128_grid(args):
         # hyperparam('--quantized-pos-embed', binary_flag=True, save_dir_key=lambda val: f'qpos'),
         # hyperparam('--quantized-xyz-embed', binary_flag=True, save_dir_key=lambda val: f'qxyz'),
         # hyperparam('--quantized-context-proj', binary_flag=True, save_dir_key=lambda val: f'cp'),
-        hyperparam('--use-hypernetwork', binary_flag=True, save_dir_key=lambda val: f'hyper'),
-        # hyperparam('--post-context', binary_flag=True, save_dir_key=lambda val: f'hpc'),
+        # hyperparam('--use-hypernetwork', binary_flag=True, save_dir_key=lambda val: f'hyper'),
+        # hyperparam('--normalize-context', binary_flag=True, save_dir_key=lambda val: f'nc')
+        hyperparam('--post-context', binary_flag=True, save_dir_key=lambda val: f'hpc'),
         hyperparam('--quantized-voxel-path', voxel_name),
         hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--context', 'id', save_dir_key=lambda val: f'{val}'),
@@ -321,7 +322,7 @@ def get_shapenet_seq128_grid(args):
         # hyperparam('--pixel-per-view', 2048, save_dir_key=lambda val: f'p16384'),
         hyperparam('--sampling-on-mask', 0.9, save_dir_key=lambda val: f'smk{val}'),
         hyperparam('--sampling-on-bbox', binary_flag=True),
-        # hyperparam('--sampling-patch-size', 4, save_dir_key=lambda val: f'patch{val}'),
+        hyperparam('--sampling-patch-size', 4, save_dir_key=lambda val: f'patch{val}'),
         hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', False, binary_flag=True),        
         
@@ -329,8 +330,8 @@ def get_shapenet_seq128_grid(args):
         hyperparam('--alpha-weight', 1.0, save_dir_key=lambda val: f'alpha{val}'),
         # hyperparam('--entropy-weight', [10.0], save_dir_key=lambda val: f'ent{val}'),
         hyperparam('--reg-weight', 1.0, save_dir_key=lambda val: f'latent{val}'),
-        hyperparam('--vgg-weight', 0.0, save_dir_key=lambda val: f'vgg{val}'),
-        # hyperparam('--vgg-level', 3, save_dir_key=lambda val: f'l{val}'),
+        hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
+        hyperparam('--vgg-level', 3, save_dir_key=lambda val: f'l{val}'),
 
         hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
         hyperparam('--adam-betas', '(0.9, 0.999)'),

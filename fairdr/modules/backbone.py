@@ -19,7 +19,7 @@ from fairdr.modules.pointnet2.pointnet2_modules import (
 from fairdr.data.data_utils import load_matrix, unique_points
 from fairdr.data.geometry import trilinear_interp
 from fairdr.modules.pointnet2.pointnet2_utils import furthest_point_sample
-from fairdr.modules.linear import FCLayer, Linear, Embedding
+from fairdr.modules.linear import FCBlock, Linear, Embedding
 from fairdr.modules.hyper import HyperFC
 from fairdr.modules.implicit import SignedDistanceField as SDF
 from fairdr.modules.me import unet
@@ -191,14 +191,19 @@ class DynamicEmbeddingBackbone(Backbone):
         self.use_context_proj = getattr(args, "quantized_context_proj", False)
         self.use_hypernetwork = getattr(args, "use_hypernetwork", False)
         self.post_context = getattr(args, "post_context", False)
-        
+        self.normalize_context = getattr(args, "normalize_context", False)
+
         if self.use_context is not None:
             if self.use_context == 'id':
                 assert self.args.total_num_context > 0, "index embeddings for different frames"
                 self.context_embed = Embedding(self.args.total_num_context, self.embed_dim, None)
 
-            if self.use_context_proj:
+            if self.normalize_context:
+                self.context_proj = FCBlock(self.embed_dim, 1, self.embed_dim, self.embed_dim)
+            elif self.use_context_proj:
                 self.context_proj = Linear(self.embed_dim, self.embed_dim)
+            else:
+                self.context_proj = None
 
         if self.use_pos_embed:
             assert self.embed_dim is not None and self.embed_dim % 3 == 0, "size mismatch!"
@@ -254,6 +259,7 @@ class DynamicEmbeddingBackbone(Backbone):
         parser.add_argument('--quantized-context-proj', action='store_true')
         parser.add_argument('--use-hypernetwork', action='store_true')
         parser.add_argument('--post-context', action='store_true', help='redo contexturalization every time voxels splitted')
+        parser.add_argument('--normalize-context', action='store_true', help='normalize the embedding vectors onto the sphere')
 
     def contexturalization(self, context, values, keys=None):
         if self.use_hypernetwork:
@@ -264,8 +270,11 @@ class DynamicEmbeddingBackbone(Backbone):
         if values_proj is not None:
             values = values_proj(values)
 
-        if (context is not None) and self.use_context_proj:
-            context = self.context_proj(context)
+        if context is not None:
+            if self.normalize_context:
+                context = context * torch.rsqrt(1e-8 + torch.mean(context ** 2, dim=-1, keepdim=True))
+            if self.context_proj is not None:
+                context = self.context_proj(context)
         
         return values, context
 

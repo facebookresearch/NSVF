@@ -132,7 +132,8 @@ class SRNModel(BaseModel):
         if output is None:
             assert self.cache is not None, "need to run forward-pass"
             output = self.cache  # make sure to run forward-pass.
-        
+
+        width = int(sample['size'][shape, view][1].item())
         img_id = '{}_{}'.format(sample['shape'][shape], sample['view'][shape, view])
         images = {
             'rgb/{}:HWC'.format(img_id):
@@ -140,7 +141,9 @@ class SRNModel(BaseModel):
         }
         if depth_map:
             images['depth/{}:HWC'.format(img_id)] = {
-                'img': output['depths'][shape, view], 'min_val': 2.0, 'max_val': 5.0}
+                'img': output['depths'][shape, view], 
+                'min_val': output['depths'].min(), 
+                'max_val': output['depths'].max()}
         
         if hit_map and 'hits' in output:
             images['hit/{}:HWC'.format(img_id)] = {
@@ -165,7 +168,7 @@ class SRNModel(BaseModel):
                 sample['ray_dir'][shape, view].float(),
                 output['depths'][shape, view].float(),
                 sample['extrinsics'][shape, view].float().inverse(),
-                sample['width'][shape, view])
+                width)
             images['normal/{}:HWC'.format(img_id)] = {
                 'img': normals, 'min_val': -1, 'max_val': 1}
 
@@ -177,7 +180,7 @@ class SRNModel(BaseModel):
                 'img': errors, 'min_val': errors.min(), 'max_val': errors.max()}
         
         images = {
-            tag: recover_image(width=sample['width'][shape, view], **images[tag]) 
+            tag: recover_image(width=width, **images[tag]) 
                 for tag in images if images[tag] is not None
         }
         return images
