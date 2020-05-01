@@ -16,10 +16,10 @@ python render.py ${DATASET} \
     --render-angular-speed 0 \
     --render-save-fps 24 \
     --render-num-frames 1 \
-    --render-resolution 512 \
+    --render-resolution 512 512 \
     --render-path-args "{'radius': 3.0, 'h': 0.5, 'axis': 'z', 't0': -2, 'r':-1}" \
     --render-output /private/home/jgu/data/test_images/output4 \
-    --render-output-types "target" "rgb" "hit"\
+    --render-output-types "target" "rgb" "hit" "normal" "depth" \
     --render-combine-output
     # "hit" "normal" "depth"
     

@@ -195,8 +195,8 @@ class ShapeViewDataset(ShapeDataset):
         self.load_mask = load_mask
         self.views = views
         self.num_view = num_view
-        self.resolution = resolution if isinstance(resolution, list) \
-            else [resolution, resolution] 
+        self.resolution = [int(r) for r in resolution.split('x')]
+
         self.world2camera = True
         self.cache_view = None
         self.bg_color = bg_color  # only useful if image is transparent

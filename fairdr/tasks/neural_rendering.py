@@ -62,7 +62,7 @@ class SingleObjRenderingTask(FairseqTask):
                             help="sampling points to close to the mask")
         parser.add_argument("--sampling-patch-size", type=int, default=1, 
                             help="sample pixels based on patches instead of independent pixels")
-        parser.add_argument("--view-resolution", type=int, default=64,
+        parser.add_argument("--view-resolution", type=str, default='64x64',
                             help="width for the squared image. downsampled from the original.")       
         parser.add_argument("--min-color", choices=(0, -1), default=-1, type=int,
                             help="RGB range used in the model. conventionally used -1 ~ 1")
@@ -121,7 +121,7 @@ class SingleObjRenderingTask(FairseqTask):
         if self.rendering_every_steps is not None:
             gen_args = {
                 'path': args.save_dir,
-                'render_beam': 1, 'render_resolution': 512,
+                'render_beam': 1, 'render_resolution': '512x512',
                 'render_num_frames': 120, 'render_angular_speed': 3,
                 'render_output_types': ["rgb"], 'render_raymarching_steps': 10,
                 'render_at_vector': "(0,0,0)", 'render_up_vector': "(0,0,-1)",

@@ -154,6 +154,7 @@ class GEONERFModel(SRNModel):
 
         hits, _ray_start, _ray_dir, state, samples = \
             self.raymarcher.ray_intersection(ray_start, ray_dir, xyz, feats)
+        steps_passed = samples[2].sum(-1) / self.field.MARCH_SIZE
 
         # fine-grained raymarching + rendering
         if hits.sum() > 0:   # missed everything
@@ -187,7 +188,10 @@ class GEONERFModel(SRNModel):
             'latent': latent_loss,
             'other_logs': {
                 'voxel_log': self.field.VOXEL_SIZE.item(),
-                'marchstep_log': self.raymarcher.MARCH_SIZE.item()}
+                'marchstep_log': self.raymarcher.MARCH_SIZE.item(),
+                'mps_log': steps_passed.max().item(),
+                'aps_log': steps_passed.mean().item(),
+                }
         }
 
     @torch.no_grad()

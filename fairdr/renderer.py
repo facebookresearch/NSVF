@@ -41,8 +41,8 @@ class NeuralRenderer(object):
         self.speed = speed
         self.raymarching_steps = raymarching_steps
         self.path_gen = path_gen
-        self.resolution = resolution if isinstance(resolution, list) \
-            else [resolution, resolution] 
+        self.resolution = [int(r) for r in resolution.split('x')]
+        
         self.beam = beam
         self.output_dir = output_dir
         self.output_type = output_type

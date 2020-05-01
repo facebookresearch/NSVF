@@ -17,7 +17,7 @@ python fb_sweep/sweep_birds.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_v2 \
+    --prefix ${DATA}_v3 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

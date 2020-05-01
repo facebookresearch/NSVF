@@ -21,7 +21,7 @@ def register_grid(name):
 @register_grid("geo_birds")
 def get_birds_grid(args):
     gen_args = {
-        'render_resolution': 800,
+        'render_resolution': '600x800',
         'render_output_types': ["hit", "rgb", "depth", "normal"],
         'render_up_vector': "(0,0,1)",
         'render_path_args': "{'radius': 3.0, 'h': -1.5, 'axis': 'z', 't0': -2, 'r':-1}",
@@ -35,7 +35,7 @@ def get_birds_grid(args):
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
         
         # task level
-        hyperparam('--view-resolution', 800, save_dir_key=lambda val: f'{val}x{val}'),
+        hyperparam('--view-resolution', '600x800', save_dir_key=lambda val: f'{val}'),
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 2, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 1),
@@ -52,8 +52,8 @@ def get_birds_grid(args):
         
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
         hyperparam('--hidden-sdf', 128, save_dir_key=lambda val: f'sdfh{val}'),
-        # hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
-        # hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
+        hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
+        hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
         # hyperparam('--raypos-features', 0, save_dir_key=lambda val: f'pos{val}'),
         # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
         # hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
@@ -65,8 +65,8 @@ def get_birds_grid(args):
         # dynamic pruning
         hyperparam('--pruning-every-steps', 2500, save_dir_key=lambda val: f'prune{val}'),
         hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
-        hyperparam('--half-voxel-size-at', "5000,25000,70000", save_dir_key=lambda val: f'dyvox'),
-        hyperparam('--reduce-step-size-at', "5000,25000,70000"),
+        hyperparam('--half-voxel-size-at', "5000,25000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--reduce-step-size-at', "5000,25000"),
 
         # evaluation with rendering
         hyperparam('--rendering-every-steps', 1000),
@@ -116,6 +116,18 @@ def get_birds_grid(args):
     return hyperparams
 
 
+@register_grid("geo_birds_reload")
+def get_birdsreload_grid(args):
+    hyperparams = get_birds_grid(args)
+    hyperparams += [
+        hyperparam('--restore-file', 
+                    "/checkpoint/jgu/space/neuralrendering/debug_new_birds/scan106_v2.fp16.single.800x800.s1.v2.geo_nerf.emb384.ss0.0125.v0.1.posemb.sdfh128.raydir.r24.bg1.0.bgsg.dis.prune2500.th0.5.dyvox.m.p16384.chk512.rgb128.0.alpha1.0.vgg1.0.l3.adam.lr_poly.max100000.lr0.001.clip0.0.wd0.0.seed20.ngpu8/checkpoint1.pt"),
+        hyperparam('--half-voxel-size-at', "70000", save_dir_key=lambda val: f'halftest1'),
+        hyperparam('--reduce-step-size-at', "5000,70000"),
+    ]
+    return hyperparams
+
+
 @register_grid("geo_birds2")
 def get_birds2_grid(args):
     gen_args = {
@@ -133,7 +145,7 @@ def get_birds2_grid(args):
         hyperparam('--task', "sequence_object_rendering", save_dir_key=lambda val: "seq"),
         
         # task level
-        hyperparam('--view-resolution', 800, save_dir_key=lambda val: f'{val}x{val}'),
+        hyperparam('--view-resolution', '600 800', save_dir_key=lambda val: f'{val}x{val}'),
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 2, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 1),
