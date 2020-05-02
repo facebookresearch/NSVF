@@ -130,7 +130,8 @@ class GEONERFModel(SRNModel):
         # adjust sizes
         R, V, M = self.args.raymarching_stepsize, self.args.voxel_size, self.args.max_hits
         for g in (self.field, self.raymarcher):
-            getattr(g, 'VOXEL_SIZE').copy_(torch.scalar_tensor(V * (.5 ** level)))
+            if not self.field.fixed_voxel_size:
+                getattr(g, 'VOXEL_SIZE').copy_(torch.scalar_tensor(V * (.5 ** level)))
             getattr(g, 'MARCH_SIZE').copy_(torch.scalar_tensor(R * (.5 ** level)))
             getattr(g, 'MAX_HITS').copy_(torch.scalar_tensor(M * (1.5 ** level)))
         return level
@@ -253,8 +254,11 @@ class GEORadianceField(Field):
             torch.tensor((1.0, 1.0, 1.0)) * getattr(args, "transparent_background", -0.8), 
             requires_grad=(not getattr(args, "background_stop_gradient", False)))
 
-        # arguments
+        # backbone arguments
         self.post_context = getattr(self.backbone, 'post_context', False)
+        self.fixed_voxel_size = getattr(self.backbone, 'fixed_voxel_size', False)
+
+        # additional arguments
         self.freeze_networks = getattr(args, "freeze_networks", False)
         self.reset_context_embed = getattr(args, "reset_context_embed", False)
         self.chunk_size = 256 * getattr(args, "chunk_size", 256)
@@ -416,7 +420,7 @@ class GEORadianceField(Field):
 
         D = feats.size(-1)
         G = int(voxel_size / march_size)  # how many microgrids to steps
-
+        
         # prepare queries for all the voxels
         c = torch.arange(1, 2 * G, 2, device=xyz.device)
         ox, oy, oz = torch.meshgrid([c, c, c])
@@ -443,14 +447,14 @@ class GEORadianceField(Field):
         sigma_dist = torch.relu(sigma) * march_size
         sigma_dist = sigma_dist.reshape(-1, G ** 3)
 
-        alpha = 1 - torch.exp(-sigma_dist.sum(-1))   # probability of filling the full voxel
-        keep = (alpha > th)
-
+        score = sigma_dist.sum(-1)
         if update:
+            alpha = 1 - torch.exp(-score)   # probability of filling the full voxel
+            keep = (alpha > th)
             logger.info("pruning done. before: {}, after: {} voxels".format(xyz.size(0), keep.sum()))
             self.backbone.pruning(keep=keep)
         
-        return alpha.reshape(id.size(0), -1)
+        return score.reshape(id.size(0), -1)
 
     def splitting(self):
         self.backbone.splitting(self.VOXEL_SIZE * .5)
@@ -660,6 +664,7 @@ def geo_base_architecture(args):
     args.use_hypernetwork = getattr(args, "use_hypernetwork", False)
     args.post_context = getattr(args, "post_context", False)
     args.normalize_context = getattr(args, "normalize_context", False)
+    args.fixed_voxel_size = getattr(args, "fixed_voxel_size", False)
     plain_architecture(args)
 
 @register_model_architecture("geo_nerf", "geo_nerf_transformer")
