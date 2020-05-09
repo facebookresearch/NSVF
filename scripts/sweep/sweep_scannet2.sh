@@ -1,25 +1,25 @@
-ROOT=/private/home/jgu/data/shapenet/differentiable_volumetric_rendering/data/DTU/scan106/
-DATA=scan106
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_birds
+ROOT=/private/home/jgu/data/3d_ssl2/ScannetScan/data_render1/
+DATA=scannet0024_00_rgbd
+WORK=/checkpoint/jgu/space/neuralrendering/debug_scannet0
 mkdir -p ${WORK}
 
-GRID=geo_birds3
+GRID=geo_scannet01
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-python fb_sweep/sweep_birds.py \
+python fb_sweep/sweep_scannet.py \
     --data ${ROOT}/${DATA}/  \
     --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
-    --tensorboard-logdir ${WORK}/tensorboard/ \
+    --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_bg2 \
+    --prefix ${DATA}_dw2 \
     --num-trials -1 \
-    --num-gpus 8 \
+    --num-gpus 1 \
     --num-nodes 1 \
     --mem 500gb \
     --constraint volta32gb \
@@ -31,7 +31,7 @@ python fb_sweep/sweep_birds.py \
    
 # popd
 
-# python fb_sweep/sweep_birds.py \
+# python fb_sweep/sweep_scannet.py \
 #     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \
 #     --user-dir "fairdr" \

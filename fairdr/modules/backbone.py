@@ -97,8 +97,7 @@ def splitting_points(point_xyz, point_feats, offset, half_voxel):
 
 def expand_points(voxel_points, voxel_size):
     _voxel_size = torch.sqrt(((voxel_points[0:1] - voxel_points[1:]) ** 2).sum(-1).min())
-    depth = torch.log2(_voxel_size / voxel_size)
-    depth = int(depth.ceil())
+    depth = int(np.round(torch.log2(_voxel_size / voxel_size)))
     if depth > 0:
         half_voxel = _voxel_size / 2.0
         for _ in range(depth):
@@ -182,7 +181,7 @@ class DynamicEmbeddingBackbone(Backbone):
         init_length = init_points.size(0)
         fine_points, fine_depth = expand_points(init_points, self.voxel_size)
         fine_length = fine_points.size(0)
-
+        
         # working in LONG space
         fine_coords = (fine_points / self.half_voxel).floor_().long()
         offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
@@ -257,7 +256,7 @@ class DynamicEmbeddingBackbone(Backbone):
                         hyper_num_hidden_layers=1,
                         hyper_hidden_ch=self.embed_dim,
                         hidden_ch=self.embed_dim,
-                        num_hidden_layers=1,
+                        num_hidden_layers=2,
                         in_ch=3, out_ch=self.embed_dim,
                         outermost_linear=True)
             else:
@@ -335,7 +334,7 @@ class DynamicEmbeddingBackbone(Backbone):
             return values
 
         for t in range(step + 1):
-            if not self.fixed_voxel_size:
+            if (t == 0) or (not self.fixed_voxel_size):
                 feats = feats + values.size(1) * torch.arange(values.size(0), 
                     device=feats.device, dtype=feats.dtype)[:, None, None]
             out_values = combine(values, context)
@@ -351,10 +350,8 @@ class DynamicEmbeddingBackbone(Backbone):
                         features=(feats, points, out_values),
                         sizes=(voxel_size, march_size)).detach()
                     
-                # from fairseq import pdb; pdb.set_trace()
                 feats, points = pruning_points(feats, points, scores, self.fine_depth - t)
                 march_size = march_size * .5
-                # from fairseq import pdb; pdb.set_trace()
 
                 if not self.fixed_voxel_size:
                     corner_features = self.get_features(

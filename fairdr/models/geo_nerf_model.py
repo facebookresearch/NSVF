@@ -93,7 +93,8 @@ class GEONERFModel(SRNModel):
                             help='if set, use a different network to predict specular (must provide raydir)')
         parser.add_argument('--specular-dropout', type=float, metavar='D',
                             help='if large than 0, randomly drop specular during training')
-        
+        parser.add_argument('--background-network', action='store_true')
+
         # ray-marching parameters
         parser.add_argument('--max-hits', type=int, metavar='N',
                             help='due to restrictions we set a maximum number of hits')
@@ -144,10 +145,16 @@ class GEONERFModel(SRNModel):
         # latent regularization
         latent_loss = torch.mean(codes ** 2) if codes is not None else 0
 
+        # background color
+        if not self.field.background_network:
+            bg_color = self.field.bg_color # * 0.0 - 0.8
+        else:
+            far_point = ray_start + ray_dir * 8.0
+            bg_color = self.field.bg_color(far_point)  # use far-point as background.
+
         # coarse ray-intersection
-        bg_color = self.field.bg_color # * 0.0 - 0.8
         S, V, P, _ = ray_dir.size()
-        predicts = bg_color.unsqueeze(0).expand(S * V * P, 3)
+        predicts = ray_dir.new_zeros(S * V * P, 3)
         depths = predicts.new_ones(S * V * P) * BG_DEPTH
         missed = predicts.new_ones(S * V * P)
         first_hits = predicts.new_ones(S * V * P).long().fill_(500)
@@ -155,16 +162,17 @@ class GEONERFModel(SRNModel):
 
         hits, _ray_start, _ray_dir, state, samples = \
             self.raymarcher.ray_intersection(ray_start, ray_dir, xyz, feats)
+        
         steps_passed = samples[2].sum(-1) / self.field.MARCH_SIZE
-
+        
         # fine-grained raymarching + rendering
         if hits.sum() > 0:   # missed everything
             hits = hits.view(S * V * P).contiguous()
             _predicts, _depths, _missed, entropy = self.raymarcher(
                 self.field, _ray_start, _ray_dir, samples, state, values)
-            _predicts = _predicts + bg_color * _missed.unsqueeze(-1)  # fill background color
+            # _predicts = _predicts + bg_color * _missed.unsqueeze(-1)  # fill background color
             _depths = _depths + BG_DEPTH * _missed
-
+            
             predicts = predicts.masked_scatter(
                 hits.unsqueeze(-1).expand(S * V * P, 3),
                 _predicts)
@@ -177,6 +185,9 @@ class GEONERFModel(SRNModel):
             first_hits = first_hits.masked_scatter(
                 hits, ((samples[1][:, 0].long() * 100 % 499) * 100 ) % 499
             )
+
+        # add the background color
+        predicts = predicts + missed.unsqueeze(-1) * bg_color.reshape(-1, 3)
 
         # model's output
         return {
@@ -248,17 +259,13 @@ class GEORadianceField(Field):
             self.backbone = BACKBONE_REGISTRY[args.backbone](args)
         except Exception:
             raise NotImplementedError("Backbone is not implemented!!!")
-        
-        # background color
-        self.bg_color = nn.Parameter(
-            torch.tensor((1.0, 1.0, 1.0)) * getattr(args, "transparent_background", -0.8), 
-            requires_grad=(not getattr(args, "background_stop_gradient", False)))
 
         # backbone arguments
         self.post_context = getattr(self.backbone, 'post_context', False)
         self.fixed_voxel_size = getattr(self.backbone, 'fixed_voxel_size', False)
 
         # additional arguments
+        self.background_network = getattr(args, "background_network", False)
         self.freeze_networks = getattr(args, "freeze_networks", False)
         self.reset_context_embed = getattr(args, "reset_context_embed", False)
         self.chunk_size = 256 * getattr(args, "chunk_size", 256)
@@ -271,6 +278,15 @@ class GEORadianceField(Field):
         if self.condition_on_marchsize:
             self.cond_emb = Embedding(10, self.backbone.feature_dim)
 
+        # background color 
+        if not self.background_network:
+            self.bg_color = nn.Parameter(
+                torch.tensor((1.0, 1.0, 1.0)) * getattr(args, "transparent_background", -0.8), 
+                requires_grad=(not getattr(args, "background_stop_gradient", False)))
+        else:
+            self.bg_color = TextureField(
+                args, 3, args.hidden_textures, 4)
+            
         # build layers
         if not self.post_context:
             self.feature_field = ImplicitField(
@@ -293,6 +309,7 @@ class GEORadianceField(Field):
                 args,
                 args.output_features,
                 args.hidden_sdf, recurrent=False)
+                
         self.renderer = TextureField(
                 args,
                 args.output_features + self.raydir_features,
@@ -562,6 +579,8 @@ class GEORaymarcher(Raymarcher):
         dists = self.MARCH_SIZE if self.deterministic_step \
             else sampled_dists        
         sigma_dist = torch.relu(noise + sigma) * dists
+        # sigma_dist = (F.elu(sigma - 3, alpha=1) + 1) * dists
+        
         sigma_dist = torch.zeros_like(sampled_depth).masked_scatter(sample_mask, sigma_dist)
         texture = sigma_dist.new_zeros(*sigma_dist.size(), 3).masked_scatter(
             sample_mask.unsqueeze(-1).expand(*sample_mask.size(), 3), texture)
@@ -609,19 +628,22 @@ class GEORaymarcher(Raymarcher):
 
         # aggregate along the ray
         shifted_sigma_dist = torch.cat([sigma_dist.new_zeros(sampled_depth.size(0), 1), sigma_dist[:, :-1]], dim=-1)  # shift one step
-        a = 1 - torch.exp(-sigma_dist.float())
-        b = torch.exp(-torch.cumsum(shifted_sigma_dist.float(), dim=-1))
-        probs = (a * b).type_as(sigma_dist)
+        a = 1 - torch.exp(-sigma_dist.float())                             # probability of it is not empty here
+        b = torch.exp(-torch.cumsum(shifted_sigma_dist.float(), dim=-1))   # probability of everything is empty up to now
+        probs = (a * b).type_as(sigma_dist)                                # probability of the ray hits something here
+        ext_p = torch.cat([probs, 1 - probs.sum(-1, keepdim=True).clamp(max=1)], 1)
+
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
         rgb = (texture * probs.unsqueeze(-1)).sum(-2)
         
-        # entropy regularization
-        def ee(s):
-            s = 10 - F.relu(10 - s)  # safe margin
-            return (torch.exp(-s) * s).mean()
+        # print(sigma_dist/self.MARCH_SIZE)
+        # from fairseq import pdb; pdb.set_trace()
+        def get_entropy(probs):
+            entropy = -(torch.log(probs.float().clamp(min=1e-7)) * probs.float()).sum(-1).type_as(probs)
+            return entropy
 
-        return rgb, depth, missed, ee(sigma_dist.float()).type_as(sigma_dist)
+        return rgb, depth, missed, get_entropy(ext_p).mean()
 
 
 def plain_architecture(args):
@@ -634,6 +656,7 @@ def plain_architecture(args):
     args.specular_dropout = getattr(args, "specular_dropout", 0.0)
     args.voxel_size = getattr(args, "voxel_size", 0.25)
     args.condition_on_marchsize = getattr(args, "condition_on_marchsize", False)
+    args.background_network = getattr(args, "background_network", False)
 
     # raymarcher
     args.max_hits = getattr(args, "max_hits", 32)

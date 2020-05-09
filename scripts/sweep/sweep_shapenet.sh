@@ -3,7 +3,7 @@ DATA=srn_data
 WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv2
 mkdir -p ${WORK}
 
-GRID=geo_shapenet_seq128
+GRID=geo_shapenet_seq1282
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -17,7 +17,7 @@ python fb_sweep/sweep_shapenet.py \
     --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_pos \
+    --prefix ${DATA}_before2 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -29,7 +29,7 @@ python fb_sweep/sweep_shapenet.py \
     --resume-failed \
     --local \
    
-# popd
+# popd 
 
 # python fb_sweep/sweep_shapenet.py \
 #     --data ${ROOT}/${DATA}/training_set  \
@@ -39,7 +39,7 @@ python fb_sweep/sweep_shapenet.py \
 #     --no-tensorboard \
 #     --snapshot-code \
 #     --snapshot-root ${WORK}/snapshot \
-#     --prefix ${DATA}v2 \
+#     --prefix ${DATA}v10 \
 #     --num-trials 1 \
 #     --num-gpus 1 \
 #     --num-nodes 1 \

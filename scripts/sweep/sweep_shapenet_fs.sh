@@ -1,9 +1,9 @@
 ROOT=/private/home/jgu/data/
 DATA=srn_data
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairs
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv2
 mkdir -p ${WORK}
 
-GRID=geo_shapenet_seq128_fewshot2
+GRID=geo_shapenet_seq1282_fewshot
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -17,7 +17,7 @@ python fb_sweep/sweep_shapenet.py \
     --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_test2 \
+    --prefix ${DATA}_v5test \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

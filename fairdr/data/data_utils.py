@@ -58,9 +58,9 @@ def load_rgb(
     img = skimage.img_as_float32(img).astype('float32')
     H, W, D = img.shape
     h, w = resolution
-
+    
     if D == 3:
-        img = np.concatenate([img, np.ones((img.shape[0], img.shape[1], 1))], -1)
+        img = np.concatenate([img, np.ones((img.shape[0], img.shape[1], 1))], -1).astype('float32')
     
     uv, ratio = get_uv(H, W, h, w)
     if (h < H) or (w < W):
@@ -82,10 +82,11 @@ def load_depth(path, resolution=None, depth_plane=5):
     
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float32)
     ret, img = cv2.threshold(img, depth_plane, depth_plane, cv2.THRESH_TRUNC)
-    if resolution is not None:
-        h, w = img.shape[:2]
-        w, h = resolution, int(h/float(w)*resolution)
-        img  = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST)
+    
+    H, W = img.shape[:2]
+    h, w = resolution
+    if (h < H) or (w < W):
+        img  = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST).astype('float32')
         #img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
     #img *= 1e-4
     if len(img.shape) ==3:
@@ -193,9 +194,11 @@ def sample_pixel_from_image(
             and (num_sample % (patch_size * patch_size) == 0), "size must match"
         _num_pixel = num_pixel // (patch_size * patch_size)
         _num_sample = num_sample // (patch_size * patch_size)
+        height = num_pixel // width
+
         _mask = None if mask is None else \
-            mask.reshape(-1, width).reshape(
-                width//patch_size, patch_size, width//patch_size, patch_size
+            mask.reshape(height, width).reshape(
+                height//patch_size, patch_size, width//patch_size, patch_size
             ).any(1).any(-1).reshape(-1)
         _width = width // patch_size
         _out = sample_pixel_from_image(_num_pixel, _num_sample, _mask, ratio, use_bbox, _width)

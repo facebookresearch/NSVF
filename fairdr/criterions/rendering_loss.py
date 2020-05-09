@@ -179,7 +179,9 @@ class SRNLossCriterion(RenderingCriterion):
 
         if self.args.depth_weight > 0:
             if sample['depths'] is not None:
-                depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], masks)
+                depth_mask = masks & (sample['depths'] > 0)
+                depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], depth_mask)
+                
             else:
                 # no depth map is provided. depth loss only applied on background.
                 max_depth_target = self.args.max_depth * torch.ones_like(net_output['depths'])

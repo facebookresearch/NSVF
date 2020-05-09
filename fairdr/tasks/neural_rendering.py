@@ -136,13 +136,16 @@ class SingleObjRenderingTask(FairseqTask):
         def parse_views(view_args):
             output = []
             try:
-                ids = view_args.split(',')
+                xx = view_args.split(':')
+                ids = xx[0].split(',')
                 for id in ids:
                     if '..' in id:
                         a, b = id.split('..')
                         output += list(range(int(a), int(b)))
                     else:
                         output += [int(id)]
+                if len(xx) > 1:
+                    output = output[::int(xx[-1])]
             except Exception as e:
                 raise Exception("parse view args error: {}".format(e))
 
@@ -329,7 +332,6 @@ class SingleObjRenderingTask(FairseqTask):
         return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
 
     def valid_step(self, sample, model, criterion):
-        # model.pruning(points=sample['points'])
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
         
         # compute PSNR & SSMI for validation

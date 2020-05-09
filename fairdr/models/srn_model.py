@@ -139,11 +139,13 @@ class SRNModel(BaseModel):
             'rgb/{}:HWC'.format(img_id):
                 {'img': output['predicts'][shape, view]},
         }
+        min_depth, max_depth = output['depths'].min(), output['depths'].max()
+
         if depth_map:
             images['depth/{}:HWC'.format(img_id)] = {
                 'img': output['depths'][shape, view], 
-                'min_val': output['depths'].min(), 
-                'max_val': output['depths'].max()}
+                'min_val': min_depth, 
+                'max_val': max_depth}
         
         if hit_map and 'hits' in output:
             images['hit/{}:HWC'.format(img_id)] = {
@@ -158,7 +160,9 @@ class SRNModel(BaseModel):
                     {'img': sample['rgb'][shape, view]}
                     if sample.get('rgb', None) is not None else None,
                 'target_depth/{}:HWC'.format(img_id):
-                    {'img': sample['depths'][shape, view], 'min_val': 0.5, 'max_val': 5}
+                    {'img': sample['depths'][shape, view], 
+                     'min_val': min_depth, 
+                     'max_val': max_depth}
                     if sample.get('depths', None) is not None else None,
             })
 
@@ -171,6 +175,17 @@ class SRNModel(BaseModel):
                 width)
             images['normal/{}:HWC'.format(img_id)] = {
                 'img': normals, 'min_val': -1, 'max_val': 1}
+            
+            if sample.get('depths', None) is not None:
+                target_normals = compute_normal_map(
+                    sample['ray_start'][shape, view].float(),
+                    sample['ray_dir'][shape, view].float(),
+                    sample['depths'][shape, view].float(),
+                    sample['extrinsics'][shape, view].float().inverse(),
+                    width)
+                images['target_normal/{}:HWC'.format(img_id)] = {
+                    'img': target_normals, 'min_val': -1, 'max_val': 1}
+
 
         if error_map:
             errors = F.mse_loss(

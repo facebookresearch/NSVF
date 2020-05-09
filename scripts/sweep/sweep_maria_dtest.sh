@@ -1,6 +1,6 @@
 ROOT=/private/home/jgu/data/shapenet/maria
 DATA=0000
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_hotdog
+WORK=/checkpoint/jgu/space/neuralrendering/debug_scannet0
 mkdir -p ${WORK}
 
 GRID=geo_maria
@@ -36,10 +36,10 @@ python fb_sweep/sweep_maria.py \
     --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
-    --no-tensorboard \
+    --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_Trans4 \
+    --prefix ${DATA}_test0 \
     --num-trials 1 \
     --num-gpus 1 \
     --num-nodes 1 \

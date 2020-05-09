@@ -126,18 +126,20 @@ def get_maria_grid(args):
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
         
         # task level
-        hyperparam('--view-resolution', "512x512", save_dir_key=lambda val: f'{val}x{val}'),
-        hyperparam('--max-sentences', 2, save_dir_key=lambda val: f's{val}'),
+        hyperparam('--view-resolution', "512x512", save_dir_key=lambda val: f'{val}'),
+        hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 1),
-        hyperparam('--max-train-view', 50),
+        hyperparam('--train-views', "38"),
+        hyperparam('--valid-views', "38"),
         
         # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
-        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/maria/initial_voxel.txt"),
+        # hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/maria/initial_voxel.txt"),
+        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/maria/initial_voxel1.0.txt"),
         hyperparam('--quantized-embed-dim', 378, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--raymarching-stepsize', 0.025, save_dir_key=lambda val: f'ss{val}'),
-        hyperparam('--voxel-size', 0.2, save_dir_key=lambda val: f'v{val}'),
+        hyperparam('--voxel-size', 1.0, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 48),
         
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
@@ -159,11 +161,12 @@ def get_maria_grid(args):
         # hyperparam('--reduce-step-size-at', "5000,50000"),
 
         # evaluation with rendering
-        hyperparam('--rendering-every-steps', 1000),
-        hyperparam('--rendering-args', gen_args),
+        # hyperparam('--rendering-every-steps', 1000),
+        # hyperparam('--rendering-args', gen_args),
 
         # dataset arguments
-        hyperparam('--no-load-binary', binary_flag=True),
+        hyperparam('--no-preload', binary_flag=True),
+        hyperparam('--load-depth', binary_flag=True, save_dir_key=lambda val: 'd'),
         #hyperparam('--load-point', binary_flag=True, save_dir_key=lambda val: 'p'),
 
         # training arguments
@@ -173,10 +176,11 @@ def get_maria_grid(args):
         hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', False, binary_flag=True),        
         
-        hyperparam('--rgb-weight', 200.0, save_dir_key=lambda val: f'rgb{val}'),
+        hyperparam('--rgb-weight', 0.0, save_dir_key=lambda val: f'rgb{val}'),
+        hyperparam('--depth-weight', 1.0, save_dir_key=lambda val: f'depth{val}'),
         hyperparam('--entropy-weight', 0.0, save_dir_key=lambda val: f'ent{val}'),
         hyperparam('--reg-weight', 0.0),
-        hyperparam('--vgg-weight', 1.0, save_dir_key=lambda val: f'vgg{val}'),
+        hyperparam('--vgg-weight', 0.0, save_dir_key=lambda val: f'vgg{val}'),
 
         hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
         hyperparam('--adam-betas', '(0.9, 0.999)'),
@@ -192,7 +196,7 @@ def get_maria_grid(args):
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [20], save_dir_key=lambda val: f'seed{val}'),
         hyperparam('--save-interval-updates', 200),
-        hyperparam('--max-update', 100000),
+        hyperparam('--max-update', 10000),
         hyperparam('--virtual-epoch-steps', 5000),
         hyperparam('--save-interval', 1),
         # hyperparam('--no-epoch-checkpoints'),

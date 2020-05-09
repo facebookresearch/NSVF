@@ -195,13 +195,18 @@ class ShapeViewDataset(ShapeDataset):
         self.load_mask = load_mask
         self.views = views
         self.num_view = num_view
-        self.resolution = [int(r) for r in resolution.split('x')]
+
+        if isinstance(resolution, str):
+            self.resolution = [int(r) for r in resolution.split('x')]
+        else:
+            self.resolution = [resolution, resolution]
 
         self.world2camera = True
         self.cache_view = None
         self.bg_color = bg_color  # only useful if image is transparent
         self.min_color = min_color
-        
+        self.apply_mask_color = (bg_color >= -1) & (bg_color <= 1)  # if need to apply
+
         # -- load per-view data
         _data_per_view = {}
         _data_per_view['rgb'] = self.find_rgb()  
@@ -235,6 +240,7 @@ class ShapeViewDataset(ShapeDataset):
                                 f".{self.resolution[0]}x{self.resolution[1]}" + \
                                 f"{'.d' if load_depth else ''}" + \
                                 f"{'.m' if load_mask else ''}" + \
+                                f"{'b' if not self.apply_mask_color else ''}" + \
                                 f"{'.p' if load_point else ''}"
                     logger.info("preload {}-{}".format(id, phase_name))
                     if binarize:
@@ -281,7 +287,7 @@ class ShapeViewDataset(ShapeDataset):
     
     def find_rgb(self):
         try:
-            return self.select([sorted(glob.glob(path + '/rgb/*.*')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/rgb/*.png')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find rendered images.")
     
@@ -334,8 +340,9 @@ class ShapeViewDataset(ShapeDataset):
             z = data_utils.load_depth(packed_data['dep'][view_idx], resolution=self.resolution)
         if packed_data.get('mask', None) is not None:
             mask = data_utils.load_mask(packed_data['mask'][view_idx], resolution=self.resolution)
-            rgb = rgb * mask[None, :, :] + (1 - mask[None, :, :]) * self.bg_color
-        
+            if self.apply_mask_color:   # we can also not apply mask
+                rgb = rgb * mask[None, :, :] + (1 - mask[None, :, :]) * self.bg_color
+
         return {
             'view': view_idx,
             'uv': uv.reshape(2, -1), 

@@ -9,10 +9,11 @@ from fairdr.data import ShapeViewDataset, WorldCoordDataset
 
 parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
 parser.add_argument('--dir', type=str, required=True)
+parser.add_argument('--th', type=int, default=None)
+parser.add_argument('--fname', type=str, default="voxel2.txt")
 parser.add_argument('--frames', type=int, default=50)
 parser.add_argument('--voxel_res', type=int, default=128)
-parser.add_argument('--image_res', type=int, default=1024)
-parser.add_argument('--image_res_H', type=int, default=None)
+parser.add_argument('--image_res', type=str, default="1024x1024")
 parser.add_argument('--extent', type=float, default=5.0)
 parser.add_argument('--marching_cube', action='store_true')
 parser.add_argument('--downsample', type=float, default=4.0)
@@ -33,20 +34,16 @@ print(DIR)
 dataset = ShapeViewDataset(
     DIR, list(range(args.frames)), args.frames, 
     load_mask=args.load_mask, binarize=False,
-    resolution=[args.image_res_H, args.image_res])
+    resolution=args.image_res)
 
 # visual-hull parameters
 s = args.voxel_res     # voxel resolution
 extent = args.extent
-imgW = args.image_res
-if args.image_res_H is None:
-    imgH = args.image_res
-else:
-    imgH = args.image_res_H
+imgH, imgW = [int(s) for s in args.image_res.split('x')]
 
 background = -1
 tau = 0.005
-th = args.frames - 1
+th = args.frames - 1 if args.th is None else args.th
 voxw = extent / s
 voxd = args.downsample
 
@@ -97,7 +94,7 @@ for i, data in enumerate(packed_data):
         image_mask = data['mask'].reshape(imgH, imgW).astype(np.int)
     else:
         image_mask = data['alpha'].reshape(imgH, imgW).astype(np.int)
-
+    # from fairseq import pdb; pdb.set_trace()
     res = image_mask[sub_uvs[1, :], sub_uvs[0, :]]
     occupancy[indices] += res
 
@@ -133,7 +130,7 @@ def voxelize_pcd(verts, voxel_size, fname):
     return ovoxels
 
 def voxelize_bbx(verts, voxel_size, fname):
-    xyz_min, xyz_max = verts.min(0) - voxel_size, verts.max(0) + voxel_size
+    xyz_min, xyz_max = verts.min(0) - voxel_size * 0.5, verts.max(0) + voxel_size * 0.5
     x, y, z = np.mgrid[
         range(int((xyz_max[0] - xyz_min[0]) / voxel_size) + 1),
         range(int((xyz_max[1] - xyz_min[1]) / voxel_size) + 1),
@@ -171,7 +168,7 @@ if not args.visualhull_only:
     ox, oy, oz = o[:, 0], o[:, 1], o[:, 2]
 
     # save data
-    fname = os.path.join(DIR, 'voxel2.txt')
+    fname = os.path.join(DIR, args.fname)
     with open(fname, 'w') as f:
         for i in range(ox.shape[0]):
             print('{} {} {} {} {} {}'.format(

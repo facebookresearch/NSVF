@@ -1,15 +1,17 @@
-ROOT=/private/home/jgu/data/shapenet/differentiable_volumetric_rendering/data/DTU/scan106/
-DATA=scan106
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_birds
+ROOT=/private/home/jgu/data/shapenet/
+DATA=ignatius_srn
+WORK=/checkpoint/jgu/space/neuralrendering/debug_ignatius
 mkdir -p ${WORK}
 
-GRID=geo_birds3
+# GRID=geo_ignatius
+GRID=geo_ignatius_bg
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-python fb_sweep/sweep_birds.py \
+
+python fb_sweep/sweep_ignatius.py \
     --data ${ROOT}/${DATA}/  \
     --grid $GRID \
     --user-dir "fairdr" \
@@ -17,7 +19,7 @@ python fb_sweep/sweep_birds.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_bg2 \
+    --prefix ${GRID}2 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -28,10 +30,9 @@ python fb_sweep/sweep_birds.py \
     --partition priority \
     --resume-failed \
     --local \
-   
-# popd
 
-# python fb_sweep/sweep_birds.py \
+
+# python fb_sweep/sweep_ignatius.py \
 #     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \
 #     --user-dir "fairdr" \
@@ -39,8 +40,8 @@ python fb_sweep/sweep_birds.py \
 #     --no-tensorboard \
 #     --snapshot-code \
 #     --snapshot-root ${WORK}/snapshot \
-#     --prefix ${DATA}v9 \
-#     --num-trials 1 \
+#     --prefix ${GRID} \
+#     --num-trials -1 \
 #     --num-gpus 1 \
 #     --num-nodes 1 \
 #     --mem 500gb \
