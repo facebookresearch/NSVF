@@ -21,7 +21,9 @@ from fairseq.models import (
 )
 
 from fairdr.models.fairdr_model import BaseModel, Field, Raymarcher
-from fairdr.modules.implicit import ImplicitField, SignedDistanceField, TextureField
+from fairdr.modules.implicit import (
+    ImplicitField, SignedDistanceField, TextureField
+)
 from fairdr.modules.raymarcher import IterativeSphereTracer
 from fairdr.data.geometry import ray, compute_normal_map
 from fairdr.data.data_utils import recover_image
@@ -139,7 +141,7 @@ class SRNModel(BaseModel):
             'rgb/{}:HWC'.format(img_id):
                 {'img': output['predicts'][shape, view]},
         }
-        min_depth, max_depth = output['depths'].min(), output['depths'].max()
+        min_depth, max_depth = 0.0, 6.0
 
         if depth_map:
             images['depth/{}:HWC'.format(img_id)] = {

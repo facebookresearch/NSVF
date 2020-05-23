@@ -24,7 +24,7 @@ from fairdr.models.fairdr_model import Field, Raymarcher
 from fairdr.modules.linear import Linear, NeRFPosEmbLinear, Embedding
 from fairdr.modules.implicit import (
     ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField,
-    HyperImplicitField
+    HyperImplicitField, SphereTextureField
 )
 from fairdr.modules.backbone import BACKBONE_REGISTRY, pruning_points
 
@@ -32,6 +32,128 @@ BG_DEPTH = 5.0
 MAX_DEPTH = 10000.0
 
 logger = logging.getLogger(__name__)
+
+
+@torch.no_grad()
+def _parallel_ray_sampling_old(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
+    max_step = int(((max_depth - min_depth) / MARCH_SIZE).ceil_().max())
+    delta = torch.arange(max_step, device=min_depth.device, dtype=min_depth.dtype)
+    delta = delta[None, None, :].expand(*min_depth.size(), max_step)
+    if deterministic:
+        delta = delta + 0.5
+    else:
+        delta = delta + delta.clone().uniform_()
+    delta = delta * MARCH_SIZE
+
+    min_depth, max_depth = min_depth[:, :, None], max_depth[:, :, None]
+    sampled_depth = torch.cat([min_depth, min_depth + delta, max_depth], -1)
+    max_depth = max_depth.expand_as(sampled_depth)
+    sampled_idx = pts_idx[:, :, None].expand_as(sampled_depth)
+    
+    sampled_masks = sampled_depth >= max_depth
+    sampled_depth = sampled_depth.masked_scatter(sampled_masks, max_depth[sampled_masks])
+    sampled_idx = sampled_idx.masked_fill(sampled_masks, -1)
+    
+    sampled_dists = sampled_depth[:, :, 1:] - sampled_depth[:, :, :-1]
+    sampled_masks = sampled_masks[:, :, :-1]
+    sampled_idx = sampled_idx[:, :, :-1]
+    
+    sampled_depth = sampled_depth[:, :, :-1].masked_fill_(sampled_masks, MAX_DEPTH)
+    num_max_steps = (~sampled_masks).sum(-1).sum(-1).max()
+
+    sampled_depth = sampled_depth.reshape(sampled_depth.size(0), -1)
+    sampled_dists = sampled_dists.reshape(sampled_dists.size(0), -1)
+    sampled_idx = sampled_idx.reshape(sampled_idx.size(0), -1)
+    sampled_depth, sorted_ids = sampled_depth.sort(1)
+
+    sorted_ids = sorted_ids[:, : num_max_steps]
+    sampled_depth = sampled_depth[:, : num_max_steps]
+    sampled_dists = sampled_dists.gather(1, sorted_ids)
+    sampled_idx = sampled_idx.gather(1, sorted_ids)
+    
+    return sampled_idx, sampled_depth, sampled_dists
+
+
+@torch.no_grad()
+def _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
+    # uniform sampling
+    _min_depth = min_depth.min(1)[0]
+    _max_depth = max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(1)[0]
+    max_ray_length = (_max_depth - _min_depth).max()
+    
+    delta = torch.arange(int(max_ray_length / MARCH_SIZE), device=min_depth.device, dtype=min_depth.dtype)
+    delta = delta[None, :].expand(min_depth.size(0), delta.size(-1))
+    if deterministic:
+        delta = delta + 0.5
+    else:
+        delta = delta + delta.clone().uniform_().clamp(min=0.01, max=0.99)
+    delta = delta * MARCH_SIZE
+    sampled_depth = min_depth[:, :1] + delta
+    sampled_idx = (sampled_depth[:, :, None] >= min_depth[:, None, :]).sum(-1) - 1
+    sampled_idx = pts_idx.gather(1, sampled_idx)    
+    
+    # include all boundary points
+    sampled_depth = torch.cat([min_depth, max_depth, sampled_depth], -1)
+    sampled_idx = torch.cat([pts_idx, pts_idx, sampled_idx], -1)
+
+    # reorder
+    sampled_depth, ordered_index = sampled_depth.sort(-1)
+    sampled_idx = sampled_idx.gather(1, ordered_index)
+    sampled_dists = sampled_depth[:, 1:] - sampled_depth[:, :-1]          # distances
+    sampled_depth = .5 * (sampled_depth[:, 1:] + sampled_depth[:, :-1])   # mid-points
+
+    # remove all invalid depths
+    min_ids = (sampled_depth[:, :, None] >= min_depth[:, None, :]).sum(-1) - 1
+    max_ids = (sampled_depth[:, :, None] >= max_depth[:, None, :]).sum(-1)
+
+    sampled_depth.masked_fill_(
+        (max_ids.ne(min_ids)) |
+        (sampled_depth > _max_depth[:, None]) |
+        (sampled_dists == 0.0)
+        , MAX_DEPTH)
+    sampled_depth, ordered_index = sampled_depth.sort(-1) # sort again
+    sampled_masks = sampled_depth.eq(MAX_DEPTH)
+    num_max_steps = (~sampled_masks).sum(-1).max()
+    
+    sampled_depth = sampled_depth[:, :num_max_steps]
+    sampled_dists = sampled_dists.gather(1, ordered_index).masked_fill_(sampled_masks, 0.0)[:, :num_max_steps]
+    sampled_idx = sampled_idx.gather(1, ordered_index).masked_fill_(sampled_masks, -1)[:, :num_max_steps]
+    
+    return sampled_idx, sampled_depth, sampled_dists
+
+
+@torch.no_grad()
+def parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
+    chunk_size=8192
+    full_size = min_depth.shape[0]
+    if full_size <= chunk_size:
+        return _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=deterministic)
+
+    outputs = zip(*[
+            _parallel_ray_sampling(
+                MARCH_SIZE, 
+                pts_idx[i:i+chunk_size], min_depth[i:i+chunk_size], max_depth[i:i+chunk_size],
+                deterministic=deterministic) 
+            for i in range(0, full_size, chunk_size)])
+    sampled_idx, sampled_depth, sampled_dists = outputs
+    
+    def padding_points(xs, pad):
+        if len(xs) == 1:
+            return xs[0]
+        
+        maxlen = max([x.size(1) for x in xs])
+        full_size = sum([x.size(0) for x in xs])
+        xt = xs[0].new_ones(full_size, maxlen).fill_(pad)
+        st = 0
+        for i in range(len(xs)):
+            xt[st: st + xs[i].size(0), :xs[i].size(1)] = xs[i]
+            st += xs[i].size(0)
+        return xt
+
+    sampled_idx = padding_points(sampled_idx, -1)
+    sampled_depth = padding_points(sampled_depth, MAX_DEPTH)
+    sampled_dists = padding_points(sampled_dists, 0.0)
+    return sampled_idx, sampled_depth, sampled_dists
 
 
 def chunking(func):
@@ -94,6 +216,11 @@ class GEONERFModel(SRNModel):
         parser.add_argument('--specular-dropout', type=float, metavar='D',
                             help='if large than 0, randomly drop specular during training')
         parser.add_argument('--background-network', action='store_true')
+        parser.add_argument('--soft-depth-loss', action='store_true')
+        
+        # voxel pruning
+        parser.add_argument('--use-max-pruning', action='store_true',
+                            help='use max sigma instead of sum of sigma for pruning')
 
         # ray-marching parameters
         parser.add_argument('--max-hits', type=int, metavar='N',
@@ -104,6 +231,8 @@ class GEONERFModel(SRNModel):
                             help='if set, a zero mean unit variance gaussian will be added to encougrage discreteness')
         parser.add_argument('--deterministic-step', action='store_true',
                             help='if set, the model runs fixed stepsize, instead of sampling one')
+        parser.add_argument('--parallel-sampling', action='store_true',
+                            help='if set, use the pytorch version of parallel sampling (slightly different)')
 
         # training parameters
         parser.add_argument('--chunk-size', type=int, metavar='D', 
@@ -137,10 +266,10 @@ class GEONERFModel(SRNModel):
             getattr(g, 'MAX_HITS').copy_(torch.scalar_tensor(M * (1.5 ** level)))
         return level
 
-    def _forward(self, ray_start, ray_dir, id, **kwargs):
+    def _forward(self, ray_start, ray_dir, id, depths=None, **kwargs):
         # get geometry features
         feats, xyz, values, codes = self.field.get_backbone_features(
-            id=id, step=self.set_level(), pruner=self.field.pruning)
+            id=id, step=self.set_level(), pruner=self.field.pruning, **kwargs)
 
         # latent regularization
         latent_loss = torch.mean(codes ** 2) if codes is not None else 0
@@ -149,19 +278,22 @@ class GEONERFModel(SRNModel):
         if not self.field.background_network:
             bg_color = self.field.bg_color # * 0.0 - 0.8
         else:
-            far_point = ray_start + ray_dir * 8.0
-            bg_color = self.field.bg_color(far_point)  # use far-point as background.
+            bg_color = self.field.bg_color(
+                ray_start, ray_dir, min_depth=5.0, steps=10)  # use far-point as background.
+        
+        # (optional) ground-truth depth
+        gt_depths = depths.clone() if depths is not None else None
 
         # coarse ray-intersection
         S, V, P, _ = ray_dir.size()
         predicts = ray_dir.new_zeros(S * V * P, 3)
         depths = predicts.new_ones(S * V * P) * BG_DEPTH
         missed = predicts.new_ones(S * V * P)
-        first_hits = predicts.new_ones(S * V * P).long().fill_(500)
+        first_hits = predicts.new_ones(S * V * P).fill_(500)
         entropy = 0.0
 
-        hits, _ray_start, _ray_dir, state, samples = \
-            self.raymarcher.ray_intersection(ray_start, ray_dir, xyz, feats)
+        hits, _ray_start, _ray_dir, state, samples, gt_depths = \
+            self.raymarcher.ray_intersection(ray_start, ray_dir, xyz, feats, gt_depths)
         
         steps_passed = samples[2].sum(-1) / self.field.MARCH_SIZE
         
@@ -169,7 +301,7 @@ class GEONERFModel(SRNModel):
         if hits.sum() > 0:   # missed everything
             hits = hits.view(S * V * P).contiguous()
             _predicts, _depths, _missed, entropy = self.raymarcher(
-                self.field, _ray_start, _ray_dir, samples, state, values)
+                self.field, _ray_start, _ray_dir, samples, state, values, gt_depths=gt_depths)
             # _predicts = _predicts + bg_color * _missed.unsqueeze(-1)  # fill background color
             _depths = _depths + BG_DEPTH * _missed
             
@@ -182,8 +314,12 @@ class GEONERFModel(SRNModel):
             missed = missed.masked_scatter(
                 hits, _missed
             )
+            
+            shape_index = ((samples[1][:, 0].long() * 100 % 499) * 100 ) % 499
+            # shape_index = shape_index.type_as(predicts) + \
+            #    100.0 * (torch.sqrt(((_ray_start + _ray_dir * samples[0][:, :1] - xyz.reshape(-1, 3)[samples[1][:, 0].long()]) ** 2).sum(-1)) / (self.field.VOXEL_SIZE * math.sqrt(3)/2)) ** 0.8
             first_hits = first_hits.masked_scatter(
-                hits, ((samples[1][:, 0].long() * 100 % 499) * 100 ) % 499
+                hits, shape_index.type_as(depths)
             )
 
         # add the background color
@@ -249,6 +385,7 @@ class GEONERFModel(SRNModel):
         return "GEONERF model (voxel size: {:.4f} ({} voxels), march step: {:.4f})".format(
             self.field.VOXEL_SIZE, self.field.num_voxels, self.raymarcher.MARCH_SIZE)
 
+
 class GEORadianceField(Field):
     
     def __init__(self, args):
@@ -274,18 +411,27 @@ class GEORadianceField(Field):
         self.use_raydir = getattr(args, "use_raydir", False)
         self.raydir_features = getattr(args, "raydir_features", 0)
         self.raypos_features = getattr(args, "raypos_features", 0)
+        self.use_max_pruning = getattr(args, "use_max_pruning", False)
         self.condition_on_marchsize = getattr(args, "condition_on_marchsize", False)
         if self.condition_on_marchsize:
             self.cond_emb = Embedding(10, self.backbone.feature_dim)
 
         # background color 
         if not self.background_network:
-            self.bg_color = nn.Parameter(
-                torch.tensor((1.0, 1.0, 1.0)) * getattr(args, "transparent_background", -0.8), 
+            bg_color = getattr(args, "transparent_background", "1.0,1.0,1.0")
+            bg_color = [float(b) for b in bg_color.split(',')] if isinstance(bg_color, str) else [bg_color]
+            if getattr(args, "min_color", -1) == -1:
+                bg_color = [b * 2 - 1 for b in bg_color]
+            if len(bg_color) == 1:
+                bg_color = bg_color + bg_color + bg_color
+            assert len(bg_color) == 3, "initial color needs 3 dimensions"
+
+            self.bg_color = nn.Parameter(torch.tensor(bg_color), 
                 requires_grad=(not getattr(args, "background_stop_gradient", False)))
+        
         else:
-            self.bg_color = TextureField(
-                args, 3, args.hidden_textures, 4)
+            self.bg_color = SphereTextureField(
+                args, 3, args.hidden_textures, 4, with_alpha=True)
             
         # build layers
         if not self.post_context:
@@ -419,7 +565,7 @@ class GEORadianceField(Field):
             _data['texture'] = texture
         return tuple([_data[key] for key in outputs])
 
-    def pruning(self, id, th=0.5, update=True, features=None, sizes=None):    
+    def pruning(self, id, th=0.5, update=True, features=None, sizes=None, use_max=False):    
         if update:
             feats, xyz, values, _ = self.get_backbone_features(id=id)
             assert feats.size(0) == 1, "offline pruning only works for single objects"
@@ -436,7 +582,7 @@ class GEORadianceField(Field):
             voxel_size, march_size = sizes
 
         D = feats.size(-1)
-        G = int(voxel_size / march_size)  # how many microgrids to steps
+        G = 16 # int(voxel_size / march_size)  # how many microgrids to steps
         
         # prepare queries for all the voxels
         c = torch.arange(1, 2 * G, 2, device=xyz.device)
@@ -460,17 +606,21 @@ class GEORadianceField(Field):
             chunk_size=self.chunk_size,
             voxel_size=voxel_size,
             march_size=march_size)
+        
+        if (not use_max) and (not self.use_max_pruning):
+            sigma_dist = torch.relu(sigma) * march_size
+            sigma_dist = sigma_dist.reshape(-1, G ** 3)
+            score = sigma_dist.sum(-1)
+        else:
+            sigma = torch.relu(sigma).reshape(-1, G ** 3)
+            score = sigma.max(-1)[0]
 
-        sigma_dist = torch.relu(sigma) * march_size
-        sigma_dist = sigma_dist.reshape(-1, G ** 3)
-
-        score = sigma_dist.sum(-1)
         if update:
             alpha = 1 - torch.exp(-score)   # probability of filling the full voxel
             keep = (alpha > th)
             logger.info("pruning done. before: {}, after: {} voxels".format(xyz.size(0), keep.sum()))
             self.backbone.pruning(keep=keep)
-        
+
         return score.reshape(id.size(0), -1)
 
     def splitting(self):
@@ -491,13 +641,15 @@ class GEORaymarcher(Raymarcher):
         self.discrete_reg = getattr(args, "discrete_regularization", False)
         self.deterministic_step = getattr(args, "deterministic_step", False)
         self.expectation = getattr(args, "expectation", "rgb")
-        
+        self.parallel = getattr(args, "parallel_sampling", False)
+        self.soft_depth_loss = getattr(args, "soft_depth_loss", False)
+
         # register buffers (not learnable)
         self.register_buffer("MAX_HITS", torch.scalar_tensor(args.max_hits))
         self.register_buffer("VOXEL_SIZE", torch.scalar_tensor(args.voxel_size))
         self.register_buffer("MARCH_SIZE", torch.scalar_tensor(args.raymarching_stepsize))
 
-    def ray_intersection(self, ray_start, ray_dir, point_xyz, point_feats):
+    def ray_intersection(self, ray_start, ray_dir, point_xyz, point_feats, gt_depths=None):
         VOXEL_SIZE, MARCH_SIZE, MAX_HITS = self.VOXEL_SIZE, self.MARCH_SIZE, self.MAX_HITS
         
         S, V, P, _ = ray_dir.size()
@@ -505,6 +657,8 @@ class GEORaymarcher(Raymarcher):
 
         ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3)
         ray_dir = ray_dir.reshape(S, V * P, 3)
+        gt_depths = gt_depths.reshape(S, V * P) if gt_depths is not None else None
+
         ray_intersect_fn = aabb_ray_intersect
         pts_idx, min_depth, max_depth = ray_intersect_fn(
             VOXEL_SIZE, MAX_HITS, point_xyz, ray_start, ray_dir)
@@ -518,7 +672,7 @@ class GEORaymarcher(Raymarcher):
 
         hits = pts_idx.ne(-1).any(-1)  # remove all points that completely miss the object
         if hits.sum() <= 0:            # missed everything
-            return hits, None, None, None, None
+            return hits, None, None, None, None, None
         
         # extend the point-index to multiple shapes
         pts_idx = (pts_idx + H * torch.arange(S, 
@@ -528,23 +682,24 @@ class GEORaymarcher(Raymarcher):
         pts_idx = pts_idx[hits]
         min_depth = min_depth[hits]
         max_depth = max_depth[hits]
-        max_steps = int(((max_depth - min_depth).sum(-1) / MARCH_SIZE).ceil_().max())
-        sampled_idx, sampled_depth, sampled_dists = [p.squeeze(0) for p in 
-            uniform_ray_sampling(
-                MARCH_SIZE, max_steps, 
-                pts_idx.unsqueeze(0), min_depth.unsqueeze(0), max_depth.unsqueeze(0),
-                self.deterministic_step or (not self.training)
-            )]
+        
+        # uniform ray sampling (new)
+        ray_sampler = parallel_ray_sampling if self.parallel else uniform_ray_sampling
+        sampled_idx, sampled_depth, sampled_dists = ray_sampler(
+            MARCH_SIZE, pts_idx, min_depth, max_depth, self.deterministic_step or (not self.training))
+        
         sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
 
         # prepare output
         ray_start = ray_start[hits]
         ray_dir = ray_dir[hits]
+        if gt_depths is not None:
+            gt_depths = gt_depths[hits]
 
         point_feats = point_feats.view(S * H, D)
         point_xyz = point_xyz.view(S * H, 3)
-        return hits, ray_start, ray_dir, (point_feats, point_xyz), (sampled_depth, sampled_idx, sampled_dists)
+        return hits, ray_start, ray_dir, (point_feats, point_xyz), (sampled_depth, sampled_idx, sampled_dists), gt_depths
 
     def _forward(self, field_fn, ray_start, ray_dir, samples, state, values, early_stop=None):
         """
@@ -587,7 +742,7 @@ class GEORaymarcher(Raymarcher):
 
         return sigma_dist, texture
 
-    def forward(self, field_fn, ray_start, ray_dir, samples, state, values, tolerance=0):
+    def forward(self, field_fn, ray_start, ray_dir, samples, state, values, tolerance=0, gt_depths=None):
         sampled_depth, sampled_idx, sampled_dists = samples
         early_stop = None
         # tolerance, early_stop = 4.605170185988091, None
@@ -631,19 +786,35 @@ class GEORaymarcher(Raymarcher):
         a = 1 - torch.exp(-sigma_dist.float())                             # probability of it is not empty here
         b = torch.exp(-torch.cumsum(shifted_sigma_dist.float(), dim=-1))   # probability of everything is empty up to now
         probs = (a * b).type_as(sigma_dist)                                # probability of the ray hits something here
-        ext_p = torch.cat([probs, 1 - probs.sum(-1, keepdim=True).clamp(max=1)], 1)
+        
+        # ext_p = torch.cat([probs, 1 - probs.sum(-1, keepdim=True).clamp(max=1)], 1)
+        # print(((sampled_depth - gt_depths[:, None])**2).min(1)[1][gt_depths.ne(0.0)].eq(0).sum() / 2048.0)
+        # from fairseq import pdb; pdb.set_trace()
 
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
         rgb = (texture * probs.unsqueeze(-1)).sum(-2)
         
-        # print(sigma_dist/self.MARCH_SIZE)
-        # from fairseq import pdb; pdb.set_trace()
-        def get_entropy(probs):
-            entropy = -(torch.log(probs.float().clamp(min=1e-7)) * probs.float()).sum(-1).type_as(probs)
-            return entropy
+        if gt_depths is not None:
+            distss = (sampled_depth - gt_depths[:, None]) ** 2
+            
+            if self.soft_depth_loss:
+                tau = 0.0005
+                loss = -(F.softmax(-distss / tau, dim=1) * torch.log(probs.clamp(min=1e-7))).sum(-1)[gt_depths.ne(0.0)].mean()
+            
+            else:
+                depth_target = (distss).min(1)[1]
+                depth_target = depth_target.masked_fill(gt_depths.eq(0), -100)
+                loss = F.nll_loss(torch.log(probs.clamp(min=1e-7)), depth_target, ignore_index=-100)
+        
+        else:
+            loss = ((sampled_depth ** 2 * probs).sum(-1) - depth ** 2).mean()
+        
+        # def get_entropy(probs):
+        #     entropy = -(torch.log(probs.float().clamp(min=1e-7)) * probs.float()).sum(-1).type_as(probs)
+        #     return entropy
 
-        return rgb, depth, missed, get_entropy(ext_p).mean()
+        return rgb, depth, missed, loss
 
 
 def plain_architecture(args):
@@ -657,6 +828,8 @@ def plain_architecture(args):
     args.voxel_size = getattr(args, "voxel_size", 0.25)
     args.condition_on_marchsize = getattr(args, "condition_on_marchsize", False)
     args.background_network = getattr(args, "background_network", False)
+    args.use_max_pruning = getattr(args, "use_max_pruning", False)
+    args.soft_depth_loss = getattr(args, "soft_depth_loss", False)
 
     # raymarcher
     args.max_hits = getattr(args, "max_hits", 32)
@@ -664,6 +837,7 @@ def plain_architecture(args):
     args.background_stop_gradient = getattr(args, "background_stop_gradient", False)
     args.discrete_regularization = getattr(args, "discrete_regularization", False)
     args.deterministic_step = getattr(args, "deterministic_step", False)
+    args.parallel_sampling = getattr(args, "parallel_sampling", False)
 
     # training
     args.chunk_size = getattr(args, "chunk_size", 100)

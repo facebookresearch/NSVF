@@ -64,6 +64,10 @@ def main(args, override_args=None):
 
     # Build criterion
     criterion = task.build_criterion(model_args)
+    if use_fp16:
+        criterion.half()
+    if use_cuda:
+        criterion.cuda()
     criterion.eval()
 
     for subset in args.valid_subset.split(','):

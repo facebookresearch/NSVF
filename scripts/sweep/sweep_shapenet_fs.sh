@@ -1,6 +1,6 @@
 ROOT=/private/home/jgu/data/
 DATA=srn_data
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv2
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3
 mkdir -p ${WORK}
 
 GRID=geo_shapenet_seq1282_fewshot

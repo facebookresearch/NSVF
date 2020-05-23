@@ -1,6 +1,6 @@
 ROOT=/private/home/jgu/data/
 DATA=srn_data
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv2
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3
 mkdir -p ${WORK}
 
 GRID=geo_shapenet_seq1282
@@ -17,7 +17,7 @@ python fb_sweep/sweep_shapenet.py \
     --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_before2 \
+    --prefix ${DATA}_xyz3 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -25,9 +25,9 @@ python fb_sweep/sweep_shapenet.py \
     --constraint volta32gb \
     --exclusive \
     --comment "NeurIPS2020 deadline." \
-    --partition priority \
+    --partition learnfair \
     --resume-failed \
-    --local \
+    # --local \
    
 # popd 
 

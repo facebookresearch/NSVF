@@ -34,6 +34,8 @@ def add_rendering_args(parser):
     group.add_argument("--render-path-style", default="circle", choices=["circle", "zoomin_circle"], type=str)
     group.add_argument("--render-path-args", default="{'radius': 2.5, 'h': 0.0}",
                        help="specialized arguments for rendering paths")
+    group.add_argument("--render-interpolation", action='store_true', 
+                       help='used for latent code interpolation')
     group.add_argument("--render-output", default=None, type=str)
     group.add_argument("--render-at-vector", default="(0,0,0)", type=str)
     group.add_argument("--render-up-vector", default="(0,0,-1)", type=str)
@@ -43,3 +45,5 @@ def add_rendering_args(parser):
     group.add_argument("--render-save-fps", default=24, type=int)
     group.add_argument("--render-combine-output", action='store_true', 
                        help="if set, concat the images into one file.")
+    group.add_argument("--render-camera-poses", default=None, type=str,
+                       help="text file saved for the testing trajectories")

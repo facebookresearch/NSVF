@@ -203,9 +203,16 @@ class ShapeViewDataset(ShapeDataset):
 
         self.world2camera = True
         self.cache_view = None
-        self.bg_color = bg_color  # only useful if image is transparent
+        
+        bg_color = [float(b) for b in bg_color.split(',')] \
+            if isinstance(bg_color, str) else [bg_color]
+        if min_color == -1:
+            bg_color = [b * 2 - 1 for b in bg_color]
+        if len(bg_color) == 1:
+            bg_color = bg_color + bg_color + bg_color
+        self.bg_color = bg_color
         self.min_color = min_color
-        self.apply_mask_color = (bg_color >= -1) & (bg_color <= 1)  # if need to apply
+        self.apply_mask_color = (self.bg_color[0] >= -1) & (self.bg_color[0] <= 1)  # if need to apply
 
         # -- load per-view data
         _data_per_view = {}
@@ -287,7 +294,7 @@ class ShapeViewDataset(ShapeDataset):
     
     def find_rgb(self):
         try:
-            return self.select([sorted(glob.glob(path + '/rgb/*.png')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/rgb/*.*g')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find rendered images.")
     
@@ -341,7 +348,7 @@ class ShapeViewDataset(ShapeDataset):
         if packed_data.get('mask', None) is not None:
             mask = data_utils.load_mask(packed_data['mask'][view_idx], resolution=self.resolution)
             if self.apply_mask_color:   # we can also not apply mask
-                rgb = rgb * mask[None, :, :] + (1 - mask[None, :, :]) * self.bg_color
+                rgb = rgb * mask[None, :, :] + (1 - mask[None, :, :]) * np.asarray(self.bg_color)[:, None, None]
 
         return {
             'view': view_idx,
@@ -430,11 +437,20 @@ class SampledPixelDataset(BaseWrapperDataset):
     A wrapper dataset, which split rendered images into pixels
     """
 
-    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0, sampling_on_bbox=False, resolution=512, patch_size=1):
+    def __init__(self, 
+        dataset, 
+        num_sample=None, 
+        sampling_on_mask=1.0, 
+        sampling_on_bbox=False, 
+        sampling_at_center=1.0,
+        resolution=512, 
+        patch_size=1):
+        
         super().__init__(dataset)
         self.num_sample = num_sample
         self.sampling_on_mask = sampling_on_mask
         self.sampling_on_bbox = sampling_on_bbox
+        self.sampling_at_center = sampling_at_center
         self.patch_size = patch_size
         self.res = resolution
 
@@ -451,6 +467,7 @@ class SampledPixelDataset(BaseWrapperDataset):
                     else data.get('alpha', None),
                 self.sampling_on_mask,
                 self.sampling_on_bbox,
+                self.sampling_at_center,
                 width=int(data['size'][1]),
                 patch_size=self.patch_size)
             for data in data_per_view

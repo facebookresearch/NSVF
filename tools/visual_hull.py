@@ -21,6 +21,7 @@ parser.add_argument('--load_mask', action='store_true')
 parser.add_argument('--white-bg', action='store_true')
 parser.add_argument('--boundingbox', action='store_true')
 parser.add_argument('--visualhull_only', action='store_true')
+parser.add_argument('--expand_bbox', type=float, default=0.5)
 args = parser.parse_args()
 
 
@@ -93,7 +94,7 @@ for i, data in enumerate(packed_data):
     elif args.load_mask:
         image_mask = data['mask'].reshape(imgH, imgW).astype(np.int)
     else:
-        image_mask = data['alpha'].reshape(imgH, imgW).astype(np.int)
+        image_mask = (data['alpha']>0).reshape(imgH, imgW).astype(np.int)
     # from fairseq import pdb; pdb.set_trace()
     res = image_mask[sub_uvs[1, :], sub_uvs[0, :]]
     occupancy[indices] += res
@@ -130,7 +131,8 @@ def voxelize_pcd(verts, voxel_size, fname):
     return ovoxels
 
 def voxelize_bbx(verts, voxel_size, fname):
-    xyz_min, xyz_max = verts.min(0) - voxel_size * 0.5, verts.max(0) + voxel_size * 0.5
+    eps = args.expand_bbox
+    xyz_min, xyz_max = verts.min(0) - voxel_size * eps, verts.max(0) + voxel_size * eps
     x, y, z = np.mgrid[
         range(int((xyz_max[0] - xyz_min[0]) / voxel_size) + 1),
         range(int((xyz_max[1] - xyz_min[1]) / voxel_size) + 1),

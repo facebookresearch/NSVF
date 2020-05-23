@@ -106,9 +106,15 @@ class GEOSRNField(PointSRNField):
         super().__init__(args)
         self.max_hits = args.max_hits
         self.ball_radius = args.ball_radius
-        self.bg_color = nn.Parameter(
-            torch.tensor((1.0, 1.0, 1.0)) * getattr(args, "transparent_background", -0.8), 
-            requires_grad=(not getattr(args, "no_background_loss", False)))
+
+        bg_color = getattr(args, "transparent_background", "1.0,1.0,1.0")
+        bg_color = [float(b) for b in bg_color.split(',')] if isinstance(bg_color, str) else [bg_color]
+        if len(bg_color) == 1:
+            bg_color = bg_color + bg_color + bg_color
+        assert len(bg_color) == 3, "initial color needs 3 dimensions"
+
+        self.bg_color = nn.Parameter(torch.tensor(bg_color), 
+            requires_grad=(not getattr(args, "background_stop_gradient", False)))
         self.sdf_scale = getattr(args, 'sdf_scale', 0.1)
         self.bg_feature = nn.Parameter(
             torch.normal(0, 0.02, (self.backbone.feature_dim, ))

@@ -35,7 +35,9 @@ class NeuralRenderer(object):
                 up=(0,1,0),
                 output_dir=None,
                 output_type=None,
-                fps=24):
+                fps=24,
+                test_camera_poses=None,
+                interpolation=False):
 
         self.frames = frames
         self.speed = speed
@@ -53,21 +55,35 @@ class NeuralRenderer(object):
         self.at = at
         self.up = up
         self.fps = fps
+        self.use_interpolation = interpolation
 
         if self.path_gen is None:
             self.path_gen = trajectory.circle()
         if self.output_type is None:
             self.output_type = ["rgb"]
 
-    def generate_rays(self, t, intrinsics, img_size):
-        cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
-                    device=intrinsics.device, dtype=intrinsics.dtype)
-        cam_rot = geometry.look_at_rotation(cam_pos, at=self.at, up=self.up, inverse=True, cv=True)
-        
-        inv_RT = cam_pos.new_zeros(4, 4)
-        inv_RT[:3, :3] = cam_rot
-        inv_RT[:3, 3] = cam_pos
-        inv_RT[3, 3] = 1
+        if test_camera_poses is not None:
+            self.test_poses = data_utils.load_matrix(test_camera_poses)
+            if len(self.test_poses.shape) == 2:
+                self.test_poses = self.test_poses.reshape(-1, 4, 4)
+
+            self.test_poses[:, :, 1] = -self.test_poses[:, :, 1]
+            self.test_poses[:, :, 2] = -self.test_poses[:, :, 2]
+        else:
+            self.test_poses = None
+
+    def generate_rays(self, t, intrinsics, img_size, inv_RT=None):
+        if inv_RT is None:
+            cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
+                        device=intrinsics.device, dtype=intrinsics.dtype)
+            cam_rot = geometry.look_at_rotation(cam_pos, at=self.at, up=self.up, inverse=True, cv=True)
+            
+            inv_RT = cam_pos.new_zeros(4, 4)
+            inv_RT[:3, :3] = cam_rot
+            inv_RT[:3, 3] = cam_pos
+            inv_RT[3, 3] = 1
+        else:
+            inv_RT = torch.from_numpy(inv_RT).type_as(intrinsics)
 
         h, w, rh, rw = img_size[0], img_size[1], img_size[2], img_size[3]
         uv = torch.from_numpy(get_uv(h * rh, w * rw, h, w)[0]).type_as(intrinsics)
@@ -97,7 +113,9 @@ class NeuralRenderer(object):
                 logger.info("rendering frames: {}".format(step))
                 
                 ray_start, ray_dir, inv_RT = zip(*[
-                    self.generate_rays(k, sample['intrinsics'][shape], sample['size'][shape, 0])
+                    self.generate_rays(
+                        k, sample['intrinsics'][shape], sample['size'][shape, 0],
+                        self.test_poses[k] if self.test_poses is not None else None)
                     for k in range(step, next_step)
                 ])
         
@@ -106,6 +124,7 @@ class NeuralRenderer(object):
                 real_images = real_images.transpose(2, 3) if real_images.size(-1) != 3 else real_images
                 _sample = {
                     'id': sample['id'][shape:shape+1],
+                    'offset': float((step % self.frames)) / float(self.frames) if self.use_interpolation else None,
                     'rgb': torch.cat([real_images[shape:shape+1] for _ in range(step, next_step)], 1),
                     'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
                     'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
@@ -143,7 +162,8 @@ class NeuralRenderer(object):
                             image_names.append(image_name)
                 step = next_step
 
-        logger.info("total rendering time: {:.4f}s ({:.4f}s per frame)".format(timer.sum, timer.avg))
+        logger.info("total rendering time: {:.4f}s ({:.4f}s per frame)".format(
+            timer.sum, timer.avg / self.beam))
         return step, image_names
 
     def save_images(self, output_files, steps=None, combine_output=True):
@@ -172,4 +192,17 @@ class NeuralRenderer(object):
             print ("Error: %s - %s." % (e.filename, e.strerror))
             raise OSError    
         
-        
+        return timestamp
+
+    def merge_videos(self, timestamps):
+        logger.info("mergining mp4 files..")
+        timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
+        writer = imageio.get_writer(
+            os.path.join(self.output_dir, 'full_' + timestamp + '.mp4'), fps=self.fps)
+        for timestamp in timestamps:
+            tempfile = os.path.join(self.output_dir, 'full_' + timestamp + '.mp4')
+            reader = imageio.get_reader(tempfile)
+            for im in reader:
+                writer.append_data(im)
+            os.remove(tempfile)
+        writer.close()

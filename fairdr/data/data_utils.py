@@ -48,7 +48,7 @@ def load_rgb(
     path, 
     resolution=None, 
     with_alpha=True, 
-    bg_color=-0.8,
+    bg_color=[1.0, 1.0, 1.0],
     min_rgb=-1):
     if with_alpha:
         img = imageio.imread(path)  # RGB-ALPHA
@@ -70,8 +70,8 @@ def load_rgb(
         img[:, :, :3] -= 0.5
         img[:, :, :3] *= 2.
 
-    img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + bg_color * (1 - img[:, :, 3:])
-    img[:, :, 3] = (img[:, :, :3] != bg_color).any(-1) 
+    img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + np.asarray(bg_color)[None, None, :] * (1 - img[:, :, 3:])
+    # img[:, :, 3] = (img[:, :, :3] != bg_color).any(-1) 
     img = img.transpose(2, 0, 1)
     return img, uv, ratio
 
@@ -185,8 +185,10 @@ def square_crop_img(img):
 
 def sample_pixel_from_image(
     num_pixel, num_sample, 
-    mask=None, ratio=1.0, 
-    use_bbox=False, width=512,
+    mask=None, ratio=1.0,
+    use_bbox=False, 
+    center_ratio=1.0,
+    width=512,
     patch_size=1):
 
     if patch_size > 1:
@@ -209,7 +211,25 @@ def sample_pixel_from_image(
         out = x + y * width
         return out.reshape(-1)
 
-    if mask is None or ratio <= 0.0 or mask.sum() == 0 or (1 - mask).sum() == 0:
+    if center_ratio < 1.0:
+        r = (1 - center_ratio) / 2.0
+        H, W = num_pixel // width, width
+        mask0 = np.zeros((H, W))
+        mask0[int(H * r): H - int(H * r), int(W * r): W - int(W * r)] = 1
+        mask0 = mask0.reshape(-1)
+
+        if mask is None:
+            mask = mask0
+        else:
+            mask = mask * mask0
+    
+    if mask is not None:
+        mask = (mask > 0.0).astype('float32')
+
+    if (mask is None) or \
+        (ratio <= 0.0) or \
+        (mask.sum() == 0) or \
+        ((1 - mask).sum() == 0):
         return np.random.choice(num_pixel, num_sample)
 
     if use_bbox:

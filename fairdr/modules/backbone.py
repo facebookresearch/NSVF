@@ -96,13 +96,16 @@ def splitting_points(point_xyz, point_feats, offset, half_voxel):
 
 
 def expand_points(voxel_points, voxel_size):
-    _voxel_size = torch.sqrt(((voxel_points[0:1] - voxel_points[1:]) ** 2).sum(-1).min())
+    _voxel_size = min([
+        torch.sqrt(((voxel_points[j:j+1] - voxel_points[j+1:]) ** 2).sum(-1).min())
+        for j in range(100)])
     depth = int(np.round(torch.log2(_voxel_size / voxel_size)))
     if depth > 0:
         half_voxel = _voxel_size / 2.0
         for _ in range(depth):
             voxel_points = offset_points(voxel_points, half_voxel / 2.0).reshape(-1, 3)
             half_voxel = half_voxel / 2.0
+    
     return voxel_points, depth
 
 
@@ -181,7 +184,7 @@ class DynamicEmbeddingBackbone(Backbone):
         init_length = init_points.size(0)
         fine_points, fine_depth = expand_points(init_points, self.voxel_size)
         fine_length = fine_points.size(0)
-        
+
         # working in LONG space
         fine_coords = (fine_points / self.half_voxel).floor_().long()
         offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
@@ -259,9 +262,10 @@ class DynamicEmbeddingBackbone(Backbone):
                         num_hidden_layers=2,
                         in_ch=3, out_ch=self.embed_dim,
                         outermost_linear=True)
-            else:
+            elif self.embed_dim != 3:
                 self.values_proj = Linear(3, self.embed_dim)
-            
+            else:
+                self.values_proj = None
         else:
             self.values = Embedding(self.total_size, self.embed_dim, None)
             if self.use_context is not None and self.use_hypernetwork:
@@ -276,6 +280,18 @@ class DynamicEmbeddingBackbone(Backbone):
                         outermost_linear=True)
             else:
                 self.values_proj = None
+
+    # def upgrade_state_dict_named(self, state_dict, name):
+    #     for key in ('feats', 'keys', 'keep', 'points'):
+    #         values_weight = state_dict[name + '.' + key]
+    #         if values_weight.size(0) < getattr(self, key).size(0):  # update value embeddings
+    #             state_dict[name + '.' + key] = getattr(self, key).data.clone()
+    #             state_dict[name + '.' + key][: values_weight.size(0)] = values_weight
+        
+    #     values_weight = state_dict[name + '.values.weight']
+    #     if values_weight.size(0) < self.values.weight.size(0):  # update value embeddings
+    #         state_dict[name + '.values.weight'] = self.values.weight.data.clone()
+    #         state_dict[name + '.values.weight'][: values_weight.size(0)] = values_weight 
 
     @staticmethod
     def add_args(parser):
@@ -308,7 +324,7 @@ class DynamicEmbeddingBackbone(Backbone):
         
         return values, context
 
-    def _forward(self, id, step=0, pruner=None, *args, **kwargs):
+    def _forward(self, id, step=0, pruner=None, offset=None, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
         values = self.values.weight[: self.num_keys] if self.values is not None else None
@@ -319,6 +335,10 @@ class DynamicEmbeddingBackbone(Backbone):
         points = points.unsqueeze(0).expand(id.size(0), *points.size()).contiguous()
         values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous()
         codes = self.get_context_features(id)
+
+        if offset is not None:
+            codes_beta = self.get_context_features(id + 1)
+            codes = codes * (1 - offset) + codes_beta * offset
 
         # contexturalization (potential)
         voxel_size, march_size = self.voxel_size, self.march_size

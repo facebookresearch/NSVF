@@ -135,9 +135,10 @@ class SRNLossCriterion(RenderingCriterion):
                             help='set if we are using transparent image')
 
     def compute_loss(self, model, net_output, sample, reduce=True):
-        alpha  = (sample['alpha'] > 0.5)
+        alpha = sample['alpha']
         masks = alpha.clone() if self.args.no_background_loss else torch.ones_like(alpha)
-        
+        masks = masks.bool()
+
         losses, other_logs = {}, {}
         if 'other_logs' in net_output:
             other_logs.update(net_output['other_logs'])
@@ -169,12 +170,12 @@ class SRNLossCriterion(RenderingCriterion):
             losses['ent_loss'] = (net_output['entropy'], self.args.entropy_weight)
 
         if self.args.alpha_weight > 0:
-            alpha = net_output['missed'].reshape(-1)
+            _alpha = net_output['missed'].reshape(-1)
             # alpha_loss = torch.log(0.1 + alpha) + torch.log(0.1 + 1 - alpha) - math.log(0.11)
             # alpha_loss = alpha_loss.float().mean().type_as(alpha_loss)
             alpha_loss = torch.log1p(
-                1. / 0.11 * alpha.float() * (1 - alpha.float())
-            ).mean().type_as(alpha)
+                1. / 0.11 * _alpha.float() * (1 - _alpha.float())
+            ).mean().type_as(_alpha)
             losses['alpha_loss'] = (alpha_loss, self.args.alpha_weight)
 
         if self.args.depth_weight > 0:
