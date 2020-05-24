@@ -53,12 +53,12 @@ def padding_points(xs, pad):
     return xt
 
 
-def pruning_points(feats, points, scores, depth=0):
+def pruning_points(feats, points, scores, depth=0, th=0.5):
     if depth > 0:
         g = int(8 ** depth)
         scores = scores.reshape(scores.size(0), -1, g).sum(-1, keepdim=True)
         scores = scores.expand(*scores.size()[:2], g).reshape(scores.size(0), -1)
-    alpha = (1 - torch.exp(-scores)) > 0.5
+    alpha = (1 - torch.exp(-scores)) > th
     feats = [feats[i][alpha[i]] for i in range(alpha.size(0))]
     points = [points[i][alpha[i]] for i in range(alpha.size(0))]
     points = padding_points(points, INF)
@@ -216,6 +216,7 @@ class DynamicEmbeddingBackbone(Backbone):
 
         # voxel embeddings
         self.embed_dim = getattr(args, "quantized_embed_dim", None)
+        self.latent_embed_dim = getattr(args, "latent_code_embed_dim", self.embed_dim)
         self.use_pos_embed = getattr(args, "quantized_pos_embed", False)
         self.use_xyz_embed = getattr(args, "quantized_xyz_embed", False)
         self.use_context_proj = getattr(args, "quantized_context_proj", False)
@@ -227,12 +228,12 @@ class DynamicEmbeddingBackbone(Backbone):
         if self.use_context is not None:
             if self.use_context == 'id':
                 assert self.args.total_num_context > 0, "index embeddings for different frames"
-                self.context_embed = Embedding(self.args.total_num_context, self.embed_dim, None)
+                self.context_embed = Embedding(self.args.total_num_context, self.latent_embed_dim, None)
 
             if self.normalize_context:
-                self.context_proj = FCBlock(self.embed_dim, 1, self.embed_dim, self.embed_dim)
+                self.context_proj = FCBlock(self.latent_embed_dim, 1, self.embed_dim, self.embed_dim)
             elif self.use_context_proj:
-                self.context_proj = Linear(self.embed_dim, self.embed_dim)
+                self.context_proj = Linear(self.latent_embed_dim, self.embed_dim)
             else:
                 self.context_proj = None
 
@@ -281,17 +282,17 @@ class DynamicEmbeddingBackbone(Backbone):
             else:
                 self.values_proj = None
 
-    # def upgrade_state_dict_named(self, state_dict, name):
-    #     for key in ('feats', 'keys', 'keep', 'points'):
-    #         values_weight = state_dict[name + '.' + key]
-    #         if values_weight.size(0) < getattr(self, key).size(0):  # update value embeddings
-    #             state_dict[name + '.' + key] = getattr(self, key).data.clone()
-    #             state_dict[name + '.' + key][: values_weight.size(0)] = values_weight
+    def upgrade_state_dict_named(self, state_dict, name):
+        for key in ('feats', 'keys', 'keep', 'points'):
+            values_weight = state_dict[name + '.' + key]
+            if values_weight.size(0) < getattr(self, key).size(0):  # update value embeddings
+                state_dict[name + '.' + key] = getattr(self, key).data.clone()
+                state_dict[name + '.' + key][: values_weight.size(0)] = values_weight
         
-    #     values_weight = state_dict[name + '.values.weight']
-    #     if values_weight.size(0) < self.values.weight.size(0):  # update value embeddings
-    #         state_dict[name + '.values.weight'] = self.values.weight.data.clone()
-    #         state_dict[name + '.values.weight'][: values_weight.size(0)] = values_weight 
+        values_weight = state_dict[name + '.values.weight']
+        if values_weight.size(0) < self.values.weight.size(0):  # update value embeddings
+            state_dict[name + '.values.weight'] = self.values.weight.data.clone()
+            state_dict[name + '.values.weight'][: values_weight.size(0)] = values_weight 
 
     @staticmethod
     def add_args(parser):
@@ -301,6 +302,7 @@ class DynamicEmbeddingBackbone(Backbone):
         parser.add_argument('--total-num-context', type=int, metavar='N', help="if use id as inputs, unique embeddings")
         parser.add_argument('--quantized-pos-embed', action='store_true', help="instead of standard embeddings, use positional embeddings")
         parser.add_argument('--quantized-xyz-embed', action='store_true', help='instead of positional embedding, use actual xyz as inputs')
+        parser.add_argument('--latent-code-embed-dim', type=int, metavar='N', help='latent codes')
         parser.add_argument('--quantized-context-proj', action='store_true')
         parser.add_argument('--use-hypernetwork', action='store_true')
         parser.add_argument('--post-context', action='store_true', help='redo contexturalization every time voxels splitted')
@@ -324,7 +326,7 @@ class DynamicEmbeddingBackbone(Backbone):
         
         return values, context
 
-    def _forward(self, id, step=0, pruner=None, offset=None, *args, **kwargs):
+    def _forward(self, id, step=0, pruner=None, offset=None, th=0.5, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
         values = self.values.weight[: self.num_keys] if self.values is not None else None
@@ -368,9 +370,10 @@ class DynamicEmbeddingBackbone(Backbone):
                     scores = pruner(
                         id=id, update=False, 
                         features=(feats, points, out_values),
-                        sizes=(voxel_size, march_size)).detach()
-                    
-                feats, points = pruning_points(feats, points, scores, self.fine_depth - t)
+                        sizes=(voxel_size, march_size))
+                    scores = scores.detach()
+                
+                feats, points = pruning_points(feats, points, scores, self.fine_depth - t, th=th)
                 march_size = march_size * .5
 
                 if not self.fixed_voxel_size:
@@ -420,7 +423,6 @@ class DynamicEmbeddingBackbone(Backbone):
         if update_buffer:
             new_num_keys = new_values.size(0)
             new_point_length = new_points.size(0)
-
             self.values.weight.data.index_copy_(
                 0,
                 torch.arange(new_num_keys, device=new_values.device),
@@ -438,6 +440,10 @@ class DynamicEmbeddingBackbone(Backbone):
     @property
     def feature_dim(self):
         return self.embed_dim
+
+    @property
+    def latent_code_dim(self):
+        return self.latent_embed_dim
 
     @property
     def networks_not_freeze(self):

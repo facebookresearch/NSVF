@@ -71,8 +71,9 @@ def load_rgb(
         img[:, :, :3] *= 2.
 
     img[:, :, :3] = img[:, :, :3] * img[:, :, 3:] + np.asarray(bg_color)[None, None, :] * (1 - img[:, :, 3:])
-    # img[:, :, 3] = (img[:, :, :3] != bg_color).any(-1) 
+    img[:, :, 3] = img[:, :, 3] * (img[:, :, :3] != np.asarray(bg_color)[None, None, :]).any(-1) 
     img = img.transpose(2, 0, 1)
+    
     return img, uv, ratio
 
 
@@ -190,7 +191,7 @@ def sample_pixel_from_image(
     center_ratio=1.0,
     width=512,
     patch_size=1):
-
+    
     if patch_size > 1:
         assert (num_pixel % (patch_size * patch_size) == 0) \
             and (num_sample % (patch_size * patch_size) == 0), "size must match"

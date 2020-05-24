@@ -1,23 +1,25 @@
-ROOT=/private/home/jgu/data/
-DATA=srn_data
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3
+ROOT=/private/home/jgu/data/3d_ssl2/ScannetScan/data_render2/
+DATA=scene0101_04
+WORK=/checkpoint/jgu/space/neuralrendering/debug_scannetv2
 mkdir -p ${WORK}
 
-GRID=geo_shapenet_seq1283
+# GRID=geo_scannet00
+# GRID=geo_scannet01
+GRID=geo_scannet3
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-python fb_sweep/sweep_shapenet.py \
-    --data ${ROOT}/${DATA}/training_set \
+python fb_sweep/sweep_scannet3.py \
+    --data ${ROOT}/${DATA}/data  \
     --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
-    --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
+    --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_noprune \
+    --prefix ${DATA}v0 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -27,19 +29,21 @@ python fb_sweep/sweep_shapenet.py \
     --comment "NeurIPS2020 deadline." \
     --partition priority \
     --resume-failed \
-    --local
-   
-# popd 
+    # --local \
 
-# python fb_sweep/sweep_shapenet.py \
-#     --data ${ROOT}/${DATA}/training_set  \
+   
+# popd
+
+# CUDA_VISIBLE_DEVICES=0 \
+# python fb_sweep/sweep_scannet.py \
+#     --data ${ROOT}/${DATA}/data  \
 #     --grid $GRID \
 #     --user-dir "fairdr" \
 #     --checkpoints-dir ${WORK} \
-#     --no-tensorboard \
+#     --tensorboard-logdir ${WORK}/tensorboard \
 #     --snapshot-code \
 #     --snapshot-root ${WORK}/snapshot \
-#     --prefix ${DATA}v11 \
+#     --prefix ${DATA}v9 \
 #     --num-trials 1 \
 #     --num-gpus 1 \
 #     --num-nodes 1 \

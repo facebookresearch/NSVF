@@ -95,7 +95,7 @@ for i, data in enumerate(packed_data):
         image_mask = data['mask'].reshape(imgH, imgW).astype(np.int)
     else:
         image_mask = (data['alpha']>0).reshape(imgH, imgW).astype(np.int)
-    # from fairseq import pdb; pdb.set_trace()
+
     res = image_mask[sub_uvs[1, :], sub_uvs[0, :]]
     occupancy[indices] += res
 

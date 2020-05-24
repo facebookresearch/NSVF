@@ -269,7 +269,10 @@ class GEONERFModel(SRNModel):
     def _forward(self, ray_start, ray_dir, id, depths=None, **kwargs):
         # get geometry features
         feats, xyz, values, codes = self.field.get_backbone_features(
-            id=id, step=self.set_level(), pruner=self.field.pruning, **kwargs)
+            id=id, step=self.set_level(), 
+            pruner=self.field.pruning, 
+            th=getattr(self.args, "pruning_th", 0.5),
+            **kwargs)
 
         # latent regularization
         latent_loss = torch.mean(codes ** 2) if codes is not None else 0
@@ -444,7 +447,7 @@ class GEORadianceField(Field):
         else:
             self.feature_field = HyperImplicitField(
                 args,
-                self.backbone.feature_dim,  # currently assume latent dim = feature dim
+                self.backbone.latent_code_dim,
                 self.backbone.feature_dim + self.raypos_features, 
                 args.output_features, 
                 args.hidden_features, 
@@ -582,7 +585,7 @@ class GEORadianceField(Field):
             voxel_size, march_size = sizes
 
         D = feats.size(-1)
-        G = 16 # int(voxel_size / march_size)  # how many microgrids to steps
+        G = 16 if update else int(voxel_size / march_size)  # how many microgrids to steps
         
         # prepare queries for all the voxels
         c = torch.arange(1, 2 * G, 2, device=xyz.device)
@@ -612,8 +615,8 @@ class GEORadianceField(Field):
             sigma_dist = sigma_dist.reshape(-1, G ** 3)
             score = sigma_dist.sum(-1)
         else:
-            sigma = torch.relu(sigma).reshape(-1, G ** 3)
-            score = sigma.max(-1)[0]
+            sigma_dist = torch.relu(sigma).reshape(-1, G ** 3)
+            score = sigma_dist.max(-1)[0]
 
         if update:
             alpha = 1 - torch.exp(-score)   # probability of filling the full voxel
@@ -728,6 +731,7 @@ class GEORaymarcher(Raymarcher):
 
         point_xyz = point_xyz.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), 3))
         point_feats = point_feats.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), D))
+
         sigma, texture = field_fn(queries, point_feats, point_xyz, [values], querie_dirs, chunk_size=chunk_size)
         noise = 0 if not self.discrete_reg and (not self.training) \
             else torch.zeros_like(sigma).normal_()
@@ -855,6 +859,7 @@ def geo_base_architecture(args):
     args.online_pruning = getattr(args, "online_pruning", False)
     args.quantized_voxel_path = getattr(args, "quantized_voxel_path", None)
     args.quantized_embed_dim = getattr(args, "quantized_embed_dim", 384)
+    args.latent_code_embed_dim = getattr(args, "latent_code_embed_dim", 256)
     args.quantized_pos_embed = getattr(args, "quantized_pos_embed", False)
     args.quantized_xyz_embed = getattr(args, "quantized_xyz_embed", False)
     args.quantized_context_proj = getattr(args, "quantized_context_proj", False)

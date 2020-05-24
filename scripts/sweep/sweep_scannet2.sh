@@ -19,7 +19,7 @@ python fb_sweep/sweep_scannet2.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}v2 \
+    --prefix ${DATA}v3 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

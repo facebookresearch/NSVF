@@ -237,6 +237,8 @@ class SingleObjRenderingTask(FairseqTask):
                 self.datasets[split]
             )
 
+            # print(len(self.datasets[split]))
+            # 1 // 0
         else:
             self.datasets[split] = ShapeViewDataset(
                 self.test_data,
@@ -343,7 +345,14 @@ class SingleObjRenderingTask(FairseqTask):
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
+        h, w, h0, w0 = [c.long() for c in sample['size'][0, 0]]
         
+        if sample['rgb'].shape[-2] < (h * w / h0 / w0):
+            # this is a dummy batch
+            logging_output['ssim_loss'] = 0
+            logging_output['psnr_loss'] = 0
+            return loss, sample_size, logging_output            
+
         # compute PSNR & SSMI for validation
         predicts, targets = model.cache['predicts'], sample['rgb']
         ssims, psnrs = [], []
