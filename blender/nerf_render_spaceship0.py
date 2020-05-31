@@ -6,13 +6,13 @@ import numpy as np
 
 DEBUG = False
 
-VIEWS = 400
+VIEWS = 1
 RESOLUTION = 800
-RESULTS_PATH = 'results'
+RESULTS_PATH = 'output'
 DEPTH_SCALE = 1.4
 COLOR_DEPTH = 8
 FORMAT = 'PNG'
-RANDOM_VIEWS = True
+RANDOM_VIEWS = False
 UPPER_VIEWS = False
 CIRCLE_FIXED_START = (.3,0,0)
 

@@ -17,7 +17,7 @@ python fb_sweep/sweep_shapenet.py \
     --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_v5test \
+    --prefix ${DATA}_oneshot2 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -27,7 +27,7 @@ python fb_sweep/sweep_shapenet.py \
     --comment "NeurIPS2020 deadline." \
     --partition priority \
     --resume-failed \
-    --local \
+    # --local \
    
 # popd
 

@@ -1,12 +1,9 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=barn_srn
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev2
+ROOT=/private/home/jgu/data/shapenet/final
+DATA=tanksandtemple_barnv2
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
-GRID=geo_barn
-# GRID=geo_ignatius
-# GRID=geo_ignatius2
-# GRID=geo_ignatius_bg
+GRID=geo_barn_final
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -21,7 +18,7 @@ python fb_sweep/sweep_barn.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v3 \
+    --prefix ${GRID}v3.0 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

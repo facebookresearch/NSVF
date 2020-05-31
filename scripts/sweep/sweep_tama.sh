@@ -1,9 +1,12 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=tama
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_single
+ROOT=/private/home/jgu/data/shapenet/final
+DATA=blendedmvs_jade
+# ROOT=/private/home/jgu/data/shapenet/
+# DATA=tama
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
-GRID=geo_tama
+# GRID=geo_tama
+GRID=geo_jade_final
 # GRID=geo_ignatius2
 # GRID=geo_ignatius_bg
 ENGINE=~jgu/work/fairdr-exp
@@ -20,7 +23,7 @@ python fb_sweep/sweep_tama.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v2 \
+    --prefix ${GRID}v5 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

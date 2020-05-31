@@ -400,15 +400,15 @@ def get_shapenet_seq1282_grid(args):
 
     voxel_name = "/private/home/jgu/data/srn_data/initial_voxel.txt"
     hyperparams = [
-        hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+        # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
         # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
         hyperparam('--task', "sequence_object_rendering", save_dir_key=lambda val: "seq"),
         
         # task level
         hyperparam('--view-resolution', "128x128", save_dir_key=lambda val: f'{val}'),
-        # hyperparam('--max-sentences', 16, save_dir_key=lambda val: f's{val}'),
         hyperparam('--max-sentences', 16, save_dir_key=lambda val: f's{val}'),
+        # hyperparam('--max-sentences', 8, save_dir_key=lambda val: f's{val}'),
         hyperparam('--max-sentences-valid', 8),
         hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 1),
@@ -424,9 +424,9 @@ def get_shapenet_seq1282_grid(args):
         # hyperparam('--quantized-pos-embed', binary_flag=True, save_dir_key=lambda val: f'qpos'),
         hyperparam('--quantized-xyz-embed', binary_flag=True, save_dir_key=lambda val: f'qxyz'),
         # hyperparam('--quantized-context-proj', binary_flag=True, save_dir_key=lambda val: f'cp'),
-        # hyperparam('--use-hypernetwork', binary_flag=True, save_dir_key=lambda val: f'hyper'),
+        hyperparam('--use-hypernetwork', binary_flag=True, save_dir_key=lambda val: f'hyper'),
         # hyperparam('--normalize-context', binary_flag=True, save_dir_key=lambda val: f'nc')
-        hyperparam('--post-context', binary_flag=True, save_dir_key=lambda val: f'hpc'),
+        # hyperparam('--post-context', binary_flag=True, save_dir_key=lambda val: f'hpc'),
         hyperparam('--quantized-voxel-path', voxel_name),
         hyperparam('--quantized-embed-dim', 256, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--latent-code-embed-dim', 256),
@@ -441,7 +441,7 @@ def get_shapenet_seq1282_grid(args):
         # hyperparam('--encoder-layers', [1], save_dir_key=lambda val: f'enc{val}'),
         # hyperparam('--cross-attention-context', binary_flag=True, save_dir_key=lambda val: f'cac'),
         # hyperparam('--attention-context', binary_flag=True, save_dir_key=lambda val: f'ac'),
-        hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
+        hyperparam('--raymarching-stepsize', 0.025, save_dir_key=lambda val: f'ss{val}'),
         hyperparam('--voxel-size', 0.25, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 60),
         
@@ -449,8 +449,8 @@ def get_shapenet_seq1282_grid(args):
         hyperparam('--hidden-sdf', 128, save_dir_key=lambda val: f'sdfh{val}'),
         # hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
         # hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
-        
-        hyperparam('--raypos-features', 72, save_dir_key=lambda val: f'pos{val}'),
+
+        # hyperparam('--raypos-features', 72, save_dir_key=lambda val: f'pos{val}'),
         # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
         # hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
         hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
@@ -461,11 +461,11 @@ def get_shapenet_seq1282_grid(args):
 
         # dynamic pruning
         hyperparam('--online-pruning', binary_flag=True, save_dir_key=lambda val: f'pruning'),
-        hyperparam('--condition-on-marchsize', binary_flag=True, save_dir_key=lambda val: f'cm'),
-        hyperparam('--half-voxel-size-at', "5000,25000,75000", save_dir_key=lambda val: f'dyvox'),
+        # hyperparam('--condition-on-marchsize', binary_flag=True, save_dir_key=lambda val: f'cm'),
+        hyperparam('--half-voxel-size-at', "10000,75000", save_dir_key=lambda val: f'dyvox'),
         # hyperparam('--fixed-voxel-size', binary_flag=True, save_dir_key=lambda val: f'fv'),
         hyperparam('--use-max-pruning', binary_flag=True, save_dir_key=lambda val: 'maxp'),
-        hyperparam('--pruning-th', 0.2, save_dir_key=lambda val: 'th{val}'),
+        hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
 
         # evaluation with rendering
         # hyperparam('--rendering-every-steps', 2500),
@@ -486,20 +486,20 @@ def get_shapenet_seq1282_grid(args):
         hyperparam('--inner-chunking', False, binary_flag=True),        
         
         hyperparam('--rgb-weight', 128.0, save_dir_key=lambda val: f'rgb{val}'),
-        hyperparam('--alpha-weight', 1.0, save_dir_key=lambda val: f'alpha{val}'),
+        hyperparam('--alpha-weight', 0.0, save_dir_key=lambda val: f'alpha{val}'),
         # hyperparam('--entropy-weight', [10.0], save_dir_key=lambda val: f'ent{val}'),
-        hyperparam('--reg-weight', 1.0, save_dir_key=lambda val: f'latent{val}'),
+        hyperparam('--reg-weight', 0.0, save_dir_key=lambda val: f'latent{val}'),
         hyperparam('--vgg-weight', 0.0, save_dir_key=lambda val: f'vgg{val}'),
         # hyperparam('--vgg-level', 3, save_dir_key=lambda val: f'l{val}'),
 
         hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
         hyperparam('--adam-betas', '(0.9, 0.999)'),
-        # hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
-        hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: f'lr_poly'),
-        hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
+        hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
+        # hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: f'lr_poly'),
+        # hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
         # hyperparam('--lr', 0.0002, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
-        hyperparam('--end-learning-rate', 0.00001),
+        # hyperparam('--end-learning-rate', 0.0001),
         hyperparam('--clip-norm', 0.0),
 
         hyperparam('--dropout', 0.0),
@@ -507,8 +507,8 @@ def get_shapenet_seq1282_grid(args):
         hyperparam('--criterion', 'srn_loss'),
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [22], save_dir_key=lambda val: f'seed{val}'),
-        hyperparam('--save-interval-updates', 5),
-        hyperparam('--max-update', 300000),
+        hyperparam('--save-interval-updates', 500),
+        hyperparam('--max-update', 50000),
         
         hyperparam('--virtual-epoch-steps', 5000),
         hyperparam('--save-interval', 1),
@@ -518,11 +518,11 @@ def get_shapenet_seq1282_grid(args):
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
 
-    hyperparams += [
-        hyperparam('--restore-file', 
-        "/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3/srn_data_omega.fp16.seq.128x128.s16.v1.geo_nerf.qxyz.hpc.emb256.nf3.nt4.id.ss0.05.v0.25.posemb.sdfh128.pos72.bg1.0.dis.ps.pruning.cm.dyvox.maxp.p512.smk0.9.chk512.rgb128.0.alpha1.0.latent1.0.vgg0.0.adam.lr_poly.max100000.lr0.001.seed22.ngpu8/checkpoint_last.pt"
-        )
-    ]
+    # hyperparams += [
+    #     hyperparam('--restore-file', 
+    #     "/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3/srn_data_nparea.fp16.seq.128x128.s8.v1.geo_nerf.qxyz.hpc.emb256.nf3.nt4.id.ss0.025.v0.25.posemb.sdfh128.pos72.bg1.0.dis.ps.p512.smk0.9.chk512.rgb128.0.alpha1.0.latent1.0.vgg0.0.adam.lr_poly.max100000.lr0.001.seed22.ngpu8/checkpoint4.pt"
+    #     )
+    # ]
     return hyperparams
 
 
@@ -550,14 +550,19 @@ def get_shapenet_seq128fs_grid(args):
     ]
 
     hyperparams += [
+        # hypernetwork previously
+        # hyperparam('--restore-file',
+        #     "/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3/srn_data_biglr.seq.128x128.s16.v1.geo_nerf.qxyz.hyper.emb256.nf3.nt4.id.ss0.025.v0.25.posemb.sdfh128.bg1.0.dis.ps.pruning.dyvox.maxp.th{val}.p512.smk0.9.chk512.rgb128.0.alpha1.0.latent1.0.vgg0.0.adam.lr_poly.max100000.lr0.001.seed22.ngpu8/checkpoint_best.pt",
+        #     save_dir_key=lambda val: f'hhyper')
         hyperparam('--restore-file',
-            "/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3/srn_data_xyz.fp16.seq.128x128.s16.v1.geo_nerf.qxyz.hpc.emb384.id.ss0.05.v0.25.posemb.sdfh128.bg1.0.dis.ps.pruning.cm.dyvox.fv.p2048.smk0.9.chk512.rgb128.0.alpha1.0.latent1.0.vgg0.0.adam.lr_poly.max200000.lr0.001.seed22.ngpu8/checkpoint_last.pt")
+            "/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3/srn_data_biglr.fp16.seq.128x128.s16.v1.geo_nerf.qxyz.hpc.emb256.nf3.nt4.id.ss0.025.v0.25.posemb.sdfh128.bg1.0.dis.ps.pruning.dyvox.maxp.th{val}.p512.smk0.9.chk512.rgb128.0.alpha1.0.latent1.0.vgg0.0.adam.lr_poly.max100000.lr0.001.seed22.ngpu8/checkpoint_last.pt",
+            save_dir_key=lambda val: f'hhpc')
     ]
     return hyperparams
 
 
 @register_grid("geo_shapenet_seq1283")
-def get_shapenet_seq1282_grid(args):
+def get_shapenet_seq1283_grid(args):
     gen_args = {
         'render_resolution': "128x128",
         'render_output_types': ["target", "hit", "rgb", "depth", "normal"],

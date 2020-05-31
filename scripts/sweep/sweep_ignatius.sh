@@ -1,6 +1,6 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=ignatius_new
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev2
+ROOT=/private/home/jgu/data/shapenet/final/
+DATA=tanksandtemple_ignatius
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
 # GRID=geo_ignatius
@@ -21,7 +21,7 @@ python fb_sweep/sweep_ignatius.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v3 \
+    --prefix ${GRID}v1 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -31,7 +31,7 @@ python fb_sweep/sweep_ignatius.py \
     --comment "NeurIPS2020 deadline." \
     --partition priority \
     --resume-failed \
-    --local \
+    # --local \
 
 
 # python fb_sweep/sweep_ignatius.py \

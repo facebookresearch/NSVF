@@ -1,23 +1,23 @@
 ROOT=/private/home/jgu/data/shapenet/
-DATA=wine-holder
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev2
+DATA=wineholder
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
-GRID=geo_wineholder
+GRID=geo_wineholder3
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
 python fb_sweep/sweep_wineholder.py \
-    --data ${ROOT}/${DATA}/  \
+    --data ${ROOT}/${DATA}/0000  \
     --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v1 \
+    --prefix ${GRID}_latest_bv0 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -27,10 +27,10 @@ python fb_sweep/sweep_wineholder.py \
     --comment "NeurIPS2020 deadline." \
     --partition priority \
     --resume-failed \
-    --local \
+    # --dry-run
+    # --local \
    
 # popd
-
 # python fb_sweep/sweep_babyangel.py \
 #     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \

@@ -1,9 +1,9 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=springs
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev2
+ROOT=/private/home/jgu/data/shapenet/final
+DATA=blendedmvs_springs
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
-GRID=geo_spring
+GRID=geo_spring_final
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -18,7 +18,7 @@ python fb_sweep/sweep_spring.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v3.1 \
+    --prefix ${GRID}v2.2 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

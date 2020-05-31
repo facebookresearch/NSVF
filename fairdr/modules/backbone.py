@@ -184,7 +184,7 @@ class DynamicEmbeddingBackbone(Backbone):
         init_length = init_points.size(0)
         fine_points, fine_depth = expand_points(init_points, self.voxel_size)
         fine_length = fine_points.size(0)
-
+ 
         # working in LONG space
         fine_coords = (fine_points / self.half_voxel).floor_().long()
         offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
@@ -250,16 +250,18 @@ class DynamicEmbeddingBackbone(Backbone):
                 self.values_proj = Linear(self.embed_dim, self.embed_dim)
         
         elif self.use_xyz_embed:
-            self.values = Embedding(fine_keys.shape[0], 3, None)
-            self.values.weight.data = (fine_keys.float() / abs(fine_keys.float()).max())
+            # self.values = Embedding(fine_keys.shape[0], 3, None)
+            # self.values.weight.data = (fine_keys.float() / abs(fine_keys.float()).max())
+            self.values = Embedding(self.total_size, 3, None)
+            self.values.weight.data[:fine_keys.shape[0]] = fine_keys.float()
             self.values.weight.requires_grad = False
 
             if self.use_context is not None and self.use_hypernetwork:
                 self.values_hyper = HyperFC(
-                        hyper_in_ch=self.embed_dim,
+                        hyper_in_ch=self.latent_embed_dim,
                         hyper_num_hidden_layers=1,
-                        hyper_hidden_ch=self.embed_dim,
-                        hidden_ch=self.embed_dim,
+                        hyper_hidden_ch=self.latent_embed_dim,
+                        hidden_ch=self.latent_embed_dim,
                         num_hidden_layers=2,
                         in_ch=3, out_ch=self.embed_dim,
                         outermost_linear=True)
@@ -418,7 +420,8 @@ class DynamicEmbeddingBackbone(Backbone):
 
         # split points
         new_points, new_feats, new_values = splitting_points(point_xyz, point_feats, self.offset, half_voxel)
-        
+        # print(new_points.shape, self.feats.shape, self.values.weight.shape, new_values.shape)
+        # 1 // 0
         # assign to the parameters    
         if update_buffer:
             new_num_keys = new_values.size(0)

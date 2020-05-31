@@ -15,8 +15,8 @@ python render.py ${DATASET} \
     --render-beam 1 \
     --render-angular-speed 3 \
     --render-save-fps 24 \
-    --render-num-frames 120 \
-    --render-resolution "480x640" \
+    --render-num-frames 400 \
+    --render-resolution "360x480" \
     --render-camera-poses ${DATASET}/test_traj.txt \
     --render-output /private/home/jgu/data/test_images/output_scannet \
     --render-output-types "rgb" "depth" "normal" \

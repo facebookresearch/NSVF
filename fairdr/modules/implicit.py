@@ -10,16 +10,25 @@ import torch.nn.functional as F
 from fairseq.utils import get_activation_fn
 from fairdr.modules.utils import FCLayer, ResFCLayer
 from fairdr.modules.hyper import HyperFC
+from fairdr.modules.linear import NeRFPosEmbLinear
 
 class ImplicitField(nn.Module):
     
     """
     An implicit field is a neural network that outputs a vector given any query point.
     """
-    def __init__(self, args, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False):
+    def __init__(self, 
+        args, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
         super().__init__()
         self.args = args
-        
+
+        if pos_proj > 0:
+            new_in_dim = in_dim * 2 * pos_proj
+            self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
+            in_dim = new_in_dim + in_dim
+        else:
+            self.nerfpos = None
+
         self.net = []
         self.net.append(FCLayer(in_dim, hidden_dim))
         for _ in range(num_layers):
@@ -38,15 +47,24 @@ class ImplicitField(nn.Module):
             nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity='relu', mode='fan_in')
 
     def forward(self, x):
+        if self.nerfpos is not None:
+            x = torch.cat([x, self.nerfpos(x)], -1)
         return self.net(x)
 
 
 class HyperImplicitField(nn.Module):
 
-    def __init__(self, args, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False):
+    def __init__(self, args, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
         super().__init__()
 
         self.args = args
+        if pos_proj > 0:
+            new_in_dim = in_dim * 2 * pos_proj
+            self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
+            in_dim = new_in_dim + in_dim
+        else:
+            self.nerfpos = None
+
         self.net = HyperFC(
             hyper_in_dim,
             1, 256, 
@@ -58,6 +76,8 @@ class HyperImplicitField(nn.Module):
         )
 
     def forward(self, x, i, c):
+        if self.nerfpos is not None:
+            x = torch.cat([x, self.nerfpos(x)], -1)
         net = self.net(c)
         
         def flat2mx(x, i):

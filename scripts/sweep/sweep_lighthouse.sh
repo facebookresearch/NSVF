@@ -1,9 +1,9 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=lighthouse2
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev2
+ROOT=/private/home/jgu/data/shapenet/final
+DATA=synthetic_lighthouse
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
-GRID=geo_lighthouse
+GRID=geo_lighthouse_final
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -17,7 +17,7 @@ python fb_sweep/sweep_lighthouse.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID} \
+    --prefix ${GRID}s3 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -30,7 +30,6 @@ python fb_sweep/sweep_lighthouse.py \
     --local \
    
 # popd
-
 # python fb_sweep/sweep_babyangel.py \
 #     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \

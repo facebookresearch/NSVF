@@ -8,12 +8,12 @@ DEBUG = False
 
 VIEWS = 400
 RESOLUTION = 800
-RESULTS_PATH = 'results'
+RESULTS_PATH = 'results3'
 DEPTH_SCALE = 1.4
 COLOR_DEPTH = 8
 FORMAT = 'PNG'
 RANDOM_VIEWS = True
-UPPER_VIEWS = False
+UPPER_VIEWS = True
 CIRCLE_FIXED_START = (.3,0,0)
 
 
@@ -101,7 +101,7 @@ scene.render.resolution_y = RESOLUTION
 scene.render.resolution_percentage = 100
 
 cam = scene.objects['Camera']
-cam.location = (2.5, 0, 0)
+cam.location = (2, 0, 0)
 cam_constraint = cam.constraints.new(type='TRACK_TO')
 cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
 cam_constraint.up_axis = 'UP_Y'

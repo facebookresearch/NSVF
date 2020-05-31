@@ -6,7 +6,7 @@ import numpy as np
 
 DEBUG = False
 
-VIEWS = 400
+VIEWS = 200
 RESOLUTION = 800
 RESULTS_PATH = 'results'
 DEPTH_SCALE = 1.4

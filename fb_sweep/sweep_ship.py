@@ -34,12 +34,12 @@ def get_newlego_trans_grid(args):
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
         
         # task level
-        hyperparam('--view-resolution', "400x400", save_dir_key=lambda val: f'{val}x{val}'),
+        hyperparam('--view-resolution', "800x800", save_dir_key=lambda val: f'{val}'),
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 4, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 1),
         hyperparam('--train-views', "0..100"),
-        hyperparam('--valid-views', "0..96"),
+        hyperparam('--valid-views', "100..200"),
         
        # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
@@ -65,8 +65,8 @@ def get_newlego_trans_grid(args):
         # dynamic pruning
         hyperparam('--pruning-every-steps', 2500, save_dir_key=lambda val: f'prune{val}'),
         hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
-        hyperparam('--half-voxel-size-at', "5000,25000", save_dir_key=lambda val: f'dyvox'),
-        hyperparam('--reduce-step-size-at', "5000,25000"),
+        hyperparam('--half-voxel-size-at', "5000,25000,75000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--reduce-step-size-at', "5000,25000,75000"),
         hyperparam('--use-max-pruning', binary_flag=True, save_dir_key=lambda val: 'maxp'),
         hyperparam('--total-num-embedding', 60000, save_dir_key=lambda val: '60k'),
 
@@ -79,7 +79,7 @@ def get_newlego_trans_grid(args):
         # hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
 
         # training arguments
-        hyperparam('--pixel-per-view', 4096, save_dir_key=lambda val: f'p16384'),
+        hyperparam('--pixel-per-view', 2048, save_dir_key=lambda val: f'p16384'),
         hyperparam('--sampling-on-mask', 0.8),
         hyperparam('--sampling-on-bbox', binary_flag=True),
         # hyperparam('--sampling-patch-size', 4, save_dir_key=lambda val: f'patch{val}'),

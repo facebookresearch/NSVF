@@ -1,6 +1,6 @@
 ROOT=/private/home/jgu/data/shapenet/
-DATA=ship
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_single
+DATA=ship_full
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
 GRID=geo_ship
@@ -17,7 +17,7 @@ python fb_sweep/sweep_ship.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v2 \
+    --prefix ${GRID}v1 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -25,7 +25,7 @@ python fb_sweep/sweep_ship.py \
     --constraint volta32gb \
     --exclusive \
     --comment "NeurIPS2020 deadline." \
-    --partition learnfair \
+    --partition priority \
     --resume-failed \
     # --local \
    

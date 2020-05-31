@@ -4,6 +4,7 @@ WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3
 mkdir -p ${WORK}
 
 GRID=geo_shapenet_seq1283
+GRID=geo_shapenet_seq1282
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -17,7 +18,7 @@ python fb_sweep/sweep_shapenet.py \
     --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_noprune \
+    --prefix ${DATA}_fixed \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

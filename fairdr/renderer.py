@@ -106,6 +106,14 @@ class NeuralRenderer(object):
         image_names = []
         sample, step = sample
 
+        # fix the rendering size
+        a = sample['size'][0,0,0] / self.resolution[0]
+        b = sample['size'][0,0,1] / self.resolution[1]
+        sample['size'][:, :, 0] /= a
+        sample['size'][:, :, 1] /= b
+        sample['size'][:, :, 2] *= a
+        sample['size'][:, :, 3] *= b
+
         for shape in range(sample['shape'].size(0)):
             max_step = step + self.frames
             while step < max_step:
@@ -118,7 +126,7 @@ class NeuralRenderer(object):
                         self.test_poses[k] if self.test_poses is not None else None)
                     for k in range(step, next_step)
                 ])
-        
+                
                 voxels, points = sample.get('voxels', None), sample.get('points', None)
                 real_images = sample['full_rgb'] if 'full_rgb' in sample else sample['rgb']
                 real_images = real_images.transpose(2, 3) if real_images.size(-1) != 3 else real_images

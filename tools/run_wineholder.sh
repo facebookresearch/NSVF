@@ -1,6 +1,6 @@
-DIR="/private/home/jgu/data/shapenet/wine-holder/"
+DIR="/private/home/jgu/data/shapenet/wineholder/0000/"
 python tools/visual_hull.py \
-    --dir $DIR --frames 400 --voxel_res 128 --th 390 \
-    --fname "voxel.txt" \
-    --image_res "800x800" --extent 4.0 \
-    --downsample 0.4 --boundingbox --expand_bbox 0.5 \
+    --dir $DIR --frames 200 --voxel_res 256 --th 150 \
+    --fname "voxel0.2.txt" \
+    --image_res "800x800" --extent 10.0 \
+    --downsample 0.2 --boundingbox --expand_bbox 1.0 \

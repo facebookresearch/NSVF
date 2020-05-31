@@ -237,7 +237,7 @@ class ShapeViewDataset(ShapeDataset):
             for id in range(self.total_num_shape): 
                 element = {}
                 total_num_view = len(_data_per_view['rgb'][id])
-                perm_ids = np.random.permutation(total_num_view)
+                perm_ids = np.random.permutation(total_num_view) if train else np.arange(total_num_view)
                 for key in _data_per_view:
                     element[key] = [_data_per_view[key][id][i] for i in perm_ids]
                 self.data[_index].update(element)
@@ -403,7 +403,7 @@ class ShapeViewStreamDataset(ShapeViewDataset):
         for i, d in enumerate(self.data):
             for j, _ in enumerate(d['rgb']):
                 self.data_index.append((i, j))   # shape i, view j
-
+        
     def __len__(self):
         return len(self.data_index)
 

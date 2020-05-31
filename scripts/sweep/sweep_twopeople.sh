@@ -1,9 +1,9 @@
-ROOT=/private/home/jgu/data/shapenet/
-DATA=twopeople
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_single
+ROOT=/private/home/jgu/data/shapenet/final
+DATA=blendedmvs_twopeople
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
-GRID=geo_twopeople
+GRID=geo_twopeople_final
 # GRID=geo_ignatius2
 # GRID=geo_ignatius_bg
 ENGINE=~jgu/work/fairdr-exp

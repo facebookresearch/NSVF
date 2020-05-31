@@ -49,7 +49,8 @@ def load_rgb(
     resolution=None, 
     with_alpha=True, 
     bg_color=[1.0, 1.0, 1.0],
-    min_rgb=-1):
+    min_rgb=-1,
+    interpolation='AREA'):
     if with_alpha:
         img = imageio.imread(path)  # RGB-ALPHA
     else:
@@ -64,7 +65,8 @@ def load_rgb(
     
     uv, ratio = get_uv(H, W, h, w)
     if (h < H) or (w < W):
-        img = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST).astype('float32')
+        # img = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST).astype('float32')
+        img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA).astype('float32')
 
     if min_rgb == -1:  # 0, 1  --> -1, 1
         img[:, :, :3] -= 0.5
@@ -277,14 +279,12 @@ def write_images(writer, images, updates):
         writer.add_image(tag, img, updates, dataformats=dataform)
 
 
-def compute_psnr(predicts, targets, width=512):
+def compute_psnr(p, t):
     """Compute PSNR of model image predictions.
     :param prediction: Return value of forward pass.
     :param ground_truth: Ground truth.
     :return: (psnr, ssim): tuple of floats
     """
-    p = recover_image(predicts, width=width).numpy()
-    t = recover_image(targets, width=width).numpy()
     ssim = skimage.metrics.structural_similarity(p, t, multichannel=True, data_range=1)
     psnr = skimage.metrics.peak_signal_noise_ratio(p, t, data_range=1)
     return ssim, psnr

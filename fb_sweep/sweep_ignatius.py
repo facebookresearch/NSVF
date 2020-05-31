@@ -159,27 +159,27 @@ def get_ignatius2_grid(args):
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
         hyperparam('--view-per-batch', 4, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 1),
-        hyperparam('--train-views', "0..263"),
-        hyperparam('--valid-views', "0..256:4"),
+        hyperparam('--train-views', "0..230"),
+        hyperparam('--valid-views', "230..263"),
 
         # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
-        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/ignatius_new/new_bbvoxel0.4.txt"),
+        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/final/tanksandtemple_ignatius/new_bbvoxel0.4.txt"),
         hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
+        hyperparam('--num-layer-textures', 4, save_dir_key=lambda val: f'nt{val}'),
         hyperparam('--voxel-size', 0.4, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 60),
         
-        hyperparam('--quantized-xyz-embed', binary_flag=True, save_dir_key=lambda val: f'qxyz'),  # QXYZ
-
+        # hyperparam('--quantized-xyz-embed', binary_flag=True, save_dir_key=lambda val: f'qxyz'),  # QXYZ
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
-        hyperparam('--hidden-sdf', 128, save_dir_key=lambda val: f'sdfh{val}'),
+        hyperparam('--hidden-sdf', 256, save_dir_key=lambda val: f'sdfh{val}'),
 
         hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
         hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
         # hyperparam('--raypos-features', 0, save_dir_key=lambda val: f'pos{val}'),
-        # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
-        # hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
+        hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
+        hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
         
         hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
         hyperparam('--background-stop-gradient', True, binary_flag=True, save_dir_key=lambda val: f'bgsg'),
@@ -225,6 +225,7 @@ def get_ignatius2_grid(args):
         hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: f'lr_poly'),
         hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
+        hyperparam('--end-learning-rate', 0.0001),
         hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
 
         hyperparam('--dropout', 0.0),

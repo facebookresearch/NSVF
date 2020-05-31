@@ -18,7 +18,7 @@ parser.add_argument('--extent', type=float, default=5.0)
 parser.add_argument('--marching_cube', action='store_true')
 parser.add_argument('--downsample', type=float, default=4.0)
 parser.add_argument('--load_mask', action='store_true')
-parser.add_argument('--white-bg', action='store_true')
+parser.add_argument('--white_bg', action='store_true')
 parser.add_argument('--boundingbox', action='store_true')
 parser.add_argument('--visualhull_only', action='store_true')
 parser.add_argument('--expand_bbox', type=float, default=0.5)
@@ -35,7 +35,8 @@ print(DIR)
 dataset = ShapeViewDataset(
     DIR, list(range(args.frames)), args.frames, 
     load_mask=args.load_mask, binarize=False,
-    resolution=args.image_res)
+    resolution=args.image_res,
+    bg_color=1.0)
 
 # visual-hull parameters
 s = args.voxel_res     # voxel resolution
@@ -132,7 +133,7 @@ def voxelize_pcd(verts, voxel_size, fname):
 
 def voxelize_bbx(verts, voxel_size, fname):
     eps = args.expand_bbox
-    xyz_min, xyz_max = verts.min(0) - voxel_size * eps, verts.max(0) + voxel_size * eps
+    xyz_min, xyz_max = verts.min(0) - voxel_size * (0.1 * eps), verts.max(0) + voxel_size * eps
     x, y, z = np.mgrid[
         range(int((xyz_max[0] - xyz_min[0]) / voxel_size) + 1),
         range(int((xyz_max[1] - xyz_min[1]) / voxel_size) + 1),

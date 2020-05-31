@@ -5,9 +5,10 @@
 import os
 import json
 import torch
+import imageio
 import numpy as np
 from collections import defaultdict
-
+from torchvision.utils import save_image
 from argparse import Namespace
 
 from fairseq.tasks import FairseqTask, register_task
@@ -17,7 +18,7 @@ from fairdr.data import (
     ShapeViewDataset, SampledPixelDataset, ShapeViewStreamDataset,
     WorldCoordDataset, ShapeDataset, InfiniteDataset
 )
-from fairdr.data.data_utils import write_images, compute_psnr
+from fairdr.data.data_utils import write_images, compute_psnr, recover_image
 from fairdr.renderer import NeuralRenderer
 from fairdr.data.trajectory import get_trajectory
 
@@ -84,6 +85,8 @@ class SingleObjRenderingTask(FairseqTask):
         parser.add_argument("--pruning-th", type=float, default=0.5,
                             help="if larger than this, we choose keep the voxel.")
 
+        parser.add_argument("--output-valid", type=str, default=None)
+
     def __init__(self, args):
         super().__init__(args)
         
@@ -91,7 +94,8 @@ class SingleObjRenderingTask(FairseqTask):
         self.train_data = self.val_data = self.test_data = args.data
         self.object_ids = None if args.object_id_path is None else \
             {line.strip(): i for i, line in enumerate(open(args.object_id_path))}
-            
+        self.output_valid = getattr(args, "output_valid", None)
+        
         if os.path.isdir(args.data):
             if os.path.exists(args.data + '/train.txt'):
                 self.train_data = args.data + '/train.txt'
@@ -101,6 +105,10 @@ class SingleObjRenderingTask(FairseqTask):
                 self.test_data = args.data + '/test.txt'
             if self.object_ids is None and os.path.exists(args.data + '/object_ids.txt'):
                 self.object_ids = {line.strip(): i for i, line in enumerate(open(args.data + '/object_ids.txt'))}
+        if self.object_ids is not None:
+            self.ids_object = {self.object_ids[o]: o for o in self.object_ids}
+        else:
+            self.ids_object = {0: 'model'}
 
         if len(self.args.tensorboard_logdir) > 0 and getattr(args, "distributed_rank", -1) == 0:
             from tensorboardX import SummaryWriter
@@ -329,7 +337,8 @@ class SingleObjRenderingTask(FairseqTask):
             (self._num_updates > 0) and \
             self.renderer is not None:
 
-            outputs = self.inference_step(self.renderer, [model], [sample, 0])[1]
+            sample_clone = {key: sample[key].clone() if sample[key] is not None else None for key in sample }
+            outputs = self.inference_step(self.renderer, [model], [sample_clone, 0])[1]
             if getattr(self.args, "distributed_rank", -1) == 0:  # save only for master
                 self.renderer.save_images(outputs, self._num_updates)
         
@@ -358,7 +367,15 @@ class SingleObjRenderingTask(FairseqTask):
         ssims, psnrs = [], []
         for s in range(predicts.size(0)):
             for v in range(predicts.size(1)):
-                ssim, psnr = compute_psnr(predicts[s, v], targets[s, v], int(sample['size'][s, v][1]))
+                width = int(sample['size'][s, v][1])
+                p = recover_image(predicts[s, v], width=width).numpy()
+                t = recover_image(targets[s, v], width=width).numpy()
+                ssim, psnr = compute_psnr(p, t)
+                
+                if self.output_valid is not None:
+                    self.save_image(p, sample['id'][s], sample['view'][s, v], 'srn')
+                    self.save_image(t, sample['id'][s], sample['view'][s, v], 'gt')
+
                 ssims.append(ssim)
                 psnrs.append(psnr)
         logging_output['ssim_loss'] = np.mean(ssims)
@@ -379,6 +396,19 @@ class SingleObjRenderingTask(FairseqTask):
         
         return loss, sample_size, logging_output
     
+    def save_image(self, img, id, view, group='gt'):
+        object_name = self.ids_object[id.item()]
+        def _mkdir(x):
+            if not os.path.exists(x):
+                os.mkdir(x)
+        _mkdir(self.output_valid)
+        _mkdir(os.path.join(self.output_valid, group))  
+        _mkdir(os.path.join(self.output_valid, group, object_name))
+        imageio.imsave(os.path.join(
+            self.output_valid, group, object_name, '{:04d}.png'.format(view)), 
+            (img * 255).astype(np.uint8))
+
+
 
 @register_task("sequence_object_rendering")
 class SequenceObjRenderingTask(SingleObjRenderingTask):

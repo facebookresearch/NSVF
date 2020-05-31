@@ -124,7 +124,7 @@ def _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, determinis
 
 @torch.no_grad()
 def parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
-    chunk_size=8192
+    chunk_size=4096
     full_size = min_depth.shape[0]
     if full_size <= chunk_size:
         return _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=deterministic)
@@ -205,6 +205,7 @@ class GEONERFModel(SRNModel):
                             help='use positional embedding instead of linear projection')
         parser.add_argument('--use-raydir', action='store_true', 
                             help='if set, use view direction as additional inputs')
+        parser.add_argument('--add-pos-embed', type=int, metavar='N')
         parser.add_argument('--raypos-features', type=int, metavar='N', 
                             help='additional to backbone, additional feature dimensions')
         parser.add_argument('--raydir-features', type=int, metavar='N',
@@ -294,14 +295,14 @@ class GEONERFModel(SRNModel):
         missed = predicts.new_ones(S * V * P)
         first_hits = predicts.new_ones(S * V * P).fill_(500)
         entropy = 0.0
+        steps_passed = first_hits.new_zeros(1)
 
         hits, _ray_start, _ray_dir, state, samples, gt_depths = \
             self.raymarcher.ray_intersection(ray_start, ray_dir, xyz, feats, gt_depths)
         
-        steps_passed = samples[2].sum(-1) / self.field.MARCH_SIZE
-        
         # fine-grained raymarching + rendering
         if hits.sum() > 0:   # missed everything
+            steps_passed = samples[2].sum(-1) / self.field.MARCH_SIZE
             hits = hits.view(S * V * P).contiguous()
             _predicts, _depths, _missed, entropy = self.raymarcher(
                 self.field, _ray_start, _ray_dir, samples, state, values, gt_depths=gt_depths)
@@ -443,7 +444,8 @@ class GEORadianceField(Field):
                     self.backbone.feature_dim + self.raypos_features, 
                     args.output_features, 
                     args.hidden_features, 
-                    args.num_layer_features - 1)
+                    args.num_layer_features - 1,
+                    pos_proj=getattr(args, "add_pos_embed", 0))
         else:
             self.feature_field = HyperImplicitField(
                 args,
@@ -827,6 +829,7 @@ def plain_architecture(args):
     args.use_raydir = getattr(args, "use_raydir", False)
     args.raydir_features = getattr(args, "raydir_features", 0)
     args.raypos_features = getattr(args, "raypos_features", 0)
+    args.add_pos_embed = getattr(args, "add_pos_embed", 0)
     args.saperate_specular = getattr(args, "saperate_specular", False)
     args.specular_dropout = getattr(args, "specular_dropout", 0.0)
     args.voxel_size = getattr(args, "voxel_size", 0.25)
