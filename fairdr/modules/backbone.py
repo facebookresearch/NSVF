@@ -169,11 +169,15 @@ class Backbone(nn.Module):
 @register_backnone('dynamic_embedding')
 class DynamicEmbeddingBackbone(Backbone):
 
-    def __init__(self, args):
+    def __init__(self, args, quantized_voxel_path=None):
         super().__init__(args)
 
-        self.voxel_path = args.quantized_voxel_path if args.quantized_voxel_path is not None \
-            else os.path.join(args.data, 'voxel.txt')
+        if quantized_voxel_path is not None:
+            self.voxel_path = quantized_voxel_path
+        else:
+            self.voxel_path = args.quantized_voxel_path if args.quantized_voxel_path is not None \
+                else os.path.join(args.data, 'voxel.txt')
+        print(self.voxel_path)
         assert os.path.exists(self.voxel_path), "Initial voxel file does not exist..."
 
         self.voxel_size = args.voxel_size  # voxel size
@@ -273,10 +277,10 @@ class DynamicEmbeddingBackbone(Backbone):
             self.values = Embedding(self.total_size, self.embed_dim, None)
             if self.use_context is not None and self.use_hypernetwork:
                 self.values_hyper = HyperFC(
-                        hyper_in_ch=self.embed_dim,
+                        hyper_in_ch=self.latent_embed_dim,
                         hyper_num_hidden_layers=1,
-                        hyper_hidden_ch=self.embed_dim,
-                        hidden_ch=self.embed_dim,
+                        hyper_hidden_ch=self.latent_embed_dim,
+                        hidden_ch=self.latent_embed_dim,
                         num_hidden_layers=1,
                         in_ch=self.embed_dim, 
                         out_ch=self.embed_dim,
@@ -445,6 +449,10 @@ class DynamicEmbeddingBackbone(Backbone):
         return self.embed_dim
 
     @property
+    def dummy_loss(self):
+        return self.values.weight[0,0] * 0.0
+
+    @property
     def latent_code_dim(self):
         return self.latent_embed_dim
 
@@ -455,6 +463,47 @@ class DynamicEmbeddingBackbone(Backbone):
         else:
             raise NotImplementedError
 
+
+@register_backnone("multi_embedding")
+class MultiDynamicEmbeddingBackbone(Backbone):
+    def __init__(self, args):
+        super().__init__(args)
+        self.voxel_lists = open(args.quantized_voxel_path).readlines()
+        self.backbones = nn.ModuleList(
+            [DynamicEmbeddingBackbone(args, vox.strip()) for vox in self.voxel_lists])
+        self.current_id = None
+        self.offset = self.backbones[0].offset
+
+    def _forward(self, id, *args, **kwargs):
+        assert id.size(0) == 1, "for now, only works for one object"
+        self.current_id = id[0]
+        return self.backbones[id[0]]._forward(id, *args, **kwargs)
+    
+    def get_features(self, x, values):
+        return F.embedding(x, values)
+
+    def pruning(self, keep):
+        self.backbones[self.current_id].pruning(keep)
+
+    def splitting(self, *args, **kwargs):
+        for i in range(len(self.backbones)):
+            self.backbones[i].splitting(*args, **kwargs)
+
+    @property
+    def feature_dim(self):
+        return self.backbones[0].embed_dim
+
+    @property
+    def keep(self):
+        return torch.cat([b.keep for b in self.backbones], -1)
+
+    @property
+    def dummy_loss(self):
+        return sum([b.dummy_loss for b in self.backbones])
+
+    @staticmethod
+    def add_args(parser):
+        pass
 
 @register_backnone("transformer")
 class TransformerBackbone(DynamicEmbeddingBackbone):

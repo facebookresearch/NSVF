@@ -19,6 +19,7 @@ from fairdr.data import (
     WorldCoordDataset, ShapeDataset, InfiniteDataset
 )
 from fairdr.data.data_utils import write_images, compute_psnr, recover_image
+from fairdr.data.geometry import ray, compute_normal_map
 from fairdr.renderer import NeuralRenderer
 from fairdr.data.trajectory import get_trajectory
 
@@ -241,12 +242,11 @@ class SingleObjRenderingTask(FairseqTask):
                 bg_color=getattr(self.args, "transparent_background", "1,1,1"),
                 min_color=getattr(self.args, "min_color", -1),
                 ids=self.object_ids)
+            
             self.datasets[split] = WorldCoordDataset(
                 self.datasets[split]
             )
 
-            # print(len(self.datasets[split]))
-            # 1 // 0
         else:
             self.datasets[split] = ShapeViewDataset(
                 self.test_data,
@@ -330,7 +330,13 @@ class SingleObjRenderingTask(FairseqTask):
             (self._num_updates % self.pruning_every_steps == 0) and \
             (self._num_updates > 0):
             model.eval()
-            model.adjust('prune', id=sample['id'], th=self.pruning_th)
+            if self.args.backbone == 'multi_embedding':
+                K = len(model.field.backbone.backbones)
+                for k in range(K):
+                    ids = torch.ones_like(sample['id']) * k
+                    model.adjust('prune', id=ids, th=self.pruning_th)
+            else:
+                model.adjust('prune', id=sample['id'], th=self.pruning_th)
 
         if self.rendering_every_steps is not None and \
             (self._num_updates % self.rendering_every_steps == 0) and \
@@ -354,32 +360,52 @@ class SingleObjRenderingTask(FairseqTask):
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
+        predicts, targets = model.cache['predicts'], sample['rgb']
         h, w, h0, w0 = [c.long() for c in sample['size'][0, 0]]
-        
-        if sample['rgb'].shape[-2] < (h * w / h0 / w0):
+        if targets.shape[-2] < (h * w / h0 / w0):
             # this is a dummy batch
             logging_output['ssim_loss'] = 0
             logging_output['psnr_loss'] = 0
             return loss, sample_size, logging_output            
 
         # compute PSNR & SSMI for validation
-        predicts, targets = model.cache['predicts'], sample['rgb']
-        ssims, psnrs = [], []
+        ssims, psnrs, lpipss = [], [], []
         for s in range(predicts.size(0)):
             for v in range(predicts.size(1)):
                 width = int(sample['size'][s, v][1])
-                p = recover_image(predicts[s, v], width=width).numpy()
-                t = recover_image(targets[s, v], width=width).numpy()
-                ssim, psnr = compute_psnr(p, t)
+                p = recover_image(predicts[s, v], width=width)
+                t = recover_image(targets[s, v], width=width)
+                ssim, psnr = compute_psnr(p.numpy(), t.numpy())
                 
+                if criterion.lpips is not None:
+                    with torch.no_grad():
+                        lpips = criterion.lpips.forward(
+                            p.unsqueeze(-1).permute(3,2,0,1),
+                            t.unsqueeze(-1).permute(3,2,0,1),
+                            normalize=True).item()
+                    lpipss.append(lpips)
+
                 if self.output_valid is not None:
-                    self.save_image(p, sample['id'][s], sample['view'][s, v], 'srn')
-                    self.save_image(t, sample['id'][s], sample['view'][s, v], 'gt')
+                    self.save_image(p.numpy(), sample['id'][s], sample['view'][s, v], 'srn')
+                    self.save_image(t.numpy(), sample['id'][s], sample['view'][s, v], 'gt')
+                    
+                    normals = compute_normal_map(
+                        sample['ray_start'][s, v].float(),
+                        sample['ray_dir'][s, v].float(),
+                        model.cache['depths'][s, v].float(),
+                        sample['extrinsics'][s, v].float().inverse(),
+                        800)
+                    normals = recover_image(normals, width=800)
+                    self.save_image(normals.numpy(), sample['id'][s], sample['view'][s, v], 'normal')
 
                 ssims.append(ssim)
                 psnrs.append(psnr)
+
         logging_output['ssim_loss'] = np.mean(ssims)
         logging_output['psnr_loss'] = np.mean(psnr)
+
+        if len(lpipss) > 0:
+            logging_output['lpips_loss'] = np.mean(lpipss)
         
         if self.writer is not None:
             images = model.visualize(

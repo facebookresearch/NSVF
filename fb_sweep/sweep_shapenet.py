@@ -495,10 +495,11 @@ def get_shapenet_seq1282_grid(args):
         hyperparam('--optimizer', 'adam', save_dir_key=lambda val: val),
         hyperparam('--adam-betas', '(0.9, 0.999)'),
         hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
+        hyperparam('--reset-lr-scheduler', binary_flag=True),
         # hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: f'lr_poly'),
         # hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
         # hyperparam('--lr', 0.0002, save_dir_key=lambda val: f'lr{val}'),
-        hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
+        hyperparam('--lr', 0.00025, save_dir_key=lambda val: f'lr{val}'),
         # hyperparam('--end-learning-rate', 0.0001),
         hyperparam('--clip-norm', 0.0),
 
@@ -508,7 +509,7 @@ def get_shapenet_seq1282_grid(args):
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [22], save_dir_key=lambda val: f'seed{val}'),
         hyperparam('--save-interval-updates', 500),
-        hyperparam('--max-update', 50000),
+        hyperparam('--max-update', 100000),
         
         hyperparam('--virtual-epoch-steps', 5000),
         hyperparam('--save-interval', 1),
@@ -518,11 +519,11 @@ def get_shapenet_seq1282_grid(args):
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
 
-    # hyperparams += [
-    #     hyperparam('--restore-file', 
-    #     "/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3/srn_data_nparea.fp16.seq.128x128.s8.v1.geo_nerf.qxyz.hpc.emb256.nf3.nt4.id.ss0.025.v0.25.posemb.sdfh128.pos72.bg1.0.dis.ps.p512.smk0.9.chk512.rgb128.0.alpha1.0.latent1.0.vgg0.0.adam.lr_poly.max100000.lr0.001.seed22.ngpu8/checkpoint4.pt"
-    #     )
-    # ]
+    hyperparams += [
+        hyperparam('--restore-file', 
+        "/checkpoint/jgu/space/neuralrendering/debug_new_chairsv3/srn_data_fixed.seq.128x128.s16.v1.geo_nerf.qxyz.hyper.emb256.nf3.nt4.id.ss0.025.v0.25.posemb.sdfh128.bg1.0.dis.ps.pruning.dyvox.maxp.th0.5.p512.smk0.9.chk512.rgb128.0.alpha0.0.latent0.0.vgg0.0.adam.lr_fixed.lr0.001.seed22.ngpu8/checkpoint10.pt"
+        )
+    ]
     return hyperparams
 
 

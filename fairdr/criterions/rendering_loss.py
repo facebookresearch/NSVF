@@ -41,7 +41,10 @@ class RenderingCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+        import time
+        t0 = time.time()
         net_output = model(**sample)
+        t1 = time.time()
         loss, loss_output = self.compute_loss(model, net_output, sample, reduce=reduce)
         sample_size = 1
         
@@ -51,6 +54,7 @@ class RenderingCriterion(FairseqCriterion):
             'ntokens':  sample['alpha'].size(1),
             'npixels': sample['alpha'].size(2),
             'sample_size': sample_size,
+            'time': t1 - t0
         }
         for w in loss_output:
             logging_output[w] = loss_output[w]
@@ -102,7 +106,12 @@ class SRNLossCriterion(RenderingCriterion):
             self.vgg = VGGPerceptualLoss(resize=True)
             self._dummy = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float32), 
                         requires_grad=True)  # HACK: to avoid warnings in c10d
-
+        if getattr(args, "use_lpips", False):
+            import fairdr.criterions.models as models
+            self.lpips = models.PerceptualLoss(model='net-lin',net='alex',use_gpu=False)
+        else:
+            self.lpips = None
+            
     @staticmethod
     def add_args(parser):
         """Add criterion-specific arguments to the parser."""
@@ -133,6 +142,7 @@ class SRNLossCriterion(RenderingCriterion):
                             help="do not compute RGB-loss on the background.")
         parser.add_argument('--random-background-loss', action='store_true',
                             help='set if we are using transparent image')
+        parser.add_argument('--use-lpips', action='store_true')
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         alpha = sample['alpha']
@@ -255,6 +265,10 @@ class SRNLossCriterion(RenderingCriterion):
             losses['pruning_loss'] = (net_output['pruning_loss'], self.args.pruning_weight)
 
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
+        
+        # add a dummy loss
+        loss = loss + model.field.backbone.dummy_loss
+        
         logging_outputs = {key: item(losses[key][0]) for key in losses}
         logging_outputs.update(other_logs)
         return loss, logging_outputs

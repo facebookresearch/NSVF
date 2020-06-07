@@ -155,7 +155,6 @@ __global__ void aabb_intersect_point_kernel(
     }
   }
 }
-            
 
 void ball_intersect_point_kernel_wrapper(
   int b, int n, int m, float radius, int n_max,

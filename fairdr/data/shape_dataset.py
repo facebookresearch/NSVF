@@ -46,10 +46,11 @@ class ShapeDataset(FairseqDataset):
         if self.load_point:
             _data_per_shape['pts'] = self.find_point()
 
-        if ids is None:
-            _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
-        else:
-            _data_per_shape['shape'] = [ids[path.split('/')[-1]] for path in self.paths]
+        # TODO: FIXME LATER
+        # if ids is None:
+        _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
+        # else:
+        #     _data_per_shape['shape'] = [ids[path.split('/')[-1]] for path in self.paths]
             
         if self.subsample_valid > -1:
             for key in _data_per_shape:
@@ -248,7 +249,7 @@ class ShapeViewDataset(ShapeDataset):
                                 f"{'.d' if load_depth else ''}" + \
                                 f"{'.m' if load_mask else ''}" + \
                                 f"{'b' if not self.apply_mask_color else ''}" + \
-                                f"{'.p' if load_point else ''}"
+                                f"{'.p' if load_point else ''}" + "_full"
                     logger.info("preload {}-{}".format(id, phase_name))
                     if binarize:
                         cache = self._load_binary(id, np.arange(total_num_view), phase_name)

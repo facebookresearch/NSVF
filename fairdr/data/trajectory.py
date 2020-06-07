@@ -40,11 +40,11 @@ def zoomin_circle(radius=3.5, h=0.0, axis='z', t0=0, r=1):
 
 
 @register_traj('zoomin_line')
-def zoomin_line(radius=3.5, h=0.0, axis='z', t0=0, r=1):
-    ra = lambda t: 0.1 + abs(4.0 - t * 2 / np.pi)
+def zoomin_line(radius=3.5, h=0.0, axis='z', t0=0, r=1, min_r=0.0001, max_r=10, step_r=10):
+    ra = lambda t: min_r + (max_r - min_r) * t * 180 / np.pi / step_r
 
     if axis == 'z':
-        return lambda t: [radius * ra(t) * np.cos(t0), radius * ra(t) * np.sin(t0), h]
+        return lambda t: [radius * ra(t) * np.cos(t0), radius * ra(t) * np.sin(t0), h * ra(t)]
     elif axis == 'y':
         return lambda t: [radius * ra(t) * np.cos(t0), h, radius * ra(t) * np.sin(t0)]
     else:

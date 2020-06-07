@@ -5,7 +5,7 @@ mkdir -p ${WORK}
 
 # GRID=geo_ignatius
 # GRID=geo_ignatius
-GRID=geo_family2
+GRID=geo_family3
 # GRID=geo_ignatius_bg
 ENGINE=~jgu/work/fairdr-exp
 
@@ -21,7 +21,7 @@ python fb_sweep/sweep_family.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v1 \
+    --prefix ${GRID}_resume \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -31,7 +31,7 @@ python fb_sweep/sweep_family.py \
     --comment "NeurIPS2020 deadline." \
     --partition priority \
     --resume-failed \
-    #--local \
+    --local \
 
 
 # python fb_sweep/sweep_ignatius.py \

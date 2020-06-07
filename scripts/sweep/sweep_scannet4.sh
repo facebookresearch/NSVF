@@ -1,18 +1,18 @@
-ROOT=/private/home/jgu/data/3d_ssl2/ScannetScan/data_render2/
-DATA=scene0101_04
+ROOT=/private/home/jgu/data/shapenet/
+DATA=select_0241
 WORK=/checkpoint/jgu/space/neuralrendering/debug_scannetv2
 mkdir -p ${WORK}
 
 # GRID=geo_scannet00
 # GRID=geo_scannet01
-GRID=geo_scannet32
+GRID=geo_scannet42
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-python fb_sweep/sweep_scannet3.py \
-    --data ${ROOT}/${DATA}/data2  \
+python fb_sweep/sweep_scannet4.py \
+    --data ${ROOT}/${DATA}  \
     --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \

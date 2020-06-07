@@ -87,8 +87,13 @@ class NeuralRenderer(object):
 
         h, w, rh, rw = img_size[0], img_size[1], img_size[2], img_size[3]
         uv = torch.from_numpy(get_uv(h * rh, w * rw, h, w)[0]).type_as(intrinsics)
+        # uv = torch.from_numpy(get_uv(h, w, h, w)[0]).type_as(intrinsics)
         uv = uv.reshape(2, -1)
-    
+        # intrinsics[0,0] = 1200
+        # intrinsics[1,1] = 1200
+        # intrinsics[0,2] = 800
+        # intrinsics[1,2] = 400
+
         ray_start = inv_RT[:3, 3]
         ray_dir = geometry.get_ray_direction(ray_start, uv, intrinsics, inv_RT)
         return ray_start[None, :], ray_dir.transpose(0, 1), inv_RT
@@ -103,6 +108,7 @@ class NeuralRenderer(object):
 
         timer = StopwatchMeter(round=4)
         rgb_path = tempfile.mkdtemp()
+        # rgb_path = '/checkpoint/jgu/space/neuralrendering/results/multi_nerf'
         image_names = []
         sample, step = sample
 
@@ -118,8 +124,6 @@ class NeuralRenderer(object):
             max_step = step + self.frames
             while step < max_step:
                 next_step = min(step + self.beam, max_step)
-                logger.info("rendering frames: {}".format(step))
-                
                 ray_start, ray_dir, inv_RT = zip(*[
                     self.generate_rays(
                         k, sample['intrinsics'][shape], sample['size'][shape, 0],
@@ -146,10 +150,12 @@ class NeuralRenderer(object):
                     'raymarching_steps': self.raymarching_steps,
                     'size': torch.cat([sample['size'][shape:shape+1] for _ in range(step, next_step)], 1),
                 }
-
+                # from fairseq import pdb; pdb.set_trace()
                 timer.start()
-                _ = model(**_sample)
+                outs = model(**_sample)
                 timer.stop()
+
+                logger.info("rendering frames: {} {:.4f} {:.4f}".format(step, outs['other_logs']['spf_log'], outs['other_logs']['sp0_log']))
 
                 for k in range(step, next_step):
                     images = model.visualize(
@@ -192,13 +198,13 @@ class NeuralRenderer(object):
             imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=8)
             # imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=10)
 
-        logger.info("cleaning the temple files..")
-        try:
-            for mydir in set([os.path.dirname(path) for path in output_files]):
-                shutil.rmtree(mydir)
-        except OSError as e:
-            print ("Error: %s - %s." % (e.filename, e.strerror))
-            raise OSError    
+        # logger.info("cleaning the temple files..")
+        # try:
+        #     for mydir in set([os.path.dirname(path) for path in output_files]):
+        #         shutil.rmtree(mydir)
+        # except OSError as e:
+        #     print ("Error: %s - %s." % (e.filename, e.strerror))
+        #     raise OSError    
         
         return timestamp
 

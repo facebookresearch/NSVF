@@ -1,10 +1,10 @@
 ROOT=/private/home/jgu/data/shapenet/maria/
 DATA=maria_seq_small
 DATA=maria_seq
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_maria_hyper
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_full
 mkdir -p ${WORK}
 
-GRID=geo_maria_seq_hyper
+# GRID=geo_maria_seq_hyper
 GRID=geo_maria_seq_hyper005
 ENGINE=~jgu/work/fairdr-exp
 
@@ -19,7 +19,7 @@ python fb_sweep/sweep_maria.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}005t3 \
+    --prefix ${DATA}_latest666 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -27,7 +27,7 @@ python fb_sweep/sweep_maria.py \
     --constraint volta32gb \
     --exclusive \
     --comment "NeurIPS2020 deadline." \
-    --partition learnfair \
+    --partition priority \
     --resume-failed \
     --local \
    

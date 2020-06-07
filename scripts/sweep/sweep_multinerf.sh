@@ -1,25 +1,24 @@
-ROOT=/private/home/jgu/data/3d_ssl2/ScannetScan/data_render2/
-DATA=scene0101_04
-WORK=/checkpoint/jgu/space/neuralrendering/debug_scannetv2
+ROOT=/private/home/jgu/data/shapenet/
+DATA=multi_nerf
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_full
 mkdir -p ${WORK}
 
-# GRID=geo_scannet00
-# GRID=geo_scannet01
-GRID=geo_scannet32
+GRID=geo_nerf
+GRID=geo_nerf0
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
 #  --tensorboard-logdir ${WORK}/tensorboard \
-python fb_sweep/sweep_scannet3.py \
-    --data ${ROOT}/${DATA}/data2  \
+python fb_sweep/sweep_multinerf.py \
+    --data ${ROOT}/${DATA}/train_full.txt  \
     --grid $GRID \
     --user-dir "fairdr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${DATA}_bboxv2 \
+    --prefix ${GRID}fullv0 \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -30,16 +29,15 @@ python fb_sweep/sweep_scannet3.py \
     --partition priority \
     --resume-failed \
     --local \
-
    
 # popd
-# CUDA_VISIBLE_DEVICES=0 \
-# python fb_sweep/sweep_scannet.py \
-#     --data ${ROOT}/${DATA}/data  \
+
+# python fb_sweep/sweep_babyangel.py \
+#     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \
 #     --user-dir "fairdr" \
 #     --checkpoints-dir ${WORK} \
-#     --tensorboard-logdir ${WORK}/tensorboard \
+#     --no-tensorboard \
 #     --snapshot-code \
 #     --snapshot-root ${WORK}/snapshot \
 #     --prefix ${DATA}v9 \

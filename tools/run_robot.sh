@@ -1,4 +1,5 @@
 DIR="/private/home/jgu/data/shapenet/robot/0000/"
+DIR="/private/home/jgu/data/shapenet/robot2/robot/0000/"
 python tools/visual_hull.py \
     --dir $DIR --frames 200 --voxel_res 250 --th 120 \
     --fname "voxel2.txt" \

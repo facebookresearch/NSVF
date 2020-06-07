@@ -251,8 +251,8 @@ def sample_pixel_from_image(
         return np.random.choice(num_pixel, num_sample)
 
 def colormap(dz):
-    return plt.cm.jet(dz)
-
+    #return plt.cm.jet(dz)
+    return plt.cm.viridis(dz)
 
 def recover_image(img, min_val=-1, max_val=1, width=512, bg=None):
     sizes = img.size()

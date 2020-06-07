@@ -3,7 +3,7 @@ DATA=wineholder
 WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
-GRID=geo_wineholder3
+GRID=geo_wineholder4
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE

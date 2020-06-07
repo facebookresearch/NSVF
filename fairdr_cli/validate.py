@@ -101,14 +101,19 @@ def main(args, override_args=None):
             prefix=f"valid on '{subset}' subset",
             default_log_format=('tqdm' if not args.no_progress_bar else 'simple'),
         )
-
+        
         log_outputs = []
         for i, sample in enumerate(progress):
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             sample = utils.apply_to_sample(
                 lambda t: t.half() if t.dtype is torch.float32 else t, sample) if use_fp16 else sample
             try:
-                _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
+                with torch.no_grad():  # do not save backward passes
+                    max_num_rays = 900 * 900
+                    if sample['ray_dir'].shape[2] > max_num_rays:
+                        sample['ray_split'] = sample['ray_dir'].shape[2] // max_num_rays
+                    _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
+
                 progress.log(log_output, step=i)
                 log_outputs.append(log_output)
             

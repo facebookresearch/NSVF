@@ -98,11 +98,7 @@ def _main(args, output_file):
         for i, sample in enumerate(t):        
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             gen_timer.start()
-            
-            if i == 0:
-                # pruning before rendering
-                model.adjust('prune', id=sample['id'], th=0, use_max=True)
-
+           
             step, _output_files = task.inference_step(generator, models, [sample, step])
             output_files += _output_files
         
@@ -110,6 +106,7 @@ def _main(args, output_file):
             wps_meter.update(500)
             t.log({'wps': round(wps_meter.avg)})
             
+            break
             # if i > 5:
             #     break
 
