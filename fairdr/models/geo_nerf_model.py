@@ -297,11 +297,10 @@ class GEONERFModel(SRNModel):
     
     def encoder(self, id, action='none', step=0, **kwargs):
         if action == 'none':
-            vertex = PlyData.read('/private/home/jgu/data/test_images/some_binary3.ply')['vertex']
-            x, y, z = vertex['x'][:, None], vertex['y'][:, None], vertex['z'][:, None]
-            points = torch.from_numpy(np.concatenate([x, y, z], 1)).type_as(self.field.backbone.points)
-            part_index = torch.from_numpy(vertex['quality']).type_as(self.field.backbone.keep)
-
+            # vertex = PlyData.read('/private/home/jgu/data/test_images/some_binary3.ply')['vertex']
+            # x, y, z = vertex['x'][:, None], vertex['y'][:, None], vertex['z'][:, None]
+            # points = torch.from_numpy(np.concatenate([x, y, z], 1)).type_as(self.field.backbone.points)
+            # part_index = torch.from_numpy(vertex['quality']).type_as(self.field.backbone.keep)
             self.field.backbone.keep = torch.zeros_like(self.field.backbone.keep).scatter_(0, part_index, 1)
             self.field.backbone.points.scatter_(0, part_index[:, None].expand_as(points), points)
 
