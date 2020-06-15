@@ -21,14 +21,14 @@ python fb_sweep/sweep_twopeople.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}_restart \
+    --prefix ${GRID}_novdir \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
     --mem 500gb \
     --constraint volta32gb \
     --exclusive \
-    --comment "NeurIPS2020 deadline." \
+    --comment "NeurIPS2020 supplemental deadline." \
     --partition priority \
     --resume-failed \
     # --local \

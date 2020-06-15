@@ -7,7 +7,7 @@
 This file is to simulate "generator" in fairseq
 """
 
-import os, tempfile, shutil
+import os, tempfile, shutil, glob
 import time
 import torch
 import numpy as np
@@ -18,6 +18,7 @@ from torchvision.utils import save_image
 from fairdr.data import trajectory, geometry, data_utils
 from fairseq.meters import StopwatchMeter
 from fairdr.data.data_utils import recover_image, get_uv
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class NeuralRenderer(object):
                 output_type=None,
                 fps=24,
                 test_camera_poses=None,
+                test_camera_intrinsics=None,
                 interpolation=False):
 
         self.frames = frames
@@ -62,17 +64,27 @@ class NeuralRenderer(object):
         if self.output_type is None:
             self.output_type = ["rgb"]
 
+        if test_camera_intrinsics is not None:
+            self.test_int = data_utils.load_intrinsics(test_camera_intrinsics)
+        else:
+            self.test_int = None
+
         if test_camera_poses is not None:
-            self.test_poses = data_utils.load_matrix(test_camera_poses)
-            if len(self.test_poses.shape) == 2:
+            if os.path.isdir(test_camera_poses):
+                self.test_poses = [
+                    np.loadtxt(f)[None, :, :] for f in sorted(glob.glob(test_camera_poses + "/*.txt"))]
+                self.test_poses = np.concatenate(self.test_poses, 0)
+            else:
+                self.test_poses = data_utils.load_matrix(test_camera_poses)
                 self.test_poses = self.test_poses.reshape(-1, 4, 4)
 
-            self.test_poses[:, :, 1] = -self.test_poses[:, :, 1]
-            self.test_poses[:, :, 2] = -self.test_poses[:, :, 2]
+            # inverse the axis
+            # self.test_poses[:, :, 1] = -self.test_poses[:, :, 1]
+            # self.test_poses[:, :, 2] = -self.test_poses[:, :, 2]
         else:
             self.test_poses = None
 
-    def generate_rays(self, t, intrinsics, img_size, inv_RT=None):
+    def generate_rays(self, t, intrinsics, img_size, inv_RT=None, action='none'):
         if inv_RT is None:
             cam_pos = torch.tensor(self.path_gen(t * self.speed / 180 * np.pi), 
                         device=intrinsics.device, dtype=intrinsics.dtype)
@@ -84,19 +96,34 @@ class NeuralRenderer(object):
             inv_RT[3, 3] = 1
         else:
             inv_RT = torch.from_numpy(inv_RT).type_as(intrinsics)
-
+        
         h, w, rh, rw = img_size[0], img_size[1], img_size[2], img_size[3]
-        uv = torch.from_numpy(get_uv(h * rh, w * rw, h, w)[0]).type_as(intrinsics)
-        # uv = torch.from_numpy(get_uv(h, w, h, w)[0]).type_as(intrinsics)
-        uv = uv.reshape(2, -1)
-        # intrinsics[0,0] = 1200
-        # intrinsics[1,1] = 1200
-        # intrinsics[0,2] = 800
-        # intrinsics[1,2] = 400
+        if action == 'multi_compose':  # TODO: DO NOT CHANGE IT.     
+            uv = torch.from_numpy(get_uv(h, w, h, w)[0]).type_as(intrinsics)
+            intrinsics[0,0] = 1200
+            intrinsics[1,1] = 1200
+            intrinsics[0,2] = 800
+            intrinsics[1,2] = 400
+        elif self.test_int is not None:
+            uv = torch.from_numpy(get_uv(h, w, h, w)[0]).type_as(intrinsics)
+            intrinsics = self.test_int
+        else:
+            uv = torch.from_numpy(get_uv(h * rh, w * rw, h, w)[0]).type_as(intrinsics)
 
+        uv = uv.reshape(2, -1)
         ray_start = inv_RT[:3, 3]
         ray_dir = geometry.get_ray_direction(ray_start, uv, intrinsics, inv_RT)
         return ray_start[None, :], ray_dir.transpose(0, 1), inv_RT
+
+    def parse_sample(self,sample):
+        if len(sample) == 1:
+            return sample[0], 0, self.frames
+        elif len(sample) == 2:
+            return sample[0], sample[1], self.frames
+        elif len(sample) == 3:
+            return sample[0], sample[1], sample[2]
+        else:
+            raise NotImplementedError
 
     @torch.no_grad()    
     def generate(self, models, sample, **kwargs):
@@ -107,10 +134,12 @@ class NeuralRenderer(object):
         logger.info("rendering starts. {}".format(model.text))
 
         timer = StopwatchMeter(round=4)
-        rgb_path = tempfile.mkdtemp()
-        # rgb_path = '/checkpoint/jgu/space/neuralrendering/results/multi_nerf'
+        output_path = self.output_dir
+        # action = 'multi_compose' #  'none'
+        action = 'none'
+        # action = 'steamtrain'
         image_names = []
-        sample, step = sample
+        sample, step, frames = self.parse_sample(sample)
 
         # fix the rendering size
         a = sample['size'][0,0,0] / self.resolution[0]
@@ -121,13 +150,14 @@ class NeuralRenderer(object):
         sample['size'][:, :, 3] *= b
 
         for shape in range(sample['shape'].size(0)):
-            max_step = step + self.frames
+            max_step = step + frames
             while step < max_step:
                 next_step = min(step + self.beam, max_step)
                 ray_start, ray_dir, inv_RT = zip(*[
                     self.generate_rays(
                         k, sample['intrinsics'][shape], sample['size'][shape, 0],
-                        self.test_poses[k] if self.test_poses is not None else None)
+                        self.test_poses[k] if self.test_poses is not None else None,
+                        action=action)
                     for k in range(step, next_step)
                 ])
                 
@@ -136,7 +166,7 @@ class NeuralRenderer(object):
                 real_images = real_images.transpose(2, 3) if real_images.size(-1) != 3 else real_images
                 _sample = {
                     'id': sample['id'][shape:shape+1],
-                    'offset': float((step % self.frames)) / float(self.frames) if self.use_interpolation else None,
+                    'offset': float((step % frames)) / float(frames) if self.use_interpolation else None,
                     'rgb': torch.cat([real_images[shape:shape+1] for _ in range(step, next_step)], 1),
                     'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
                     'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
@@ -149,12 +179,18 @@ class NeuralRenderer(object):
                     'points': points[shape:shape+1].clone() if points is not None else None,
                     'raymarching_steps': self.raymarching_steps,
                     'size': torch.cat([sample['size'][shape:shape+1] for _ in range(step, next_step)], 1),
+                    'action': action,
+                    'step': step
                 }
                 # from fairseq import pdb; pdb.set_trace()
                 timer.start()
+                
+                max_num_rays = 800 * 800
+                if _sample['ray_dir'].shape[2] > max_num_rays:
+                    _sample['ray_split'] = _sample['ray_dir'].shape[2] // max_num_rays
                 outs = model(**_sample)
-                timer.stop()
 
+                timer.stop()
                 logger.info("rendering frames: {} {:.4f} {:.4f}".format(step, outs['other_logs']['spf_log'], outs['other_logs']['sp0_log']))
 
                 for k in range(step, next_step):
@@ -164,16 +200,25 @@ class NeuralRenderer(object):
                                 depth_map=('depth' in self.output_type),
                                 normal_map=('normal' in self.output_type),
                                 hit_map=True)
-                    rgb_name = "{:04d}".format(k)
-                    
+                    image_name = "{:04d}".format(k)
+
                     for key in images:
                         type = key.split('/')[0]
                         if type in self.output_type:
+                            prefix = os.path.join(output_path, type)
+                            Path(prefix).mkdir(parents=True, exist_ok=True)
+                            
                             image = images[key].permute(2, 0, 1) \
-                                if images[key].dim() == 3 else torch.stack(3*[images[key]], 0)
-                            image_name = "{}/{}_{}.png".format(rgb_path, type, rgb_name)
-                            save_image(image, image_name, format=None)
-                            image_names.append(image_name)
+                                if images[key].dim() == 3 else torch.stack(3*[images[key]], 0)        
+                            save_image(image, os.path.join(prefix, image_name + '.png'), format=None)
+                            image_names.append(os.path.join(prefix, image_name + '.png'))
+                    
+                    # save pose matrix
+                    prefix = os.path.join(output_path, 'pose')
+                    Path(prefix).mkdir(parents=True, exist_ok=True)
+                    pose = self.test_poses[k] if self.test_poses is not None else inv_RT[k-step].cpu().numpy()
+                    np.savetxt(os.path.join(prefix, image_name + '.txt'), pose)    
+
                 step = next_step
 
         logger.info("total rendering time: {:.4f}s ({:.4f}s per frame)".format(

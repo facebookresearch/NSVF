@@ -4,6 +4,7 @@ WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
 GRID=geo_barn_final
+GRID=geo_barn
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -18,7 +19,7 @@ python fb_sweep/sweep_barn.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v3.0 \
+    --prefix ${GRID}_v1model \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

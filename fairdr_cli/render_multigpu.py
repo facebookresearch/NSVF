@@ -23,7 +23,7 @@ from fairseq.options import add_distributed_training_args
 from fairdr import options
 
 
-def main(args):
+def main(args, *kwargs):
     assert args.path is not None, '--path required for generation!'
 
     if args.results_path is not None:
@@ -72,6 +72,8 @@ def _main(args, output_file):
         if use_cuda:
             model.cuda()
 
+    logging.info(model)
+
     # Load dataset (possibly sharded)
     itr = task.get_batch_iterator(
         dataset=task.dataset(args.gen_subset),
@@ -90,21 +92,25 @@ def _main(args, output_file):
     # Initialize generator
     gen_timer = StopwatchMeter()
     generator = task.build_generator(args)
-    shard_id = args.distributed_rank
+    shard_id, world_size = args.distributed_rank, args.distributed_world_size
+    output_files = []
+    if generator.test_poses is not None:
+        total_frames = generator.test_poses.shape[0]
+        _frames = int(np.floor(total_frames / world_size))
+        step = shard_id * _frames
+        frames = _frames if shard_id < (world_size - 1) else total_frames - step
+    else:
+        step = shard_id * args.render_num_frames
+        frames = args.render_num_frames
 
-    output_files, step= [], shard_id * args.render_num_frames
     with progress_bar.build_progress_bar(args, itr) as t:
         wps_meter = TimeMeter()
         for i, sample in enumerate(t):        
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             gen_timer.start()
             
-            # if i == 0:
-            #     # pruning before rendering
-            #     model.adjust('prune', id=sample['id'], th=0, use_max=True)
-
             step, _output_files = task.inference_step(
-                generator, models, [sample, step])
+                generator, models, [sample, step, frames])
             output_files += _output_files
         
             gen_timer.stop(500)
@@ -115,7 +121,11 @@ def _main(args, output_file):
         output_files, steps='shard{}'.format(shard_id), combine_output=args.render_combine_output)
 
     # join videos from all GPUs and delete temp files
-    timestamps = distributed_utils.all_gather_list(timestamp)
+    try:
+        timestamps = distributed_utils.all_gather_list(timestamp)
+    except:
+        timestamps = [timestamp]
+
     if shard_id == 0:
         generator.merge_videos(timestamps)
 

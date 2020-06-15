@@ -1,10 +1,10 @@
 ROOT=/private/home/jgu/data/shapenet/
 DATA=drums
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev2
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
 GRID=geo_drums
-GRID=geo_drums_reload
+# GRID=geo_drums_reload
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -18,7 +18,7 @@ python fb_sweep/sweep_drums.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}v2.1_reload \
+    --prefix ${GRID}v3fix \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \

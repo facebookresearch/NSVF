@@ -141,21 +141,30 @@ class SRNModel(BaseModel):
             'rgb/{}:HWC'.format(img_id):
                 {'img': output['predicts'][shape, view]},
         }
-        min_depth, max_depth = 0.0, 6.0
+        min_depth, max_depth = output['depths'].min(), output['depths'].max()
 
         if depth_map:
             images['depth/{}:HWC'.format(img_id)] = {
                 'img': output['depths'][shape, view], 
                 'min_val': min_depth, 
                 'max_val': max_depth}
-        
+
         if hit_map and 'hits' in output:
             images['hit/{}:HWC'.format(img_id)] = {
                 'img': output['hits'][shape, view].float(), 
                 'min_val': 0, 
-                'max_val': output['hits'].max(),
-                'bg': output['hits'].max()}
-        
+                'max_val': 1,
+                #'max_val': output['hits'].max(),
+                #'bg': output['hits'].max(),
+                'weight':
+                    compute_normal_map(
+                        sample['ray_start'][shape, view].float(),
+                        sample['ray_dir'][shape, view].float(),
+                        output['first_depths'][shape, view].float(),
+                        sample['extrinsics'][shape, view].float().inverse(),
+                        width, proj=True)
+                }
+                
         if target_map:
             images.update({
                 'target/{}:HWC'.format(img_id):

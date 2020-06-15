@@ -39,16 +39,18 @@ def get_2ppl_grid(args):
         # task level
         hyperparam('--view-resolution', '576x768', save_dir_key=lambda val: f'{val}'),
         hyperparam('--max-sentences', 1, save_dir_key=lambda val: f's{val}'),
-        hyperparam('--view-per-batch', 4, save_dir_key=lambda val: f'v{val}'),
+        hyperparam('--view-per-batch', 1, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--valid-view-per-batch', 1),
-        hyperparam('--train-views', "0..51"),
-        hyperparam('--valid-views', "51..59"),
+        # hyperparam('--train-views', "0..51"),
+        # hyperparam('--valid-views', "51..59"),
+        hyperparam('--train-views', "0..96"),
+        hyperparam('--valid-views', "96..110"),
 
         # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
         hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/final/blendedmvs_character/bbvoxel0.08.txt"),
-        hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
-        # hyperparam('--add-pos-embed', 6, save_dir_key=lambda val: f'addpos{val}'),
+        hyperparam('--quantized-embed-dim', 32, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--add-pos-embed', 6, save_dir_key=lambda val: f'addpos{val}'),
         hyperparam('--raymarching-stepsize', 0.01, save_dir_key=lambda val: f'ss{val}'),
         hyperparam('--voxel-size', 0.08, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 60),
@@ -69,14 +71,14 @@ def get_2ppl_grid(args):
         # dynamic pruning
         hyperparam('--pruning-every-steps', 2500, save_dir_key=lambda val: f'prune{val}'),
         hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
-        hyperparam('--half-voxel-size-at', "5000,25000", save_dir_key=lambda val: f'dyvox'),
-        hyperparam('--reduce-step-size-at', "5000,25000"),
+        hyperparam('--half-voxel-size-at', "5000,25000,75000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--reduce-step-size-at', "5000,25000,75000"),
         hyperparam('--total-num-embedding', 100000, save_dir_key=lambda val: '100k'),
         hyperparam('--use-max-pruning', binary_flag=True),
 
         # evaluation with rendering
-        hyperparam('--rendering-every-steps', 2500),
-        hyperparam('--rendering-args', gen_args),
+        #hyperparam('--rendering-every-steps', 2500),
+        #hyperparam('--rendering-args', gen_args),
 
         # dataset arguments
         # hyperparam('--no-load-binary', binary_flag=True),
@@ -87,7 +89,7 @@ def get_2ppl_grid(args):
         hyperparam('--sampling-on-mask', 0.8),
         hyperparam('--sampling-on-bbox', binary_flag=True),
         # hyperparam('--sampling-patch-size', 4, save_dir_key=lambda val: f'patch{val}'),
-        hyperparam('--chunk-size', 128, save_dir_key=lambda val: f'chk512'),
+        hyperparam('--chunk-size', 512, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', False, binary_flag=True),        
         
         hyperparam('--rgb-weight', 128.0, save_dir_key=lambda val: f'rgb{val}'),
@@ -101,7 +103,7 @@ def get_2ppl_grid(args):
         hyperparam('--adam-betas', '(0.9, 0.999)'),
         # hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
         hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: f'lr_poly'),
-        hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
+        hyperparam('--total-num-update', 150000, save_dir_key=lambda val: f'max{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
 
@@ -111,7 +113,7 @@ def get_2ppl_grid(args):
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [20], save_dir_key=lambda val: f'seed{val}'),
         hyperparam('--save-interval-updates', 250),
-        hyperparam('--max-update', 100000),
+        hyperparam('--max-update', 150000),
         hyperparam('--virtual-epoch-steps', 5000),
         hyperparam('--save-interval', 1),
         # hyperparam('--no-epoch-checkpoints'),

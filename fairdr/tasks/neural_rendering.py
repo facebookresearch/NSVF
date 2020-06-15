@@ -283,6 +283,7 @@ class SingleObjRenderingTask(FairseqTask):
                 else os.path.join(args.path, "output"),
             output_type=args.render_output_types,
             test_camera_poses=getattr(args, "render_camera_poses", None),
+            test_camera_intrinsics=getattr(args, "render_camera_intrinsics", None),
             interpolation=getattr(args, "render_interpolation", False)
         )
 
@@ -307,10 +308,8 @@ class SingleObjRenderingTask(FairseqTask):
         self._num_updates = num_updates
 
     def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
-        self._num_updates = update_num
-        
         if self.steps_to_half_voxels is not None and \
-            self._num_updates in self.steps_to_half_voxels:
+            (update_num in self.steps_to_half_voxels) and (update_num > self._num_updates):
             
             model.adjust('split')
             if isinstance(optimizer, FP16Optimizer):
@@ -327,8 +326,8 @@ class SingleObjRenderingTask(FairseqTask):
             self._safe_steps = 0
 
         if self.pruning_every_steps is not None and \
-            (self._num_updates % self.pruning_every_steps == 0) and \
-            (self._num_updates > 0):
+            (update_num % self.pruning_every_steps == 0) and \
+            (update_num > 0) and (update_num > self._num_updates):
             model.eval()
             if self.args.backbone == 'multi_embedding':
                 K = len(model.field.backbone.backbones)
@@ -339,23 +338,25 @@ class SingleObjRenderingTask(FairseqTask):
                 model.adjust('prune', id=sample['id'], th=self.pruning_th)
 
         if self.rendering_every_steps is not None and \
-            (self._num_updates % self.rendering_every_steps == 0) and \
-            (self._num_updates > 0) and \
-            self.renderer is not None:
+            (update_num % self.rendering_every_steps == 0) and \
+            (update_num > 0) and \
+            self.renderer is not None and (update_num > self._num_updates):
 
             sample_clone = {key: sample[key].clone() if sample[key] is not None else None for key in sample }
             outputs = self.inference_step(self.renderer, [model], [sample_clone, 0])[1]
             if getattr(self.args, "distributed_rank", -1) == 0:  # save only for master
-                self.renderer.save_images(outputs, self._num_updates)
-        
+                self.renderer.save_images(outputs, update_num)
+            self.steps_to_half_voxels = [a for a in self.steps_to_half_voxels if a != update_num]
+
         if self.steps_to_reduce_step is not None and \
-            self._num_updates in self.steps_to_reduce_step:
+            update_num in self.steps_to_reduce_step and (update_num > self._num_updates):
             model.adjust('reduce')
 
         if self._safe_steps > 0:  # do not update parameters, accumulate Adam state
             optimizer.set_lr(0.0)
             self._safe_steps -= 1
 
+        self._num_updates = update_num
         return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
 
     def valid_step(self, sample, model, criterion):
@@ -394,8 +395,8 @@ class SingleObjRenderingTask(FairseqTask):
                         sample['ray_dir'][s, v].float(),
                         model.cache['depths'][s, v].float(),
                         sample['extrinsics'][s, v].float().inverse(),
-                        800)
-                    normals = recover_image(normals, width=800)
+                        width=width)
+                    normals = recover_image(normals, width=width)
                     self.save_image(normals.numpy(), sample['id'][s], sample['view'][s, v], 'normal')
 
                 ssims.append(ssim)

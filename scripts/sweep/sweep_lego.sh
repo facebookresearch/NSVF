@@ -1,6 +1,6 @@
 ROOT=/private/home/jgu/data/shapenet/
 DATA=lego_full
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev2
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
 GRID=geo_lego

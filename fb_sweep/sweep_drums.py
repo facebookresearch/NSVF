@@ -28,7 +28,7 @@ def get_drums_grid(args):
     gen_args = json.dumps(gen_args)
 
     hyperparams = [
-        hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+        # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
         # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
@@ -42,10 +42,11 @@ def get_drums_grid(args):
         hyperparam('--train-views', "0..100"),
         hyperparam('--valid-views', "100..196"),
         
-       # model arguments
+        # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
         hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/drums/voxel.txt"),
-        hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--quantized-embed-dim', 32, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--add-pos-embed', 6, save_dir_key=lambda val: f'addpos{val}'),
         hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
         hyperparam('--voxel-size', 0.4, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 60),
@@ -66,8 +67,8 @@ def get_drums_grid(args):
         # dynamic pruning
         hyperparam('--pruning-every-steps', 2500, save_dir_key=lambda val: f'prune{val}'),
         hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
-        hyperparam('--half-voxel-size-at', "5000,25000", save_dir_key=lambda val: f'dyvox'),
-        hyperparam('--reduce-step-size-at', "5000,25000"),
+        hyperparam('--half-voxel-size-at', "5000,25000,75000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--reduce-step-size-at', "5000,25000,75000"),
         hyperparam('--use-max-pruning', binary_flag=True, save_dir_key=lambda val: 'maxp'),
         hyperparam('--total-num-embedding', 60000, save_dir_key=lambda val: '60k'),
 
@@ -81,7 +82,7 @@ def get_drums_grid(args):
 
         # training arguments
         hyperparam('--pixel-per-view', 2048, save_dir_key=lambda val: f'p16384'),
-        hyperparam('--sampling-on-mask', 0.8),
+        hyperparam('--sampling-on-mask', 0.9),
         hyperparam('--sampling-on-bbox', binary_flag=True),
         # hyperparam('--sampling-patch-size', 4, save_dir_key=lambda val: f'patch{val}'),
         hyperparam('--chunk-size', 256, save_dir_key=lambda val: f'chk512'),
@@ -98,7 +99,7 @@ def get_drums_grid(args):
         hyperparam('--adam-betas', '(0.9, 0.999)'),
         # hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
         hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: f'lr_poly'),
-        hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
+        hyperparam('--total-num-update', 150000, save_dir_key=lambda val: f'max{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
 
@@ -108,7 +109,7 @@ def get_drums_grid(args):
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [20], save_dir_key=lambda val: f'seed{val}'),
         hyperparam('--save-interval-updates', 500),
-        hyperparam('--max-update', 100000),
+        hyperparam('--max-update', 150000),
         hyperparam('--virtual-epoch-steps', 5000),
         hyperparam('--save-interval', 1),
         # hyperparam('--no-epoch-checkpoints'),

@@ -30,7 +30,7 @@ def get_ignatius_grid(args):
     gen_args = json.dumps(gen_args)
 
     hyperparams = [
-        hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+        # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
         # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
@@ -159,8 +159,8 @@ def get_2ppl_grid(args):
         hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
         hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
         # hyperparam('--raypos-features', 0, save_dir_key=lambda val: f'pos{val}'),
-        # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
-        # hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
+        hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
+        hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
         hyperparam('--transparent-background', 1.0, save_dir_key=lambda val: f'bg{val}'),
         hyperparam('--background-stop-gradient', True, binary_flag=True, save_dir_key=lambda val: f'bgsg'),
         hyperparam('--discrete-regularization', True, binary_flag=True, save_dir_key=lambda val: f'dis'),

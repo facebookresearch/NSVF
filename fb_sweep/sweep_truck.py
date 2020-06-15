@@ -30,7 +30,7 @@ def get_truck_final2_grid(args):
     gen_args = json.dumps(gen_args)
 
     hyperparams = [
-        hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+        # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
         # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
@@ -56,8 +56,8 @@ def get_truck_final2_grid(args):
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
         hyperparam('--hidden-sdf', 128, save_dir_key=lambda val: f'sdfh{val}'),
 
-        hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
-        hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
+        # hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
+        # hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
         # hyperparam('--raypos-features', 0, save_dir_key=lambda val: f'pos{val}'),
         # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
         # hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),

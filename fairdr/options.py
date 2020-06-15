@@ -47,3 +47,4 @@ def add_rendering_args(parser):
                        help="if set, concat the images into one file.")
     group.add_argument("--render-camera-poses", default=None, type=str,
                        help="text file saved for the testing trajectories")
+    group.add_argument("--render-camera-intrinsics", default=None, type=str)

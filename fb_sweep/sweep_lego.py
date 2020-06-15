@@ -28,7 +28,7 @@ def get_newlego_trans_grid(args):
     gen_args = json.dumps(gen_args)
 
     hyperparams = [
-        hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
+        # hyperparam('--fp16', save_dir_key=lambda val: 'fp16'),
         # hyperparam('--ddp-backend', 'no_c10d', save_dir_key=lambda val: 'no_c10d'),
         hyperparam('--broadcast-buffers', binary_flag=True), # adding it to broadcast batchnorm (if needed)
         hyperparam('--task', "single_object_rendering", save_dir_key=lambda val: "single"),
@@ -45,7 +45,9 @@ def get_newlego_trans_grid(args):
        # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
         hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/lego_full/voxel.txt"),
-        hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
+        # hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--quantized-embed-dim', 32, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--add-pos-embed', 6, save_dir_key=lambda val: f'addpos{val}'),
         hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
         hyperparam('--voxel-size', 0.4, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 64),
@@ -81,10 +83,10 @@ def get_newlego_trans_grid(args):
 
         # training arguments
         hyperparam('--pixel-per-view', 2048, save_dir_key=lambda val: f'p{val}'),
-        hyperparam('--sampling-on-mask', 0.8),
+        hyperparam('--sampling-on-mask', 0.85),
         hyperparam('--sampling-on-bbox', binary_flag=True),
         # hyperparam('--sampling-patch-size', 4, save_dir_key=lambda val: f'patch{val}'),
-        hyperparam('--chunk-size', 128, save_dir_key=lambda val: f'chk512'),
+        hyperparam('--chunk-size', 200, save_dir_key=lambda val: f'chk512'),
         hyperparam('--inner-chunking', False, binary_flag=True),        
         
         hyperparam('--rgb-weight', 128.0, save_dir_key=lambda val: f'rgb{val}'),

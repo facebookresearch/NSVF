@@ -45,7 +45,7 @@ def get_nerf_grid(args):
        # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
         hyperparam('--backbone', "multi_embedding", save_dir_key=lambda val: "multi"),
-        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/multi_nerf/voxel_path_full.txt"),
+        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/multi_nerf/voxel_path_full2.txt"),
         hyperparam('--quantized-embed-dim', 32, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--add-pos-embed', 6, save_dir_key=lambda val: f'addpos{val}'),
         hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
@@ -68,8 +68,8 @@ def get_nerf_grid(args):
         # dynamic pruning
         hyperparam('--pruning-every-steps', 2500, save_dir_key=lambda val: f'prune{val}'),
         hyperparam('--pruning-th', 0.5, save_dir_key=lambda val: f'th{val}'),
-        hyperparam('--half-voxel-size-at', "5000,25000,75000", save_dir_key=lambda val: f'dyvox'),
-        hyperparam('--reduce-step-size-at', "5000,25000,75000"),
+        hyperparam('--half-voxel-size-at', "10000,25000,75000", save_dir_key=lambda val: f'dyvox'),
+        hyperparam('--reduce-step-size-at', "10000,25000,75000"),
         hyperparam('--use-max-pruning', binary_flag=True, save_dir_key=lambda val: 'maxp'),
         hyperparam('--total-num-embedding', 60000, save_dir_key=lambda val: '60k'),
 
@@ -103,7 +103,7 @@ def get_nerf_grid(args):
         hyperparam('--total-num-update', 150000, save_dir_key=lambda val: f'max{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
-
+        hyperparam('--update-freq', 3),
         hyperparam('--dropout', 0.0),
         hyperparam('--weight-decay', 0.0, save_dir_key=lambda val: f'wd{val}'),
         hyperparam('--criterion', 'srn_loss'),
@@ -148,7 +148,7 @@ def get_nerf0_grid(args):
        # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
         hyperparam('--backbone', "multi_embedding", save_dir_key=lambda val: "multi"),
-        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/multi_nerf/voxel_path_full.txt"),
+        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/multi_nerf/voxel_path_full2.txt"),
         hyperparam('--quantized-embed-dim', 32, save_dir_key=lambda val: f'emb{val}'),
         hyperparam('--add-pos-embed', 6, save_dir_key=lambda val: f'addpos{val}'),
         hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
@@ -222,14 +222,14 @@ def get_nerf0_grid(args):
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]
 
-    hyperparams +=[
-        hyperparam('--half-voxel-size-at', "0,20000,70000", save_dir_key=lambda val: f'dyvox'),
-        hyperparam('--reduce-step-size-at', "0,20000,70000"),
-        hyperparam('--lr', 0.00096, save_dir_key=lambda val: f'lr{val}'),
-        # hyperparam('--reset-optimizer', binary_flag=True, save_dir_key=lambda val: 'rso'),
-        # hyperparam('--restore-file', '/checkpoint/jgu/space/neuralrendering/debug_new_full/geo_nerffullv1.fp16.single.800x800.s1.v4.geo_nerf.multi.emb32.addpos6.ss0.05.v0.4.posemb.sdfh128.raydir.r24.bg1.0.bgsg.dis.prune2500.th0.5.dyvox.maxp.60k.p2048.chk512.rgb128.0.alpha1.0.vgg1.0.l3.adam.lr_poly.max150000.lr0.001.clip0.0.wd0.0.seed20.ngpu8/checkpoint1.pt')
-        hyperparam('--restore-file', '/checkpoint/jgu/space/neuralrendering/debug_new_full/geo_nerf0fullv0.fp16.single.800x800.s1.v4.geo_nerf.multi.emb32.addpos6.ss0.05.v0.4.posemb.sdfh128.raydir.r24.bg1.0.bgsg.dis.prune2500.th0.5.dyvox.maxp.60k.p2048.chk512.rgb128.0.alpha1.0.vgg1.0.l3.adam.lr_poly.max150000.lr0.00096.seed20.rso.ngpu8/checkpoint_last.pt')
-    ]
+    # hyperparams +=[
+    #     hyperparam('--half-voxel-size-at', "0,20000,70000", save_dir_key=lambda val: f'dyvox'),
+    #     hyperparam('--reduce-step-size-at', "0,20000,70000"),
+    #     hyperparam('--lr', 0.00096, save_dir_key=lambda val: f'lr{val}'),
+    #     # hyperparam('--reset-optimizer', binary_flag=True, save_dir_key=lambda val: 'rso'),
+    #     # hyperparam('--restore-file', '/checkpoint/jgu/space/neuralrendering/debug_new_full/geo_nerffullv1.fp16.single.800x800.s1.v4.geo_nerf.multi.emb32.addpos6.ss0.05.v0.4.posemb.sdfh128.raydir.r24.bg1.0.bgsg.dis.prune2500.th0.5.dyvox.maxp.60k.p2048.chk512.rgb128.0.alpha1.0.vgg1.0.l3.adam.lr_poly.max150000.lr0.001.clip0.0.wd0.0.seed20.ngpu8/checkpoint1.pt')
+    #     hyperparam('--restore-file', '/checkpoint/jgu/space/neuralrendering/debug_new_full/geo_nerf0fullv0.fp16.single.800x800.s1.v4.geo_nerf.multi.emb32.addpos6.ss0.05.v0.4.posemb.sdfh128.raydir.r24.bg1.0.bgsg.dis.prune2500.th0.5.dyvox.maxp.60k.p2048.chk512.rgb128.0.alpha1.0.vgg1.0.l3.adam.lr_poly.max150000.lr0.00096.seed20.rso.ngpu8/checkpoint_last.pt')
+    # ]
 
     return hyperparams
 

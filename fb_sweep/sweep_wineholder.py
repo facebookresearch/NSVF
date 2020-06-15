@@ -292,8 +292,8 @@ def get_wineholder4_grid(args):
         # hyperparam('--no-load-binary', binary_flag=True),
         # hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
 
-        hyperparam('--num-layer-features', [1,2], save_dir_key=lambda val: f'nf{val}'),
-        hyperparam('--num-layer-textures', [0,1], save_dir_key=lambda val: f'nt{val}'),
+        # hyperparam('--num-layer-features', [1,2], save_dir_key=lambda val: f'nf{val}'),
+        # hyperparam('--num-layer-textures', [0,1], save_dir_key=lambda val: f'nt{val}'),
 
         # training arguments
         hyperparam('--pixel-per-view', 2048, save_dir_key=lambda val: f'p16384'),
@@ -324,11 +324,11 @@ def get_wineholder4_grid(args):
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [20], save_dir_key=lambda val: f'seed{val}'),
         hyperparam('--save-interval-updates', 500),
-        hyperparam('--max-update', 150000),
+        hyperparam('--max-update', 3000),
         hyperparam('--virtual-epoch-steps', 5000),
         hyperparam('--save-interval', 1),
         # hyperparam('--no-epoch-checkpoints'),
-        hyperparam('--keep-interval-updates', 2),
+        hyperparam('--keep-interval-updates', 5),
         hyperparam('--log-format', 'simple'),
         hyperparam('--log-interval', 10 if not args.local else 1),
     ]

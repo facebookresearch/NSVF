@@ -17,7 +17,7 @@ python fb_sweep/sweep_wineholder.py \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}_latest_bv0 \
+    --prefix ${GRID}_jft \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
@@ -27,6 +27,7 @@ python fb_sweep/sweep_wineholder.py \
     --comment "NeurIPS2020 deadline." \
     --partition priority \
     --resume-failed \
+    --local
     # --dry-run
     # --local \
    

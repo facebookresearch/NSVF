@@ -1,10 +1,10 @@
 ROOT=/private/home/jgu/data/shapenet/
 DATA=multi_nerf
-WORK=/checkpoint/jgu/space/neuralrendering/debug_new_full
+WORK=/checkpoint/jgu/space/neuralrendering/debug_new_full2
 mkdir -p ${WORK}
 
 GRID=geo_nerf
-GRID=geo_nerf0
+# GRID=geo_nerf0
 ENGINE=~jgu/work/fairdr-exp
 
 pushd $ENGINE
@@ -18,14 +18,14 @@ python fb_sweep/sweep_multinerf.py \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
     --snapshot-root ${WORK}/snapshot \
-    --prefix ${GRID}fullv0 \
+    --prefix ${GRID}try \
     --num-trials -1 \
     --num-gpus 8 \
     --num-nodes 1 \
     --mem 500gb \
     --constraint volta32gb \
     --exclusive \
-    --comment "NeurIPS2020 deadline." \
+    --comment "NeurIPS2020 supplemental deadline." \
     --partition priority \
     --resume-failed \
     --local \

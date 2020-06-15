@@ -46,16 +46,18 @@ def get_ignatius_grid(args):
         # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
         # hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/barn_srn/meshvoxel0.4.txt"),
-        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/f/barn_srn/bbvoxel0.32.txt"),
-        hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/final/tanksandtemple_barn/bbvoxel0.32.txt"),
+        # hyperparam('--quantized-embed-dim', 384, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--quantized-embed-dim', 32, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--add-pos-embed', 6, save_dir_key=lambda val: f'addpos{val}'),
         hyperparam('--raymarching-stepsize', 0.05, save_dir_key=lambda val: f'ss{val}'),
         hyperparam('--voxel-size', 0.4, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 60),
         
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
         hyperparam('--hidden-sdf', 128, save_dir_key=lambda val: f'sdfh{val}'),
-        # hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
-        # hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
+        hyperparam('--use-raydir', True, binary_flag=True, save_dir_key=lambda val: 'raydir'),
+        hyperparam('--raydir-features', 24, save_dir_key=lambda val: f'r{val}'),
         # hyperparam('--raypos-features', 0, save_dir_key=lambda val: f'pos{val}'),
         # hyperparam('--saperate-specular', True, binary_flag=True, save_dir_key=lambda val: 'spec'),
         # hyperparam('--specular-dropout', 0.5, save_dir_key=lambda val: f'sd{val}'),
@@ -100,7 +102,7 @@ def get_ignatius_grid(args):
         hyperparam('--adam-betas', '(0.9, 0.999)'),
         # hyperparam('--lr-scheduler', 'fixed', save_dir_key=lambda val: f"lr_{val}"),
         hyperparam('--lr-scheduler', 'polynomial_decay', save_dir_key=lambda val: f'lr_poly'),
-        hyperparam('--total-num-update', 100000, save_dir_key=lambda val: f'max{val}'),
+        hyperparam('--total-num-update', 120000, save_dir_key=lambda val: f'max{val}'),
         hyperparam('--lr', 0.001, save_dir_key=lambda val: f'lr{val}'),
         hyperparam('--clip-norm', 0.0, save_dir_key=lambda val: f'clip{val}'),
 
@@ -110,7 +112,7 @@ def get_ignatius_grid(args):
         hyperparam('--num-workers', 0),
         hyperparam('--seed', [20], save_dir_key=lambda val: f'seed{val}'),
         hyperparam('--save-interval-updates', 250),
-        hyperparam('--max-update', 100000),
+        hyperparam('--max-update', 120000),
         hyperparam('--virtual-epoch-steps', 5000),
         hyperparam('--save-interval', 1),
         # hyperparam('--no-epoch-checkpoints'),
@@ -152,11 +154,14 @@ def get_barn_final_grid(args):
         # model arguments
         hyperparam('--arch', 'geo_nerf', save_dir_key=lambda val: val),
         # hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/barn_srn/meshvoxel0.4.txt"),
-        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/final/tanksandtemple_barnv2/bbvoxel0.32.txt"),
-        hyperparam('--quantized-embed-dim', 64, save_dir_key=lambda val: f'emb{val}'),
-        hyperparam('--add-pos-embed', 3, save_dir_key=lambda val: f'addpos{val}'),
-        hyperparam('--raymarching-stepsize', 0.04, save_dir_key=lambda val: f'ss{val}'),
-        hyperparam('--voxel-size', 0.32, save_dir_key=lambda val: f'v{val}'),
+        # hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/final/tanksandtemple_barnv2/bbvoxel0.32.txt"),
+        hyperparam('--quantized-voxel-path', "/private/home/jgu/data/shapenet/final/tanksandtemple_barn/new_bbvoxel0.6.txt"),
+        hyperparam('--quantized-embed-dim', 32, save_dir_key=lambda val: f'emb{val}'),
+        hyperparam('--add-pos-embed', 6, save_dir_key=lambda val: f'addpos{val}'),
+        hyperparam('--raymarching-stepsize', 0.08, save_dir_key=lambda val: f'ss{val}'),
+        hyperparam('--voxel-size', 0.6, save_dir_key=lambda val: f'v{val}'),
+        # hyperparam('--raymarching-stepsize', 0.04, save_dir_key=lambda val: f'ss{val}'),
+        # hyperparam('--voxel-size', 0.32, save_dir_key=lambda val: f'v{val}'),
         hyperparam('--max-hits', 66),
         
         hyperparam('--pos-embed', True, binary_flag=True, save_dir_key=lambda val: f'posemb'),
@@ -181,12 +186,12 @@ def get_barn_final_grid(args):
         hyperparam('--use-max-pruning', binary_flag=True, save_dir_key=lambda val: 'maxp'),
 
         # evaluation with rendering
-        hyperparam('--rendering-every-steps', 5000),
-        hyperparam('--rendering-args', gen_args),
+        # hyperparam('--rendering-every-steps', 5000),
+        # hyperparam('--rendering-args', gen_args),
 
         # dataset arguments
         # hyperparam('--no-load-binary', binary_flag=True),
-        # hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
+        hyperparam('--load-mask', binary_flag=True, save_dir_key=lambda val: 'm'),
 
         # training arguments
         hyperparam('--pixel-per-view', 2048, save_dir_key=lambda val: f'p{val}'),
