@@ -532,7 +532,11 @@ aabb_ray_intersect = AABBRayIntersect.apply
 
 class UniformRaySampling(Function):
     @staticmethod
-    def forward(ctx, step_size, max_steps, pts_idx, min_depth, max_depth, deterministic=False):
+    def forward(ctx, step_size, pts_idx, min_depth, max_depth, deterministic=False):
+        max_steps = int(((max_depth - min_depth).sum(-1) / step_size).ceil_().max())
+        pts_idx, min_depth, max_depth = \
+            pts_idx.unsqueeze(0), min_depth.unsqueeze(0), max_depth.unsqueeze(0)
+        
         noise = min_depth.new_zeros(*min_depth.size()[:-1], max_steps)
         if deterministic:
             noise += 0.5
@@ -543,8 +547,14 @@ class UniformRaySampling(Function):
             pts_idx, min_depth.float(), max_depth.float(), noise.float(), step_size, max_steps)
         sampled_depth = sampled_depth.type_as(min_depth)
         sampled_dists = sampled_dists.type_as(min_depth)
+        
+        sampled_idx, sampled_depth, sampled_dists = \
+            sampled_idx.squeeze(0), sampled_depth.squeeze(0), sampled_dists.squeeze(0)
+        
         ctx.mark_non_differentiable(sampled_idx)
         ctx.mark_non_differentiable(sampled_depth)
+        ctx.mark_non_differentiable(sampled_dists)
+
         return sampled_idx, sampled_depth, sampled_dists
 
     @staticmethod

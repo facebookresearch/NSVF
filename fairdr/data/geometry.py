@@ -130,7 +130,7 @@ def ray(ray_start, ray_dir, depths):
     return ray_start + ray_dir * depths
 
 
-def compute_normal_map(ray_start, ray_dir, depths, RT, width=512):
+def compute_normal_map(ray_start, ray_dir, depths, RT, width=512, proj=False):
     # TODO:
     # this function is pytorch-only (for not)
     wld_coords = ray(ray_start, ray_dir, depths.unsqueeze(-1)).transpose(0, 1)
@@ -148,6 +148,16 @@ def compute_normal_map(ray_start, ray_dir, depths, RT, width=512):
     _normal = normal.new_zeros(*cam_coords.size())
     _normal[:, 1:-1, 1:-1] = normal
     _normal = _normal.reshape(3, -1).transpose(0, 1)
+
+    # compute the projected color
+    if proj:
+        _normal = normalize(_normal, axis=1)[0]
+        wld_coords0 = ray(ray_start, ray_dir, 0).transpose(0, 1)
+        cam_coords0 = matmul(RT[:3, :3], wld_coords0) + RT[:3, 3].unsqueeze(-1)
+        cam_coords0 = D.unflatten_img(cam_coords0, width)
+        cam_raydir = normalize(cam_coords - cam_coords0, 0)[0].reshape(3, -1).transpose(0, 1)
+        proj_factor = (_normal * cam_raydir).sum(-1).abs() * 0.8 + 0.2
+        return proj_factor
     return _normal
 
 

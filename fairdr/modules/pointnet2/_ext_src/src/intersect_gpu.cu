@@ -155,7 +155,6 @@ __global__ void aabb_intersect_point_kernel(
     }
   }
 }
-            
 
 void ball_intersect_point_kernel_wrapper(
   int b, int n, int m, float radius, int n_max,
@@ -283,3 +282,95 @@ void uniform_ray_sampling_kernel_wrapper(
   
   CUDA_CHECK_ERRORS();
 }
+
+
+
+/* backup 
+__global__ void uniform_ray_sampling_kernel(
+            int b, int num_rays, 
+            int max_hits,
+            int max_steps,
+            float step_size,
+            const int *__restrict__ pts_idx,
+            const float *__restrict__ min_depth,
+            const float *__restrict__ max_depth,
+            const float *__restrict__ uniform_noise,
+            int *__restrict__ sampled_idx,
+            float *__restrict__ sampled_depth,
+            float *__restrict__ sampled_dists) {
+  
+  int batch_index = blockIdx.x;
+  int index = threadIdx.x;
+  int stride = blockDim.x;
+
+  pts_idx += batch_index * num_rays * max_hits;
+  min_depth += batch_index * num_rays * max_hits;
+  max_depth += batch_index * num_rays * max_hits;
+  uniform_noise += batch_index * num_rays * max_steps;
+  sampled_idx += batch_index * num_rays * max_steps;
+  sampled_depth += batch_index * num_rays * max_steps;
+  sampled_dists += batch_index * num_rays * max_steps;
+
+  for (int j = index; j < num_rays; j += stride) {
+    float depth = 0.0, delta = 0.0, left_dist = 0.0, right_dist = 0.0;
+    bool done = false;
+    int previous_cnt = -1;
+    
+    for (int l = 0; l < max_steps; ++l) {
+      sampled_idx[j * max_steps + l] = -1;
+    }
+
+    for (int k = 0, cnt = 0; k < max_steps && cnt < max_hits; ++k) {
+
+      if (pts_idx[j * max_hits + cnt] == -1) {
+        done = true;
+        break;
+      }
+
+      delta = step_size * uniform_noise[j * max_steps + k];   // stratified samples 
+      depth = depth + delta;
+
+      while (depth > (max_depth[j * max_hits + cnt] - min_depth[j * max_hits + cnt])) {
+        depth -= (max_depth[j * max_hits + cnt] - min_depth[j * max_hits + cnt]);
+        cnt += 1;
+        
+        if ((cnt == max_hits) || (pts_idx[j * max_hits + cnt] == -1)){
+          done = true;
+          break;
+        }
+      }
+
+      sampled_idx[j * max_steps + k] = pts_idx[j * max_hits + cnt];
+      sampled_depth[j * max_steps + k] = depth + min_depth[j * max_hits + cnt];
+      
+      // right distance for last step
+      if (previous_cnt != -1) {
+        if (cnt != previous_cnt) {
+          right_dist = max_depth[j * max_hits + previous_cnt] - sampled_depth[j * max_steps + k - 1];
+        } else {
+          right_dist = (sampled_depth[j * max_steps + k] - sampled_depth[j * max_steps + k - 1]) / 2.0;
+        }
+        sampled_dists[j * max_steps + k - 1] = left_dist + right_dist;
+      }
+      if (done) break;
+
+      // left distance for current step
+      if (cnt != -1) {
+        if (cnt != previous_cnt) {  // cross voxel boundary
+          left_dist = sampled_depth[j * max_steps + k] - min_depth[j * max_hits + cnt];
+        } else {
+          left_dist = (sampled_depth[j * max_steps + k] - sampled_depth[j * max_steps + k - 1]) / 2.0;
+        }
+      }
+      previous_cnt = cnt;      
+      depth = depth + (step_size - delta);  // go to next step
+    }
+
+    if (!done) {
+      right_dist = min_depth[j * max_hits + previous_cnt] - sampled_depth[j * max_steps + max_steps - 1];
+      sampled_dists[j * max_steps + max_steps - 1] = left_dist + right_dist;
+    }
+  }
+}
+
+*/

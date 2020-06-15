@@ -6,8 +6,8 @@ import numpy as np
 
 DEBUG = False
 
-VIEWS = 200
-RESOLUTION = 1024
+VIEWS = 300
+RESOLUTION = 800
 RESULTS_PATH = 'results'
 DEPTH_SCALE = 1.4
 COLOR_DEPTH = 8
@@ -83,7 +83,7 @@ objs = [ob for ob in bpy.context.scene.objects if ob.type in ('EMPTY') and 'Empt
 bpy.ops.object.delete({"selected_objects": objs})
 
 def parent_obj_to_camera(b_camera):
-    origin = (0, 0, 0)
+    origin = (0, 0, 1)
     b_empty = bpy.data.objects.new("Empty", None)
     b_empty.location = origin
     b_camera.parent = b_empty  # setup parenting
@@ -101,7 +101,7 @@ scene.render.resolution_y = RESOLUTION
 scene.render.resolution_percentage = 100
 
 cam = scene.objects['Camera']
-cam.location = (8, -8, 4)
+cam.location = (4, -4, 4)
 cam_constraint = cam.constraints.new(type='TRACK_TO')
 cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
 cam_constraint.up_axis = 'UP_Y'

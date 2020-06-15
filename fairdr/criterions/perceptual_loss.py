@@ -20,6 +20,7 @@ class VGGPerceptualLoss(torch.nn.Module):
             param.requires_grad = False
 
     def forward(self, input, target, level=2):
+        # print(input.device, input.dtype, self.mean.device, self.mean.dtype, self.std, self.std.dtype)
         if input.shape[1] != 3:
             input = input.repeat(1, 3, 1, 1)
             target = target.repeat(1, 3, 1, 1)

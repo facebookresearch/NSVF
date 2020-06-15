@@ -41,7 +41,10 @@ class RenderingCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+        import time
+        t0 = time.time()
         net_output = model(**sample)
+        t1 = time.time()
         loss, loss_output = self.compute_loss(model, net_output, sample, reduce=reduce)
         sample_size = 1
         
@@ -51,6 +54,7 @@ class RenderingCriterion(FairseqCriterion):
             'ntokens':  sample['alpha'].size(1),
             'npixels': sample['alpha'].size(2),
             'sample_size': sample_size,
+            'time': t1 - t0
         }
         for w in loss_output:
             logging_output[w] = loss_output[w]
@@ -102,7 +106,12 @@ class SRNLossCriterion(RenderingCriterion):
             self.vgg = VGGPerceptualLoss(resize=True)
             self._dummy = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float32), 
                         requires_grad=True)  # HACK: to avoid warnings in c10d
-
+        if getattr(args, "use_lpips", False):
+            import fairdr.criterions.models as models
+            self.lpips = models.PerceptualLoss(model='net-lin',net='alex',use_gpu=False)
+        else:
+            self.lpips = None
+            
     @staticmethod
     def add_args(parser):
         """Add criterion-specific arguments to the parser."""
@@ -133,11 +142,13 @@ class SRNLossCriterion(RenderingCriterion):
                             help="do not compute RGB-loss on the background.")
         parser.add_argument('--random-background-loss', action='store_true',
                             help='set if we are using transparent image')
+        parser.add_argument('--use-lpips', action='store_true')
 
     def compute_loss(self, model, net_output, sample, reduce=True):
-        alpha  = (sample['alpha'] > 0.5)
+        alpha = sample['alpha']
         masks = alpha.clone() if self.args.no_background_loss else torch.ones_like(alpha)
-        
+        masks = masks.bool()
+
         losses, other_logs = {}, {}
         if 'other_logs' in net_output:
             other_logs.update(net_output['other_logs'])
@@ -169,17 +180,19 @@ class SRNLossCriterion(RenderingCriterion):
             losses['ent_loss'] = (net_output['entropy'], self.args.entropy_weight)
 
         if self.args.alpha_weight > 0:
-            alpha = net_output['missed'].reshape(-1)
+            _alpha = net_output['missed'].reshape(-1)
             # alpha_loss = torch.log(0.1 + alpha) + torch.log(0.1 + 1 - alpha) - math.log(0.11)
             # alpha_loss = alpha_loss.float().mean().type_as(alpha_loss)
             alpha_loss = torch.log1p(
-                1. / 0.11 * alpha.float() * (1 - alpha.float())
-            ).mean().type_as(alpha)
+                1. / 0.11 * _alpha.float() * (1 - _alpha.float())
+            ).mean().type_as(_alpha)
             losses['alpha_loss'] = (alpha_loss, self.args.alpha_weight)
 
         if self.args.depth_weight > 0:
             if sample['depths'] is not None:
-                depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], masks)
+                depth_mask = masks & (sample['depths'] > 0)
+                depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], depth_mask)
+                
             else:
                 # no depth map is provided. depth loss only applied on background.
                 max_depth_target = self.args.max_depth * torch.ones_like(net_output['depths'])
@@ -239,7 +252,7 @@ class SRNLossCriterion(RenderingCriterion):
 
             def transform(x):
                 S, V, D, _ = x.size()
-                H, W = sample['height'][0, 0], sample['width'][0, 0]
+                H, W = int(sample['size'][0, 0, 0]), int(sample['size'][0, 0, 1])
                 x = x.transpose(2, 3).view(S * V, 3, H, W)
                 return x / 2 + 0.5
 
@@ -252,6 +265,10 @@ class SRNLossCriterion(RenderingCriterion):
             losses['pruning_loss'] = (net_output['pruning_loss'], self.args.pruning_weight)
 
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
+        
+        # add a dummy loss
+        loss = loss + model.field.backbone.dummy_loss
+        
         logging_outputs = {key: item(losses[key][0]) for key in losses}
         logging_outputs.update(other_logs)
         return loss, logging_outputs

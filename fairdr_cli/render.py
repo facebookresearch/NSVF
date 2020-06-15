@@ -71,7 +71,6 @@ def _main(args, output_file):
         if use_cuda:
             model.cuda()
 
-
     # Load dataset (possibly sharded)
     itr = task.get_batch_iterator(
         dataset=task.dataset(args.gen_subset),
@@ -96,10 +95,10 @@ def _main(args, output_file):
     output_files, step= [], 0
     with progress_bar.build_progress_bar(args, itr) as t:
         wps_meter = TimeMeter()
-        for sample in t:        
+        for i, sample in enumerate(t):        
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             gen_timer.start()
-            
+           
             step, _output_files = task.inference_step(generator, models, [sample, step])
             output_files += _output_files
         
@@ -107,6 +106,10 @@ def _main(args, output_file):
             wps_meter.update(500)
             t.log({'wps': round(wps_meter.avg)})
             
+            break
+            # if i > 5:
+            #     break
+
     generator.save_images(output_files, combine_output=args.render_combine_output)
 
 def cli_main():

@@ -9,17 +9,26 @@ import torch.nn.functional as F
 
 from fairseq.utils import get_activation_fn
 from fairdr.modules.utils import FCLayer, ResFCLayer
-
+from fairdr.modules.hyper import HyperFC
+from fairdr.modules.linear import NeRFPosEmbLinear
 
 class ImplicitField(nn.Module):
     
     """
     An implicit field is a neural network that outputs a vector given any query point.
     """
-    def __init__(self, args, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False):
+    def __init__(self, 
+        args, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
         super().__init__()
         self.args = args
-        
+
+        if pos_proj > 0:
+            new_in_dim = in_dim * 2 * pos_proj
+            self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
+            in_dim = new_in_dim + in_dim
+        else:
+            self.nerfpos = None
+
         self.net = []
         self.net.append(FCLayer(in_dim, hidden_dim))
         for _ in range(num_layers):
@@ -38,7 +47,57 @@ class ImplicitField(nn.Module):
             nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity='relu', mode='fan_in')
 
     def forward(self, x):
+        if self.nerfpos is not None:
+            x = torch.cat([x, self.nerfpos(x)], -1)
         return self.net(x)
+
+
+class HyperImplicitField(nn.Module):
+
+    def __init__(self, args, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
+        super().__init__()
+
+        self.args = args
+        if pos_proj > 0:
+            new_in_dim = in_dim * 2 * pos_proj
+            self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
+            in_dim = new_in_dim + in_dim
+        else:
+            self.nerfpos = None
+
+        self.net = HyperFC(
+            hyper_in_dim,
+            1, 256, 
+            hidden_dim,
+            num_layers,
+            in_dim,
+            out_dim,
+            outermost_linear=outmost_linear
+        )
+
+    def forward(self, x, i, c):
+        if self.nerfpos is not None:
+            x = torch.cat([x, self.nerfpos(x)], -1)
+        net = self.net(c)
+        
+        def flat2mx(x, i):
+            batch_size = c.size(0)
+            x_slices = [x[i==b] for b in range(batch_size)]
+            max_size = max([xi.size(0) for xi in x_slices])
+            new_x = x.new_zeros(batch_size, max_size, x.size(-1))
+            for b in range(batch_size):
+                new_x[b, :x_slices[b].size(0)] = x_slices[b]
+            return new_x
+
+        def mx2flat(x, i):
+            batch_size = c.size(0)
+            new_x = x.new_zeros(i.size(0), x.size(-1))
+            for b in range(batch_size):
+                size = (i == b).sum()
+                new_x[i == b] = x[b, : size]
+            return new_x
+
+        return mx2flat(net(flat2mx(x, i)), i)
 
 
 class SignedDistanceField(nn.Module):
@@ -75,8 +134,16 @@ class TextureField(ImplicitField):
     """
     Pixel generator based on 1x1 conv networks
     """
-    def __init__(self, args, in_dim, hidden_dim, num_layers):
-        super().__init__(args, in_dim, 3, hidden_dim, num_layers, outmost_linear=True)
+    def __init__(self, args, in_dim, hidden_dim, num_layers, with_alpha=False):
+        out_dim = 3 if not with_alpha else 4
+        super().__init__(args, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=True)
+
+
+class SphereTextureField(TextureField):
+
+    def forward(self, ray_start, ray_dir, min_depth=5.0, steps=10):
+        from fairseq import pdb; pdb.set_trace()
+
 
 
 class DiffusionSpecularField(nn.Module):
@@ -84,16 +151,21 @@ class DiffusionSpecularField(nn.Module):
         super().__init__()
         self.args = args
         self.raydir_dim = raydir_dim
-        self.diffusionField = TextureField(args, in_dim, hidden_dim, num_layers)
-        self.specularField = TextureField(args, in_dim + raydir_dim, hidden_dim, num_layers)
+
+        self.featureField = ImplicitField(args, in_dim, hidden_dim, hidden_dim, num_layers-2, outmost_linear=False)
+        self.diffuseField = ImplicitField(args, hidden_dim, 3, hidden_dim, num_layers=1, outmost_linear=True)
+        self.specularField = ImplicitField(args, hidden_dim + raydir_dim, 3, hidden_dim, num_layers=1, outmost_linear=True)
         self.dropout = dropout
 
     def forward(self, x):
-        if self.dropout == 0:
-            return self.diffusionField(x[:, :-self.raydir_dim]) + self.specularField(x)
-        cd = self.diffusionField(x[:, :-self.raydir_dim])
-        cs = self.specularField(x)
+        x, r = x[:, :-self.raydir_dim], x[:, -self.raydir_dim:]
+        f = self.featureField(x)
+        cd = self.diffuseField(f)
+        cs = self.specularField(torch.cat([f, r], -1))
 
+        if self.dropout == 0:
+            return cd + cs
+            
         # BUG: my default rgb is -1 ~ 1
         if self.training and self.dropout > 0:
             cs = cs * (cs.new_ones(cs.size(0)).uniform_() > self.dropout).type_as(cs)[:, None]

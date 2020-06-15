@@ -4,13 +4,15 @@
 # LICENSE file in the root directory of this source tree.
 
 from .shape_dataset import (
-    ShapeDataset, ShapeViewDataset, SampledPixelDataset, WorldCoordDataset,
+    ShapeDataset, ShapeViewDataset, ShapeViewStreamDataset,
+    SampledPixelDataset, WorldCoordDataset,
     InfiniteDataset
 )
 
 __all__ = [
     'ShapeDataset',
     'ShapeViewDataset',
+    'ShapeViewStreamDataset',
     'SampledPixelDataset',
     'WorldCoordDataset',
 ]

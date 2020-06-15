@@ -41,7 +41,7 @@ python fb_sweep/sweep_maria.py \
     --snapshot-root ${WORK}/snapshot \
     --prefix ${DATA}_Trans4 \
     --num-trials 1 \
-    --num-gpus 8 \
+    --num-gpus 1 \
     --num-nodes 1 \
     --mem 500gb \
     --constraint volta32gb \

@@ -19,7 +19,8 @@ from fairdr.modules.pointnet2.pointnet2_modules import (
 from fairdr.data.data_utils import load_matrix, unique_points
 from fairdr.data.geometry import trilinear_interp
 from fairdr.modules.pointnet2.pointnet2_utils import furthest_point_sample
-from fairdr.modules.linear import FCLayer, Linear, Embedding
+from fairdr.modules.linear import FCBlock, Linear, Embedding
+from fairdr.modules.hyper import HyperFC
 from fairdr.modules.implicit import SignedDistanceField as SDF
 from fairdr.modules.me import unet
 from fairseq import options, utils
@@ -52,7 +53,12 @@ def padding_points(xs, pad):
     return xt
 
 
-def pruning_points(feats, points, alpha):
+def pruning_points(feats, points, scores, depth=0, th=0.5):
+    if depth > 0:
+        g = int(8 ** depth)
+        scores = scores.reshape(scores.size(0), -1, g).sum(-1, keepdim=True)
+        scores = scores.expand(*scores.size()[:2], g).reshape(scores.size(0), -1)
+    alpha = (1 - torch.exp(-scores)) > th
     feats = [feats[i][alpha[i]] for i in range(alpha.size(0))]
     points = [points[i][alpha[i]] for i in range(alpha.size(0))]
     points = padding_points(points, INF)
@@ -60,12 +66,18 @@ def pruning_points(feats, points, alpha):
     return feats, points
 
 
+def offset_points(point_xyz, quarter_voxel):
+    offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
+                            [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]])
+    return point_xyz.unsqueeze(1) + offset.unsqueeze(0).type_as(point_xyz) * quarter_voxel
+
+
 def splitting_points(point_xyz, point_feats, offset, half_voxel):        
     # generate new centers
-    half_voxel = half_voxel * .5
-    new_points = (point_xyz.unsqueeze(1) + offset.unsqueeze(0).type_as(point_xyz) * half_voxel).reshape(-1, 3)
+    quarter_voxel = half_voxel * .5
+    new_points = offset_points(point_xyz, quarter_voxel).reshape(-1, 3)
 
-    old_coords = (point_xyz / half_voxel).floor_().long()
+    old_coords = (point_xyz / quarter_voxel).floor_().long()
     new_coords = (old_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
     new_keys0 = (new_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
 
@@ -81,6 +93,20 @@ def splitting_points(point_xyz, point_feats, offset, half_voxel):
     new_values = trilinear_interp(p, q, point_feats[new_keys_idx])
 
     return new_points, new_feats, new_values
+
+
+def expand_points(voxel_points, voxel_size):
+    _voxel_size = min([
+        torch.sqrt(((voxel_points[j:j+1] - voxel_points[j+1:]) ** 2).sum(-1).min())
+        for j in range(100)])
+    depth = int(np.round(torch.log2(_voxel_size / voxel_size)))
+    if depth > 0:
+        half_voxel = _voxel_size / 2.0
+        for _ in range(depth):
+            voxel_points = offset_points(voxel_points, half_voxel / 2.0).reshape(-1, 3)
+            half_voxel = half_voxel / 2.0
+    
+    return voxel_points, depth
 
 
 def positional_encoding(out_dim, x):
@@ -143,97 +169,170 @@ class Backbone(nn.Module):
 @register_backnone('dynamic_embedding')
 class DynamicEmbeddingBackbone(Backbone):
 
-    def __init__(self, args):
+    def __init__(self, args, quantized_voxel_path=None):
         super().__init__(args)
 
-        self.voxel_path = args.quantized_voxel_path if args.quantized_voxel_path is not None \
-            else os.path.join(args.data, 'voxel.txt')
+        if quantized_voxel_path is not None:
+            self.voxel_path = quantized_voxel_path
+        else:
+            self.voxel_path = args.quantized_voxel_path if args.quantized_voxel_path is not None \
+                else os.path.join(args.data, 'voxel.txt')
+        print(self.voxel_path)
         assert os.path.exists(self.voxel_path), "Initial voxel file does not exist..."
 
         self.voxel_size = args.voxel_size  # voxel size
         self.march_size = args.raymarching_stepsize   # raymarching step size (used for pruning)
-
-        self.total_size = 12000   # maximum number of voxel allowed
         self.half_voxel = self.voxel_size * .5
-
-        points, feats = torch.zeros(self.total_size, 3), torch.zeros(self.total_size, 8).long()
-        keys, keep = torch.zeros(self.total_size, 3).long(), torch.zeros(self.total_size).long()
 
         init_points = torch.from_numpy(load_matrix(self.voxel_path)[:, 3:])
         init_length = init_points.size(0)
-
+        fine_points, fine_depth = expand_points(init_points, self.voxel_size)
+        fine_length = fine_points.size(0)
+ 
         # working in LONG space
-        init_coords = (init_points / self.half_voxel).floor_().long()
+        fine_coords = (fine_points / self.half_voxel).floor_().long()
         offset = torch.tensor([[1., 1., 1.], [1., 1., -1.], [1., -1., 1.], [-1., 1., 1.],
                             [1., -1., -1.], [-1., 1., -1.], [-1., -1., 1.], [-1., -1., -1.]]).long()
-        init_keys0 = (init_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
-        init_keys, init_feats  = torch.unique(init_keys0, dim=0, sorted=True, return_inverse=True)
-        init_feats = init_feats.reshape(-1, 8)
+        fine_keys0 = (fine_coords.unsqueeze(1) + offset.unsqueeze(0)).reshape(-1, 3)
+        fine_keys, fine_feats  = torch.unique(fine_keys0, dim=0, sorted=True, return_inverse=True)
+        fine_feats = fine_feats.reshape(-1, 8)
+        num_keys = torch.scalar_tensor(fine_keys.size(0)).long()
         
-        points[: init_length] = init_points
-        feats[: init_length] = init_feats
-        keep[: init_length] = 1
-        keys[: init_keys.size(0)] = init_keys
+        # set total size
+        self.total_size = getattr(args, "total_num_embedding", fine_keys.size(0))   # maximum number of voxel allowed
+        self.fine_depth = fine_depth
+        
+        points, feats = torch.zeros(self.total_size, 3), torch.zeros(self.total_size, 8).long()
+        keys, keep = torch.zeros(self.total_size, 3).long(), torch.zeros(self.total_size).long()    
+
+        # assign values
+        points[: fine_length] = fine_points
+        feats[: fine_length] = fine_feats
+        keep[: fine_length] = 1
+        keys[: fine_keys.size(0)] = fine_keys
 
         self.register_buffer("points", points)   # voxel centers
         self.register_buffer("feats", feats)     # for each voxel, 8 vertexs
         self.register_buffer("keys", keys)
         self.register_buffer("keep", keep)
         self.register_buffer("offset", offset)
-        self.register_buffer("num_keys", 
-            torch.scalar_tensor(init_keys.size(0)).long())
+        self.register_buffer("num_keys", num_keys)
 
         # voxel embeddings
         self.embed_dim = getattr(args, "quantized_embed_dim", None)
+        self.latent_embed_dim = getattr(args, "latent_code_embed_dim", self.embed_dim)
         self.use_pos_embed = getattr(args, "quantized_pos_embed", False)
+        self.use_xyz_embed = getattr(args, "quantized_xyz_embed", False)
+        self.use_context_proj = getattr(args, "quantized_context_proj", False)
+        self.use_hypernetwork = getattr(args, "use_hypernetwork", False)
         self.post_context = getattr(args, "post_context", False)
+        self.normalize_context = getattr(args, "normalize_context", False)
+        self.fixed_voxel_size = getattr(args, "fixed_voxel_size", False)
 
-        if self.embed_dim is not None:
-            self.values = Embedding(self.total_size, self.embed_dim, None)
+        if self.use_context is not None:
+            if self.use_context == 'id':
+                assert self.args.total_num_context > 0, "index embeddings for different frames"
+                self.context_embed = Embedding(self.args.total_num_context, self.latent_embed_dim, None)
 
-        if self.use_context is not None and self.use_context == 'id':
-            assert self.args.total_num_context > 0, "index embeddings for different frames"
-            self.context_embed = Embedding(self.args.total_num_context, self.embed_dim, None)
+            if self.normalize_context:
+                self.context_proj = FCBlock(self.latent_embed_dim, 1, self.embed_dim, self.embed_dim)
+            elif self.use_context_proj:
+                self.context_proj = Linear(self.latent_embed_dim, self.embed_dim)
+            else:
+                self.context_proj = None
 
         if self.use_pos_embed:
             assert self.embed_dim is not None and self.embed_dim % 3 == 0, "size mismatch!"
             # -- positional embeddings --
-            self.values.weight.data = positional_encoding(self.embed_dim // 3, init_keys.float())
+            self.values = Embedding(self.total_size, self.embed_dim, None)
+            self.values.weight.data = positional_encoding(self.embed_dim // 3, fine_keys.float())
             self.values.weight.requires_grad = False
-            self.values_proj = Linear(self.embed_dim, self.embed_dim)
-            if self.use_context is not None and self.use_context == 'id':
-                # -- positional embeddings --
-                self.context_embed.weight.data = positional_encoding(
-                    self.embed_dim, torch.arange(self.args.total_num_context).float())
-                self.context_embed.weight.requires_grad = False
-                self.context_proj = Linear(self.embed_dim, self.embed_dim)
+
+            if self.use_context is not None and self.use_hypernetwork:
+                raise NotImplementedError
+            else:
+                self.values_proj = Linear(self.embed_dim, self.embed_dim)
+        
+        elif self.use_xyz_embed:
+            # self.values = Embedding(fine_keys.shape[0], 3, None)
+            # self.values.weight.data = (fine_keys.float() / abs(fine_keys.float()).max())
+            self.values = Embedding(self.total_size, 3, None)
+            self.values.weight.data[:fine_keys.shape[0]] = fine_keys.float()
+            self.values.weight.requires_grad = False
+
+            if self.use_context is not None and self.use_hypernetwork:
+                self.values_hyper = HyperFC(
+                        hyper_in_ch=self.latent_embed_dim,
+                        hyper_num_hidden_layers=1,
+                        hyper_hidden_ch=self.latent_embed_dim,
+                        hidden_ch=self.latent_embed_dim,
+                        num_hidden_layers=2,
+                        in_ch=3, out_ch=self.embed_dim,
+                        outermost_linear=True)
+            elif self.embed_dim != 3:
+                self.values_proj = Linear(3, self.embed_dim)
+            else:
+                self.values_proj = None
+        else:
+            self.values = Embedding(self.total_size, self.embed_dim, None)
+            if self.use_context is not None and self.use_hypernetwork:
+                self.values_hyper = HyperFC(
+                        hyper_in_ch=self.latent_embed_dim,
+                        hyper_num_hidden_layers=1,
+                        hyper_hidden_ch=self.latent_embed_dim,
+                        hidden_ch=self.latent_embed_dim,
+                        num_hidden_layers=1,
+                        in_ch=self.embed_dim, 
+                        out_ch=self.embed_dim,
+                        outermost_linear=True)
+            else:
+                self.values_proj = None
+
+    def upgrade_state_dict_named(self, state_dict, name):
+        for key in ('feats', 'keys', 'keep', 'points'):
+            values_weight = state_dict[name + '.' + key]
+            if values_weight.size(0) < getattr(self, key).size(0):  # update value embeddings
+                state_dict[name + '.' + key] = getattr(self, key).data.clone()
+                state_dict[name + '.' + key][: values_weight.size(0)] = values_weight
+        
+        values_weight = state_dict[name + '.values.weight']
+        if values_weight.size(0) < self.values.weight.size(0):  # update value embeddings
+            state_dict[name + '.values.weight'] = self.values.weight.data.clone()
+            state_dict[name + '.values.weight'][: values_weight.size(0)] = values_weight 
 
     @staticmethod
     def add_args(parser):
         parser.add_argument('--quantized-embed-dim', type=int, metavar='N', help="embedding size")
         parser.add_argument('--quantized-pproj-dim', type=int, metavar='N', help="only useful if online_pruning set")
+        parser.add_argument('--total-num-embedding', type=int, metavar='N', help='totoal number of embeddings to initialize')
         parser.add_argument('--total-num-context', type=int, metavar='N', help="if use id as inputs, unique embeddings")
         parser.add_argument('--quantized-pos-embed', action='store_true', help="instead of standard embeddings, use positional embeddings")
+        parser.add_argument('--quantized-xyz-embed', action='store_true', help='instead of positional embedding, use actual xyz as inputs')
+        parser.add_argument('--latent-code-embed-dim', type=int, metavar='N', help='latent codes')
+        parser.add_argument('--quantized-context-proj', action='store_true')
+        parser.add_argument('--use-hypernetwork', action='store_true')
         parser.add_argument('--post-context', action='store_true', help='redo contexturalization every time voxels splitted')
+        parser.add_argument('--normalize-context', action='store_true', help='normalize the embedding vectors onto the sphere')
+        parser.add_argument('--fixed-voxel-size', action='store_true', help='do not reduce the voxel_size')
 
-    def latent_regularization(self):
-        data = self.context_embed.weight 
-        return (data.float() ** 2).mean().type_as(data)
+    def contexturalization(self, context, values, keys=None):
+        if self.use_hypernetwork:
+            values_proj, context = self.values_hyper(context.squeeze(1)), None
+        else:
+            values_proj = self.values_proj
+        
+        if values_proj is not None:
+            values = values_proj(values)
 
-    def contexturalization(self, id, values, keys=None):
-        if self.use_pos_embed:
-            values = self.values_proj(values)
-        context = None
-        if self.use_context is not None:
-            if self.use_context == 'id':
-                context = self.context_embed(id).unsqueeze(1)
-                if self.use_pos_embed:
-                    context = self.context_proj(context)
-            else:
-                raise NotImplementedError("only add-on condition for now.")
+        if context is not None:
+            if self.normalize_context:
+                context = context * torch.rsqrt(1e-8 + torch.mean(context ** 2, dim=-1, keepdim=True))
+            if self.context_proj is not None:
+                context = self.context_proj(context)
+        
         return values, context
 
-    def _forward(self, id, step=0, pruner=None, *args, **kwargs):
+    def _forward(self, id, step=0, pruner=None, offset=None, th=0.5, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
         values = self.values.weight[: self.num_keys] if self.values is not None else None
@@ -243,28 +342,30 @@ class DynamicEmbeddingBackbone(Backbone):
         feats  = feats.unsqueeze(0).expand(id.size(0), *feats.size()).contiguous()
         points = points.unsqueeze(0).expand(id.size(0), *points.size()).contiguous()
         values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous()
-        
-        # pruning (optional)
+        codes = self.get_context_features(id)
+
+        if offset is not None:
+            codes_beta = self.get_context_features(id + 1)
+            codes = codes * (1 - offset) + codes_beta * offset
+
+        # contexturalization (potential)
         voxel_size, march_size = self.voxel_size, self.march_size
-        for t in range(step + 1):
+        values, context = self.contexturalization(codes, values, keys)
 
-            # object dependent value (contexturalization)
-            if (t == 0) or (self.post_context):
-                out_values, context = self.contexturalization(id, values, keys)
-                if context is not None:
-                    out_values = out_values + context
-            
-            if not self.post_context:
-                if t == 0:
-                    values = out_values.clone()   # out_values are contexturalized
+        def combine(values, context):
+            if context is not None:
+                if not self.post_context:   
+                    out_values = values + context
                 else:
-                    out_values = values.clone()   # value has been pruned
+                    out_values = torch.cat([values, context], 1)
+                return out_values
+            return values
 
-            feats = feats + out_values.size(1) * torch.arange(values.size(0), 
-                device=feats.device, dtype=feats.dtype)[:, None, None]
-            values = values.view(-1, values.size(-1))  # reshape to 2D
-            out_values = out_values.view(-1, out_values.size(-1))  # reshape to 2D
-            masks = points[:, :, 0] < (INF * .5)
+        for t in range(step + 1):
+            if (t == 0) or (not self.fixed_voxel_size):
+                feats = feats + values.size(1) * torch.arange(values.size(0), 
+                    device=feats.device, dtype=feats.dtype)[:, None, None]
+            out_values = combine(values, context)
 
             if not self.online_pruning:
                 break
@@ -272,29 +373,42 @@ class DynamicEmbeddingBackbone(Backbone):
             if t < step:
                 # pruning
                 with torch.no_grad():
-                    predicts = pruner(
+                    scores = pruner(
                         id=id, update=False, 
                         features=(feats, points, out_values),
-                        sizes=(voxel_size, march_size)).detach()
-                    
-                feats, points = pruning_points(feats, points, predicts > 0.5)
-                corner_features = self.get_features(feats, values)  # recompute features
+                        sizes=(voxel_size, march_size))
+                    scores = scores.detach()
                 
-                # splitting
-                voxel_size = voxel_size * .5
+                feats, points = pruning_points(feats, points, scores, self.fine_depth - t, th=th)
                 march_size = march_size * .5
-                new_points, new_feats, new_values = zip(*[splitting_points(
-                    points[i], corner_features[i], self.offset, voxel_size
-                ) for i in range(feats.size(0))])
+
+                if not self.fixed_voxel_size:
+                    corner_features = self.get_features(
+                        feats, values.view(-1, values.size(-1)))  # recompute features
                 
-                points = padding_points(new_points, INF)
-                feats = padding_points(new_feats, 0)
-                values = padding_points(new_values, 0.0)
-     
-        return feats, points, out_values, masks
+                    # splitting
+                    voxel_size = voxel_size * .5
+                    new_points, new_feats, new_values = zip(*[splitting_points(
+                        points[i], corner_features[i], self.offset, voxel_size
+                    ) for i in range(feats.size(0))])
+                
+                    points = padding_points(new_points, INF)
+                    feats = padding_points(new_feats, 0)
+                    values = padding_points(new_values, 0.0)
+
+        return feats, points, out_values, codes
               
     def get_features(self, x, values):
         return F.embedding(x, values)
+
+    def get_context_features(self, id):
+        context = None
+        if self.use_context is not None:
+            if self.use_context == 'id':
+                context = self.context_embed(id).unsqueeze(1)
+            else:
+                raise NotImplementedError("only add-on condition for now.")
+        return context
 
     def pruning(self, keep):
         self.keep.masked_scatter_(self.keep.bool(), keep.long())
@@ -310,12 +424,12 @@ class DynamicEmbeddingBackbone(Backbone):
 
         # split points
         new_points, new_feats, new_values = splitting_points(point_xyz, point_feats, self.offset, half_voxel)
-        
+        # print(new_points.shape, self.feats.shape, self.values.weight.shape, new_values.shape)
+        # 1 // 0
         # assign to the parameters    
         if update_buffer:
             new_num_keys = new_values.size(0)
             new_point_length = new_points.size(0)
-
             self.values.weight.data.index_copy_(
                 0,
                 torch.arange(new_num_keys, device=new_values.device),
@@ -334,6 +448,62 @@ class DynamicEmbeddingBackbone(Backbone):
     def feature_dim(self):
         return self.embed_dim
 
+    @property
+    def dummy_loss(self):
+        return self.values.weight[0,0] * 0.0
+
+    @property
+    def latent_code_dim(self):
+        return self.latent_embed_dim
+
+    @property
+    def networks_not_freeze(self):
+        if self.use_context is not None and self.use_context == 'id':
+            return ["context_embed.weight"]
+        else:
+            raise NotImplementedError
+
+
+@register_backnone("multi_embedding")
+class MultiDynamicEmbeddingBackbone(Backbone):
+    def __init__(self, args):
+        super().__init__(args)
+        self.voxel_lists = open(args.quantized_voxel_path).readlines()
+        self.backbones = nn.ModuleList(
+            [DynamicEmbeddingBackbone(args, vox.strip()) for vox in self.voxel_lists])
+        self.current_id = None
+        self.offset = self.backbones[0].offset
+
+    def _forward(self, id, *args, **kwargs):
+        assert id.size(0) == 1, "for now, only works for one object"
+        self.current_id = id[0]
+        return self.backbones[id[0]]._forward(id, *args, **kwargs)
+    
+    def get_features(self, x, values):
+        return F.embedding(x, values)
+
+    def pruning(self, keep):
+        self.backbones[self.current_id].pruning(keep)
+
+    def splitting(self, *args, **kwargs):
+        for i in range(len(self.backbones)):
+            self.backbones[i].splitting(*args, **kwargs)
+
+    @property
+    def feature_dim(self):
+        return self.backbones[0].embed_dim
+
+    @property
+    def keep(self):
+        return torch.cat([b.keep for b in self.backbones], -1)
+
+    @property
+    def dummy_loss(self):
+        return sum([b.dummy_loss for b in self.backbones])
+
+    @staticmethod
+    def add_args(parser):
+        pass
 
 @register_backnone("transformer")
 class TransformerBackbone(DynamicEmbeddingBackbone):
@@ -398,11 +568,14 @@ class TransformerBackbone(DynamicEmbeddingBackbone):
         parser.add_argument('--attention-context', action='store_true')
         parser.add_argument('--cross-attention-context', action='store_true')
 
-    def contexturalization(self, id, values, keys=None):
+    def contexturalization(self, context, values, keys=None):
         m0 = values.eq(0.0).all(-1)
-        x0, c = super().contexturalization(id, values, keys=None)
+        x0, c = super().contexturalization(context, values, keys=None)
 
-        if not self.attention_context:
+        if c is None:
+            x = x0
+            m = m0
+        elif not self.attention_context:
             x = x0 + c
             m = m0
         else:
@@ -479,7 +652,7 @@ class TransformerEncoderLayer(nn.Module):
         self.fc2 = nn.Linear(args.encoder_ffn_embed_dim, self.embed_dim)
         self.layer_norms = nn.ModuleList([LayerNorm(self.embed_dim) for i in range(2)])
 
-        if args.cross_attention_context:
+        if getattr(args, "cross_attention_context", False):
             self.cross_attn = MultiheadAttention(
                 self.embed_dim, args.encoder_attention_heads,
                 dropout=args.attention_dropout

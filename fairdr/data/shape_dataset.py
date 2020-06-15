@@ -26,7 +26,8 @@ class ShapeDataset(FairseqDataset):
                 load_point=False,
                 preload=True,
                 repeat=1,
-                subsample_valid=-1):
+                subsample_valid=-1,
+                ids=None):
         
         if os.path.isdir(paths):
             self.paths = [paths]
@@ -44,8 +45,13 @@ class ShapeDataset(FairseqDataset):
         _data_per_shape['ixt'] = self.find_intrinsics()
         if self.load_point:
             _data_per_shape['pts'] = self.find_point()
-        _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
 
+        # TODO: FIXME LATER
+        # if ids is None:
+        _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
+        # else:
+        #     _data_per_shape['shape'] = [ids[path.split('/')[-1]] for path in self.paths]
+            
         if self.subsample_valid > -1:
             for key in _data_per_shape:
                 _data_per_shape[key] = _data_per_shape[key][::self.subsample_valid]
@@ -167,9 +173,8 @@ class ShapeViewDataset(ShapeDataset):
 
     def __init__(self, 
                 paths, 
-                max_train_view, 
+                views,
                 num_view,
-                max_valid_view=None, 
                 subsample_valid=-1,
                 resolution=None, 
                 load_depth=False,
@@ -180,24 +185,36 @@ class ShapeViewDataset(ShapeDataset):
                 repeat=1,
                 binarize=True,
                 bg_color=-0.8,
-                min_color=-1):
+                min_color=-1,
+                ids=None):
         
-        super().__init__(paths, load_point, False, repeat, subsample_valid)
+        super().__init__(
+            paths, load_point, False, repeat, subsample_valid, ids)
 
         self.train = train
         self.load_depth = load_depth
         self.load_mask = load_mask
-        self.max_train_view = max_train_view
-        self.max_valid_view = max_valid_view \
-            if max_valid_view is not None \
-            else max_train_view 
+        self.views = views
         self.num_view = num_view
-        self.resolution = resolution
+
+        if isinstance(resolution, str):
+            self.resolution = [int(r) for r in resolution.split('x')]
+        else:
+            self.resolution = [resolution, resolution]
+
         self.world2camera = True
         self.cache_view = None
-        self.bg_color = bg_color  # only useful if image is transparent
-        self.min_color = min_color
         
+        bg_color = [float(b) for b in bg_color.split(',')] \
+            if isinstance(bg_color, str) else [bg_color]
+        if min_color == -1:
+            bg_color = [b * 2 - 1 for b in bg_color]
+        if len(bg_color) == 1:
+            bg_color = bg_color + bg_color + bg_color
+        self.bg_color = bg_color
+        self.min_color = min_color
+        self.apply_mask_color = (self.bg_color[0] >= -1) & (self.bg_color[0] <= 1)  # if need to apply
+
         # -- load per-view data
         _data_per_view = {}
         _data_per_view['rgb'] = self.find_rgb()  
@@ -221,17 +238,18 @@ class ShapeViewDataset(ShapeDataset):
             for id in range(self.total_num_shape): 
                 element = {}
                 total_num_view = len(_data_per_view['rgb'][id])
-                perm_ids = np.random.permutation(total_num_view)
+                perm_ids = np.random.permutation(total_num_view) if train else np.arange(total_num_view)
                 for key in _data_per_view:
                     element[key] = [_data_per_view[key][id][i] for i in perm_ids]
                 self.data[_index].update(element)
 
                 if r == 0 and preload:
                     phase_name = f"{'train' if self.train else 'valid'}" + \
-                                f".{resolution}x{resolution}" + \
+                                f".{self.resolution[0]}x{self.resolution[1]}" + \
                                 f"{'.d' if load_depth else ''}" + \
                                 f"{'.m' if load_mask else ''}" + \
-                                f"{'.p' if load_point else ''}"
+                                f"{'b' if not self.apply_mask_color else ''}" + \
+                                f"{'.p' if load_point else ''}" + "_full"
                     logger.info("preload {}-{}".format(id, phase_name))
                     if binarize:
                         cache = self._load_binary(id, np.arange(total_num_view), phase_name)
@@ -269,41 +287,37 @@ class ShapeViewDataset(ShapeDataset):
                 np.savez(npzfile, cache=cache)
             return cache
 
-    def cutoff(self, file_list):
-
-        def is_empty(list):
-            if len(list) == 0:
-                raise FileNotFoundError
-            return list
+    def select(self, file_list):
+        if len(file_list[0]) == 0:
+            raise FileNotFoundError
         
-        return [is_empty(files[:self.max_train_view]) if self.train else 
-                is_empty(files[:self.max_valid_view]) for files in file_list]
-
+        return [[files[i] for i in self.views] for files in file_list]
+    
     def find_rgb(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/rgb/*.*')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/rgb/*.*g')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find rendered images.")
     
     def find_depth(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/depth/*.exr')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/depth/*.exr')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find estimated depths images") 
 
     def find_mask(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/mask/*')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/mask/*')) for path in self.paths])
         except FileNotFoundError:
             raise FileNotFoundError("CANNOT find precomputed mask images")
 
     def find_extrinsics(self):
         try:
-            return self.cutoff([sorted(glob.glob(path + '/extrinsic/*.txt')) for path in self.paths])
+            return self.select([sorted(glob.glob(path + '/extrinsic/*.txt')) for path in self.paths])
         except FileNotFoundError:
             try:
                 self.world2camera = False
-                return self.cutoff([sorted(glob.glob(path + '/pose/*.txt')) for path in self.paths])
+                return self.select([sorted(glob.glob(path + '/pose/*.txt')) for path in self.paths])
             except FileNotFoundError:
                 raise FileNotFoundError('world2camera or camera2world matrices not found.')   
 
@@ -315,10 +329,13 @@ class ShapeViewDataset(ShapeDataset):
         return [list(range(len(_data_per_view[keys[0]][k]))) for k in range(num_of_objects)]
 
     def num_tokens(self, index):
-        return self.num_view * self.resolution ** 2  
+        return self.num_view
+        # if isinstance(self.resolution, list):
+        #     return self.num_view * np.prod(self.resolution) 
+        # return self.num_view * self.resolution ** 2  
 
     def _load_view(self, packed_data, view_idx):
-        image, uv = data_utils.load_rgb(
+        image, uv, ratio = data_utils.load_rgb(
             packed_data['rgb'][view_idx], 
             resolution=self.resolution,
             bg_color=self.bg_color,
@@ -331,8 +348,9 @@ class ShapeViewDataset(ShapeDataset):
             z = data_utils.load_depth(packed_data['dep'][view_idx], resolution=self.resolution)
         if packed_data.get('mask', None) is not None:
             mask = data_utils.load_mask(packed_data['mask'][view_idx], resolution=self.resolution)
-            rgb = rgb * mask[None, :, :] + (1 - mask[None, :, :]) * self.bg_color
-            
+            if self.apply_mask_color:   # we can also not apply mask
+                rgb = rgb * mask[None, :, :] + (1 - mask[None, :, :]) * np.asarray(self.bg_color)[:, None, None]
+
         return {
             'view': view_idx,
             'uv': uv.reshape(2, -1), 
@@ -341,8 +359,7 @@ class ShapeViewDataset(ShapeDataset):
             'extrinsics': extrinsics,
             'depths': z.reshape(-1) if z is not None else None,
             'mask': mask.reshape(-1) if mask is not None else None,
-            'height': rgb.shape[1],
-            'width': rgb.shape[2]
+            'size': np.array([rgb.shape[1], rgb.shape[2]] + ratio, dtype=np.float32)
         }
 
     def _load_batch(self, data, index, view_ids=None):
@@ -369,16 +386,72 @@ class ShapeViewDataset(ShapeDataset):
         return results
 
 
+class ShapeViewStreamDataset(ShapeViewDataset):
+    """
+    Different from ShapeViewDataset.
+    We merge all the views together into one dataset regardless of the shapes.
+
+    ** HACK **: trying to adapt to the original ShapeViewDataset
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        assert self.repeat == 1, "Comboned dataset does not support repeating"
+        assert self.num_view == 1, "StreamDataset only supports one view per shape at a time."
+
+        # reset the data_index
+        self.data_index = []
+        for i, d in enumerate(self.data):
+            for j, _ in enumerate(d['rgb']):
+                self.data_index.append((i, j))   # shape i, view j
+        
+    def __len__(self):
+        return len(self.data_index)
+
+    def _load_batch(self, data, shape_id, view_id):
+        return shape_id, self._load_shape(data[shape_id]), [self._load_view(data[shape_id], view_id)]
+
+    def __getitem__(self, index):
+        shape_id, view_id = self.data_index[index]
+        if self.cache is not None:
+            return copy.deepcopy(self.cache[shape_id % self.total_num_shape][0]), \
+                   copy.deepcopy(self.cache[shape_id % self.total_num_shape][1]), \
+                  [copy.deepcopy(self.cache[shape_id % self.total_num_shape][2][view_id])]
+        return self._load_batch(self.data, shape_id, view_id)
+
+    def _load_binary(self, id, views, phase='train'):
+        root = os.path.dirname(self.data[id]['ixt'])
+        npzfile = os.path.join(root, '{}.npz'.format(phase))
+        try:
+            with np.load(npzfile, allow_pickle=True) as f:
+                return f['cache']
+        except Exception:
+            caches = [self._load_batch(self.data, id, view_id) for view_id in views]
+            cache = [caches[0][0], caches[0][1], [caches[i][2][0] for i in range(len(views))]]
+           
+            if data_utils.get_rank() == 0:
+                np.savez(npzfile, cache=cache)
+            return cache
+
 class SampledPixelDataset(BaseWrapperDataset):
     """
     A wrapper dataset, which split rendered images into pixels
     """
 
-    def __init__(self, dataset, num_sample=None, sampling_on_mask=1.0, sampling_on_bbox=False, resolution=512, patch_size=1):
+    def __init__(self, 
+        dataset, 
+        num_sample=None, 
+        sampling_on_mask=1.0, 
+        sampling_on_bbox=False, 
+        sampling_at_center=1.0,
+        resolution=512, 
+        patch_size=1):
+        
         super().__init__(dataset)
         self.num_sample = num_sample
         self.sampling_on_mask = sampling_on_mask
         self.sampling_on_bbox = sampling_on_bbox
+        self.sampling_at_center = sampling_at_center
         self.patch_size = patch_size
         self.res = resolution
 
@@ -395,7 +468,8 @@ class SampledPixelDataset(BaseWrapperDataset):
                     else data.get('alpha', None),
                 self.sampling_on_mask,
                 self.sampling_on_bbox,
-                width=data['width'],
+                self.sampling_at_center,
+                width=int(data['size'][1]),
                 patch_size=self.patch_size)
             for data in data_per_view
         ]
@@ -405,7 +479,6 @@ class SampledPixelDataset(BaseWrapperDataset):
             for key in data:
                 if data[key] is not None \
                     and (key != 'extrinsics' and key != 'view' and key != 'full_rgb') \
-                    and (key != 'height') and (key != 'width') \
                     and data[key].shape[-1] > self.num_sample:
 
                     if len(data[key].shape) == 2:
