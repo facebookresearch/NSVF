@@ -8,7 +8,7 @@ from skimage.measure import compare_ssim
 import torch
 from torch.autograd import Variable
 
-from fairdr.criterions.models import dist_model
+from fairnr.criterions.models import dist_model
 
 class PerceptualLoss(torch.nn.Module):
     def __init__(self, model='net-lin', net='alex', colorspace='rgb', spatial=False, use_gpu=True, gpu_ids=[0], version='0.1'): # VGG using our perceptually-learned weights (LPIPS metric)
@@ -20,8 +20,10 @@ class PerceptualLoss(torch.nn.Module):
         self.gpu_ids = gpu_ids
         self.model = dist_model.DistModel()
         self.model.initialize(model=model, net=net, use_gpu=use_gpu, colorspace=colorspace, spatial=self.spatial, gpu_ids=gpu_ids, version=version)
-        #print('...[%s] initialized'%self.model.name())
-        #print('...Done')
+        
+        # NO GRADIENT!
+        for param in self.model.parameters:
+            param.requires_grad = False
 
     def forward(self, pred, target, normalize=False):
         """

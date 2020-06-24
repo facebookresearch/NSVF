@@ -27,7 +27,7 @@ python validate.py \
     $ROOT/$DATA \
     --valid-views "51..59" \
     --valid-view-resolution "576x768" \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --no-preload \
     --task single_object_rendering \
     --max-sentences 1 \
@@ -40,7 +40,7 @@ python validate.py \
     $ROOT/$DATA \
     --valid-views "51..59" \
     --valid-view-resolution "576x768" \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --no-preload \
     --task single_object_rendering \
     --max-sentences 1 \

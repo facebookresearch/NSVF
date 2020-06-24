@@ -7,7 +7,7 @@ MODEL=srn_data_test.fp16.seq.128x128.s16.v1.fs64.geo_nerf_transformer.emb384.id.
 python validate.py \
     $ROOT/$DATA/testing_set/test.txt \
     --fp16 \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task sequence_object_rendering \
     --max-sentences 64 \
     --path ${WORK}/${MODEL}/checkpoint_last.pt \

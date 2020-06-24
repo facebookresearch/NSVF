@@ -16,8 +16,8 @@ MODEL_PATH=/checkpoint/jgu/space/neuralrendering/slurm_srn/maria.no_c10d.single.
 MODEL_PATH=$1
 
 CUDA_VISIBLE_DEVICES=0 \
-fairdr-render ${DATASET} \
-    --user-dir fairdr \
+fairnr-render ${DATASET} \
+    --user-dir fairnr \
     --task sequence_object_rendering \
     --load-point \
     --path ${MODEL_PATH}/checkpoint_last.pt \

@@ -20,7 +20,7 @@ import numpy as np
 from fairseq import checkpoint_utils, progress_bar, tasks, utils, distributed_utils
 from fairseq.meters import StopwatchMeter, TimeMeter
 from fairseq.options import add_distributed_training_args
-from fairdr import options
+from fairnr import options
 
 
 def main(args, *kwargs):
@@ -42,7 +42,7 @@ def _main(args, output_file):
         level=logging.INFO,
         stream=output_file,
     )
-    logger = logging.getLogger('fairdr_cli.render')
+    logger = logging.getLogger('fairnr_cli.render')
 
     utils.import_user_module(args)
 

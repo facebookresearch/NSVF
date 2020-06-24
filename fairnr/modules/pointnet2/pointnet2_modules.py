@@ -16,8 +16,8 @@ import torch.nn.functional as F
 import os
 import sys
 
-from fairdr.modules.pointnet2 import pointnet2_utils
-from fairdr.modules.pointnet2 import pytorch_utils as pt_utils
+from fairnr.modules.pointnet2 import pointnet2_utils
+from fairnr.modules.pointnet2 import pytorch_utils as pt_utils
 from typing import List
 
 

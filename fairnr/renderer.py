@@ -15,9 +15,9 @@ import logging
 import imageio
 
 from torchvision.utils import save_image
-from fairdr.data import trajectory, geometry, data_utils
+from fairnr.data import trajectory, geometry, data_utils
 from fairseq.meters import StopwatchMeter
-from fairdr.data.data_utils import recover_image, get_uv
+from fairnr.data.data_utils import recover_image, get_uv
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -162,12 +162,12 @@ class NeuralRenderer(object):
                 ])
                 
                 voxels, points = sample.get('voxels', None), sample.get('points', None)
-                real_images = sample['full_rgb'] if 'full_rgb' in sample else sample['rgb']
+                real_images = sample['full_rgb'] if 'full_rgb' in sample else sample['colors']
                 real_images = real_images.transpose(2, 3) if real_images.size(-1) != 3 else real_images
                 _sample = {
                     'id': sample['id'][shape:shape+1],
                     'offset': float((step % frames)) / float(frames) if self.use_interpolation else None,
-                    'rgb': torch.cat([real_images[shape:shape+1] for _ in range(step, next_step)], 1),
+                    'colors': torch.cat([real_images[shape:shape+1] for _ in range(step, next_step)], 1),
                     'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
                     'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
                     'extrinsics': torch.stack(inv_RT, 0).unsqueeze(0),
@@ -184,30 +184,22 @@ class NeuralRenderer(object):
                 }
                 # from fairseq import pdb; pdb.set_trace()
                 timer.start()
-                
                 max_num_rays = 800 * 800
                 if _sample['ray_dir'].shape[2] > max_num_rays:
                     _sample['ray_split'] = _sample['ray_dir'].shape[2] // max_num_rays
                 outs = model(**_sample)
-
                 timer.stop()
-                logger.info("rendering frames: {} {:.4f} {:.4f}".format(step, outs['other_logs']['spf_log'], outs['other_logs']['sp0_log']))
+                # logger.info("rendering frames: {} {:.4f} {:.4f}".format(step, outs['other_logs']['spf_log'], outs['other_logs']['sp0_log']))
 
                 for k in range(step, next_step):
-                    images = model.visualize(
-                                _sample, None, 0, k-step, 
-                                target_map=True, 
-                                depth_map=('depth' in self.output_type),
-                                normal_map=('normal' in self.output_type),
-                                hit_map=True)
+                    images = model.visualize(_sample, None, 0, k-step)
                     image_name = "{:04d}".format(k)
 
                     for key in images:
-                        type = key.split('/')[0]
-                        if type in self.output_type:
+                        name, type = key.split('/')[0].split('_')
+                        if type in self.output_type and name == 'render':
                             prefix = os.path.join(output_path, type)
                             Path(prefix).mkdir(parents=True, exist_ok=True)
-                            
                             image = images[key].permute(2, 0, 1) \
                                 if images[key].dim() == 3 else torch.stack(3*[images[key]], 0)        
                             save_image(image, os.path.join(prefix, image_name + '.png'), format=None)
@@ -231,7 +223,7 @@ class NeuralRenderer(object):
         timestamp = time.strftime('%Y-%m-%d.%H-%M-%S',time.localtime(time.time()))
         if steps is not None:
             timestamp = "step_{}.".format(steps) + timestamp
-
+        
         if not combine_output:
             for type in self.output_type:
                 images = [imageio.imread(file_path) for file_path in output_files if type in file_path] 
@@ -239,17 +231,8 @@ class NeuralRenderer(object):
                 imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, type, timestamp), images, fps=self.fps, quality=8)
         else:
             images = [[imageio.imread(file_path) for file_path in output_files if type in file_path] for type in self.output_type]
-            images = [np.concatenate([images[j][i] for j, _ in enumerate(self.output_type)], 1) for i in range(len(images[0]))]
+            images = [np.concatenate([images[j][i] for j in range(len(images))], 1) for i in range(len(images[0]))]
             imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=8)
-            # imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=10)
-
-        # logger.info("cleaning the temple files..")
-        # try:
-        #     for mydir in set([os.path.dirname(path) for path in output_files]):
-        #         shutil.rmtree(mydir)
-        # except OSError as e:
-        #     print ("Error: %s - %s." % (e.filename, e.strerror))
-        #     raise OSError    
         
         return timestamp
 

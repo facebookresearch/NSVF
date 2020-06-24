@@ -21,7 +21,7 @@ GPU=${3:-0}
 
 CUDA_VISIBLE_DEVICES=${GPU} \
 python render.py ${DATASET} \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task single_object_rendering \
     --path ${MODEL_PATH} \
     --render-beam 1 \

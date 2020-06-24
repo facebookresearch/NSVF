@@ -16,8 +16,9 @@ import torch
 from torch.autograd import Function
 import torch.nn as nn
 
-import fairdr.modules.pointnet2.pytorch_utils as pt_utils
+import fairnr.modules.pointnet2.pytorch_utils as pt_utils
 import sys
+import numpy as np
 
 try:
     import builtins
@@ -25,7 +26,7 @@ except:
     import __builtin__ as builtins
 
 try:
-    import fairdr.modules.pointnet2._ext as _ext
+    import fairnr.modules.pointnet2._ext as _ext
 except ImportError:
     if not getattr(builtins, "__POINTNET2_SETUP__", False):
         raise ImportError(
@@ -513,10 +514,30 @@ class AABBRayIntersect(Function):
         torch.Tensor
             (B, npoint) tensor with the nearest indicies of the features that form the query balls
         """
+        # HACK: speed-up ray-voxel intersection by batching...
+        G = 2048
+        S, N = ray_start.shape[:2]
+        K = int(np.ceil(N / G))
+        H = K * G
+        if H > N:
+            ray_start = torch.cat([ray_start, ray_start[:, :H-N]], 1)
+            ray_dir = torch.cat([ray_dir, ray_dir[:, :H-N]], 1)
+        ray_start = ray_start.reshape(S * G, K, 3)
+        ray_dir = ray_dir.reshape(S * G, K, 3)
+        points = points.expand(S * G, *points.size()[1:]).contiguous()
+
         inds, min_depth, max_depth = _ext.aabb_intersect(
             ray_start.float(), ray_dir.float(), points.float(), voxelsize, n_max)
         min_depth = min_depth.type_as(ray_start)
         max_depth = max_depth.type_as(ray_start)
+        
+        inds = inds.reshape(S, H, -1)
+        min_depth = min_depth.reshape(S, H, -1)
+        max_depth = max_depth.reshape(S, H, -1)
+        if H > N:
+            inds = inds[:, :N]
+            min_depth = min_depth[:, :N]
+            max_depth = max_depth[:, :N]
         
         ctx.mark_non_differentiable(inds)
         ctx.mark_non_differentiable(min_depth)

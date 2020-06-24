@@ -11,7 +11,7 @@ GAMMA=0.01
 
 # CUDA_VISIBLE_DEVICES=${GPU} \
 python render.py ${DATASET}/train.txt \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task single_object_rendering \
     --model-overrides "{'fp16': False, 'chunk_size': 512, 'aabb_factor': ${FACTOR}, 'raymarching_tolerance': ${GAMMA}, 'object_id_path': '${IDPATH}'}" \
     --path ${MODEL_PATH} \

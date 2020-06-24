@@ -12,7 +12,7 @@ mkdir -p $MODEL_PATH
 # CUDA_VISIBLE_DEVICES=0 \
 python train.py $DATASET \
     --ddp-backend no_c10d \
-    --user-dir fairdr/ \
+    --user-dir fairnr/ \
     --save-dir $MODEL_PATH \
     --tensorboard-logdir $MODEL_PATH/tensorboard \
     --max-sentences 1 \

@@ -10,7 +10,7 @@ pushd $ENGINE
 python fb_sweep/sweep_neural_rendering.py \
     --data ${ROOT}/${DATA}.txt \
     --grid "srn_debug_seq2" \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard/transformer_seq \
     --snapshot-code \

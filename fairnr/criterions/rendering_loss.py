@@ -14,8 +14,8 @@ from fairseq import metrics
 from fairseq.utils import item
 from fairseq.criterions import FairseqCriterion, register_criterion
 
-import fairdr.criterions.utils as utils
-
+import fairnr.criterions.utils as utils
+import fairnr.criterions.models as LPIPS
 
 class RenderingCriterion(FairseqCriterion):
 
@@ -76,7 +76,7 @@ class RenderingCriterion(FairseqCriterion):
         
         for w in summed_logging_outputs:
             if '_loss' in w:
-                metrics.log_scalar(w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
+                metrics.log_scalar(w[:5], summed_logging_outputs[w] / sample_size, sample_size, round=3)
             elif '_weight' in w:
                 metrics.log_scalar('w_' + w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
             elif '_acc' in w:
@@ -102,83 +102,42 @@ class SRNLossCriterion(RenderingCriterion):
     def __init__(self, args, task):
         super().__init__(args, task)
         if args.vgg_weight > 0:
-            from fairdr.criterions.perceptual_loss import VGGPerceptualLoss
-            self.vgg = VGGPerceptualLoss(resize=True)
-            self._dummy = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float32), 
-                        requires_grad=True)  # HACK: to avoid warnings in c10d
-        if getattr(args, "use_lpips", False):
-            import fairdr.criterions.models as models
-            self.lpips = models.PerceptualLoss(model='net-lin',net='alex',use_gpu=False)
-        else:
-            self.lpips = None
-            
+            self.vgg = LPIPS.PerceptualLoss(model='net-lin',net='vgg',use_gpu=False)
+        if args.eval_lpips:
+            self.lpips = LPIPS.PerceptualLoss(model='net-lin',net='alex',use_gpu=False)
+
     @staticmethod
     def add_args(parser):
         """Add criterion-specific arguments to the parser."""
         parser.add_argument('--L1', action='store_true',
                             help='if enabled, use L1 instead of L2 for RGB loss')
-        parser.add_argument('--rgb-weight', type=float, default=200.0)
-        parser.add_argument('--reg-weight', type=float, default=1e-3)
-        parser.add_argument('--max-depth', type=float, default=5)
+        parser.add_argument('--color-weight', type=float, default=256.0)
         parser.add_argument('--depth-weight', type=float, default=0.0)
         parser.add_argument('--depth-weight-decay', type=str, default=None,
                             help="""if set, use tuple to set (final_ratio, steps).
                                     For instance, (0, 30000)    
                                 """)
-        parser.add_argument('--freespace-weight', type=float, default=0.0)
-        parser.add_argument('--occupancy-weight', type=float, default=0.0)
-        parser.add_argument('--entropy-weight', type=float, default=0.0)
-        parser.add_argument('--pruning-weight', type=float, default=0.0)
         parser.add_argument('--alpha-weight', type=float, default=0.0)
-        parser.add_argument('--gp-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
-        parser.add_argument('--error-map', action='store_true')
-        parser.add_argument('--no-loss-if-predicted', action='store_true',
-                            help="if set, loss is only on the predicted pixels.")
-        parser.add_argument('--max-margin-freespace', type=float, default=None,
-                            help="instead of binary classification. use margin-loss")
-        parser.add_argument('--no-background-loss', action='store_true',
-                            help="do not compute RGB-loss on the background.")
-        parser.add_argument('--random-background-loss', action='store_true',
-                            help='set if we are using transparent image')
-        parser.add_argument('--use-lpips', action='store_true')
+        parser.add_argument('--eval-lpips', action='store_true',
+                            help="evaluate LPIPS scores in validation")
+        parser.add_argument('--no-background-loss', action='store_true')
 
     def compute_loss(self, model, net_output, sample, reduce=True):
-        alpha = sample['alpha']
-        masks = alpha.clone() if self.args.no_background_loss else torch.ones_like(alpha)
-        masks = masks.bool()
-
         losses, other_logs = {}, {}
+        masks = torch.ones_like(sample['alpha']).bool() \
+            if not self.args.no_background_loss else (sample['alpha'] > 0)
+        
         if 'other_logs' in net_output:
             other_logs.update(net_output['other_logs'])
-        if not self.args.random_background_loss:
-            rgb_loss = utils.rgb_loss(
-                net_output['predicts'], sample['rgb'], 
+
+        if self.args.color_weight > 0:
+            color_loss = utils.rgb_loss(
+                net_output['colors'], sample['colors'], 
                 masks, self.args.L1)
-        else:
-            random_bg = torch.zeros_like(net_output['predicts']).uniform_(-1, 1) * 0.1 + net_output['bg_color'].unsqueeze(0) * 0.9
-            predicts = net_output['predicts'] + \
-                net_output['missed'].unsqueeze(-1) * (random_bg - net_output['bg_color'].unsqueeze(0))
-            targets = sample['rgb'].masked_scatter(~(alpha.unsqueeze(-1).expand_as(random_bg)), random_bg)
-            rgb_loss = utils.rgb_loss(predicts, targets, 
-                masks, self.args.L1)
+            losses['color_loss'] = (color_loss, self.args.color_weight)
         
-        losses['rgb_loss'] = (rgb_loss, self.args.rgb_weight)
-
-        if self.args.reg_weight > 0:
-            if 'latent' in net_output:
-                losses['reg_loss'] = (net_output['latent'], self.args.reg_weight)
-
-            else:
-                min_depths = net_output.get('min_depths', 0.0)
-                reg_loss = utils.depth_regularization_loss(
-                    net_output['depths'], min_depths)
-                losses['reg_loss'] = (reg_loss, 10000.0 * self.args.reg_weight)
-
-        if self.args.entropy_weight > 0:
-            losses['ent_loss'] = (net_output['entropy'], self.args.entropy_weight)
-
         if self.args.alpha_weight > 0:
             _alpha = net_output['missed'].reshape(-1)
             # alpha_loss = torch.log(0.1 + alpha) + torch.log(0.1 + 1 - alpha) - math.log(0.11)
@@ -194,12 +153,12 @@ class SRNLossCriterion(RenderingCriterion):
                 depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], depth_mask)
                 
             else:
-                # no depth map is provided. depth loss only applied on background.
+                # no depth map is provided, depth loss only applied on background based on masks
                 max_depth_target = self.args.max_depth * torch.ones_like(net_output['depths'])
                 if sample['mask'] is not None:        
                     depth_loss = utils.depth_loss(net_output['depths'], max_depth_target, (1 - sample['mask']).bool())
                 else:
-                    depth_loss = utils.depth_loss(net_output['depths'], max_depth_target, ~alpha)
+                    depth_loss = utils.depth_loss(net_output['depths'], max_depth_target, ~masks)
             
             depth_weight = self.args.depth_weight
             if self.args.depth_weight_decay is not None:
@@ -209,37 +168,7 @@ class SRNLossCriterion(RenderingCriterion):
 
             losses['depth_loss'] = (depth_loss, depth_weight)
 
-        if (self.args.freespace_weight > 0) and (self.args.occupancy_weight > 0):
-            freespace_mask = (1 - sample['mask']).bool() if sample['mask'] is not None else ~alpha
-            occupancy_mask = sample['mask'].bool() if sample['mask'] is not None else alpha
-            # if self.args.no_loss_if_predicted:
-            #     freespace_mask = freespace_mask & (net_output['missed'] < 0)
-            if self.args.max_margin_freespace is None:
-                freespace_pred = 1 - torch.sigmoid(net_output['missed'] / 0.1)
-                freespace_loss = utils.space_loss(freespace_pred, freespace_mask, sum=False)
-                
-                occupancy_pred = 1 - torch.sigmoid(net_output['missed'] / 0.1)
-                if self.args.no_loss_if_predicted:
-                    occupancy_pred = occupancy_pred.masked_fill(net_output['missed'] < 0, 1.0)
-                occupancy_loss = utils.occupancy_loss(occupancy_pred, occupancy_mask, sum=False)
-            
-            else:
-                margin = self.args.max_margin_freespace
-                assert self.args.no_loss_if_predicted, "only support no loss if preidcted"
-
-                freespace_loss, occupancy_loss = utils.maxmargin_space_loss(
-                    net_output['missed'], freespace_mask, margin, sum=False
-                )
-
-            losses['freespace_loss'] = (freespace_loss, self.args.freespace_weight)
-            losses['occupancy_loss'] = (occupancy_loss, self.args.occupancy_weight)    
-     
-            other_logs['freespace_acc'] = ((net_output['missed'] > 0)[freespace_mask]).float().mean()
-            other_logs['occupancy_acc'] = ((net_output['missed'] < 0)[occupancy_mask]).float().mean()
-
-        if self.args.gp_weight > 0:
-            losses['grd_loss'] = (net_output['grad_penalty'], self.args.gp_weight)
-
+        
         if self.args.vgg_weight > 0:
             if sample.get('full_rgb', None) is None:
                 target = sample['rgb'] 
@@ -260,14 +189,12 @@ class SRNLossCriterion(RenderingCriterion):
             losses['vgg_loss'] = (self.vgg(
                 transform(inputs), transform(target), self.args.vgg_level) + 0.0 * self._dummy, self.args.vgg_weight)
 
-        if self.args.pruning_weight > 0:
-            assert 'pruning_loss' in net_output, "requires pruning loss to be computed."
-            losses['pruning_loss'] = (net_output['pruning_loss'], self.args.pruning_weight)
-
-        loss = sum(losses[key][0] * losses[key][1] for key in losses)
         
+        loss = sum(losses[key][0] * losses[key][1] for key in losses)
+       
+        # from fairseq import pdb; pdb.set_trace()
         # add a dummy loss
-        loss = loss + model.field.backbone.dummy_loss
+        loss = loss + model.dummy_loss
         
         logging_outputs = {key: item(losses[key][0]) for key in losses}
         logging_outputs.update(other_logs)

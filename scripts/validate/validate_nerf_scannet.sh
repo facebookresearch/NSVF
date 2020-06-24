@@ -16,7 +16,7 @@ python validate.py \
     $DATA \
     --valid-views ${VALID} \
     --valid-view-resolution ${RES} \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --no-preload \
     --task single_object_rendering \
     --max-sentences 1 \

@@ -4,7 +4,7 @@ WORK=/checkpoint/jgu/space/neuralrendering/debug_new_chairs
 mkdir -p ${WORK}
 
 GRID=geo_shapenet_seq
-ENGINE=~jgu/work/fairdr-exp
+ENGINE=~jgu/work/fairnr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
@@ -12,7 +12,7 @@ pushd $ENGINE
 # python fb_sweep/sweep_shapenet.py \
 #     --data ${ROOT}/${DATA}.txt \
 #     --grid $GRID \
-#     --user-dir "fairdr" \
+#     --user-dir "fairnr" \
 #     --checkpoints-dir ${WORK} \
 #     --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
 #     --snapshot-code \
@@ -34,7 +34,7 @@ pushd $ENGINE
 python fb_sweep/sweep_shapenet.py \
     --data ${ROOT}/${DATA}.txt  \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --no-tensorboard \
     --snapshot-code \

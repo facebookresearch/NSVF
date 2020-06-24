@@ -10,7 +10,7 @@ GPU=${1:-0}
 
 CUDA_VISIBLE_DEVICES=${GPU} \
 python render.py ${DATASET} \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task single_object_rendering \
     --path ${MODEL_PATH}/checkpoint_last.pt \
     --model-overrides "{'total_num_embedding': 12000}" \

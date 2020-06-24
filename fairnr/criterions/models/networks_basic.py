@@ -12,7 +12,7 @@ from skimage import color
 from IPython import embed
 from . import pretrained_networks as pn
 
-import fairdr.criterions.models as util
+import fairnr.criterions.models as util
 
 def spatial_average(in_tens, keepdim=True):
     return in_tens.mean([2,3],keepdim=keepdim)

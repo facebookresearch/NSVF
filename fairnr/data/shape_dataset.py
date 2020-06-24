@@ -47,11 +47,8 @@ class ShapeDataset(FairseqDataset):
             _data_per_shape['pts'] = self.find_point()
 
         # TODO: FIXME LATER
-        # if ids is None:
         _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
-        # else:
-        #     _data_per_shape['shape'] = [ids[path.split('/')[-1]] for path in self.paths]
-            
+
         if self.subsample_valid > -1:
             for key in _data_per_shape:
                 _data_per_shape[key] = _data_per_shape[key][::self.subsample_valid]
@@ -354,7 +351,7 @@ class ShapeViewDataset(ShapeDataset):
         return {
             'view': view_idx,
             'uv': uv.reshape(2, -1), 
-            'rgb': rgb.reshape(3, -1), 
+            'colors': rgb.reshape(3, -1), 
             'alpha': alpha.reshape(-1), 
             'extrinsics': extrinsics,
             'depths': z.reshape(-1) if z is not None else None,
@@ -475,7 +472,7 @@ class SampledPixelDataset(BaseWrapperDataset):
         ]
         
         for i, data in enumerate(data_per_view):
-            data_per_view[i]['full_rgb'] = copy.deepcopy(data['rgb'])
+            data_per_view[i]['full_rgb'] = copy.deepcopy(data['colors'])
             for key in data:
                 if data[key] is not None \
                     and (key != 'extrinsics' and key != 'view' and key != 'full_rgb') \
@@ -527,7 +524,7 @@ class WorldCoordDataset(BaseWrapperDataset):
 
         results['ray_start'] = results['ray_start'].unsqueeze(-2)
         results['ray_dir'] = results['ray_dir'].transpose(2, 3)
-        results['rgb'] = results['rgb'].transpose(2, 3)
+        results['colors'] = results['colors'].transpose(2, 3)
         if results.get('full_rgb', None) is not None:
             results['full_rgb'] = results['full_rgb'].transpose(2, 3)
         return results

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import cv2
 
-from fairdr.data import ShapeViewDataset, WorldCoordDataset
+from fairnr.data import ShapeViewDataset, WorldCoordDataset
 
 
 # multi-view images

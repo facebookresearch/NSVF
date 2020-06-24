@@ -20,7 +20,7 @@ logging.basicConfig(
     level=logging.INFO,
     stream=sys.stdout,
 )
-logger = logging.getLogger('fairdr_cli.extract')
+logger = logging.getLogger('fairnr_cli.extract')
 
 
 def cli_main():

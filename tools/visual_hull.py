@@ -5,7 +5,7 @@ import torch
 import cv2
 import argparse
 import open3d as o3d
-from fairdr.data import ShapeViewDataset, WorldCoordDataset
+from fairnr.data import ShapeViewDataset, WorldCoordDataset
 
 parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
 parser.add_argument('--dir', type=str, required=True)

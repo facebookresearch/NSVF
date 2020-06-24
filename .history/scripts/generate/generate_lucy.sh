@@ -16,7 +16,7 @@ MODEL_PATH=$1
 
 CUDA_VISIBLE_DEVICES=0 \
 python render.py ${DATASET} \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task single_object_rendering \
     --load-point \
     --path ${MODEL_PATH}/checkpoint_last.pt \

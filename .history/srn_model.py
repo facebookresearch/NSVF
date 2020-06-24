@@ -20,14 +20,14 @@ from fairseq.models import (
     register_model_architecture
 )
 
-from fairdr.models.fairdr_model import BaseModel, Field, Raymarcher
-from fairdr.modules.implicit import (
+from fairnr.models.fairnr_model import BaseModel, Field, Raymarcher
+from fairnr.modules.implicit import (
     ImplicitField, SignedDistanceField, TextureField
 )
-from fairdr.modules.raymarcher import IterativeSphereTracer
-from fairdr.data.geometry import ray, compute_normal_map
-from fairdr.data.data_utils import recover_image
-from fairdr.modules.utils import gradient_bridage
+from fairnr.modules.raymarcher import IterativeSphereTracer
+from fairnr.data.geometry import ray, compute_normal_map
+from fairnr.data.data_utils import recover_image
+from fairnr.modules.utils import gradient_bridage
 
 
 @register_model('scene_representation_networks')

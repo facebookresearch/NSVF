@@ -17,8 +17,8 @@ MODEL_PATH=$1
 for i in {1..10}; do
 
     CUDA_VISIBLE_DEVICES=0 \
-    fairdr-render ${DATASET} \
-        --user-dir fairdr \
+    fairnr-render ${DATASET} \
+        --user-dir fairnr \
         --task single_object_rendering \
         --load-point \
         --path ${MODEL_PATH}/checkpoint_last.pt \

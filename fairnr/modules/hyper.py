@@ -1,9 +1,20 @@
-'''Pytorch implementations of hyper-network modules.'''
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+
+'''
+Pytorch implementations of hyper-network modules.
+This code is largely adapted from
+https://github.com/vsitzmann/scene-representation-networks
+'''
+
 import torch
 import torch.nn as nn
 import functools
 
-from fairdr.modules.linear import FCBlock
+from fairnr.modules.linear import FCBlock
 
 
 def partialclass(cls, *args, **kwds):

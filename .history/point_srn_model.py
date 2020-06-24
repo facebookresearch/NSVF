@@ -10,12 +10,12 @@ from fairseq.models import (
     register_model_architecture
 )
 
-from fairdr.data.geometry import ray
-from fairdr.modules.linear import Linear, PosEmbLinear, NeRFPosEmbLinear
-from fairdr.modules.implicit import ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField
-from fairdr.models.srn_model import SRNModel, SRNField, base_architecture
-from fairdr.modules.backbone import BACKBONE_REGISTRY
-from fairdr.modules.pointnet2.pointnet2_utils import ball_nearest
+from fairnr.data.geometry import ray
+from fairnr.modules.linear import Linear, PosEmbLinear, NeRFPosEmbLinear
+from fairnr.modules.implicit import ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField
+from fairnr.models.srn_model import SRNModel, SRNField, base_architecture
+from fairnr.modules.backbone import BACKBONE_REGISTRY
+from fairnr.modules.pointnet2.pointnet2_utils import ball_nearest
 
 @register_model('point_srn')
 class PointSRNModel(SRNModel):

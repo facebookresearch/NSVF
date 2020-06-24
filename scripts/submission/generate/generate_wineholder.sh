@@ -15,7 +15,7 @@ mkdir -p ${MODEL_ROOT}/supplemental
 
 CUDA_VISIBLE_DEVICES=0 \
 python render.py ${DATASET} \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task single_object_rendering \
     --path ${MODEL_ROOT}/${MODEL_PATH}/checkpoint_1_2500.pt \
     --render-beam 1 \
@@ -34,7 +34,7 @@ python render.py ${DATASET} \
 
 # rm -rf ${MODEL_ROOT}/supplemental/${DATA}_zoomin
 # python render.py ${DATASET} \
-#     --user-dir fairdr \
+#     --user-dir fairnr \
 #     --task single_object_rendering \
 #     --path ${MODEL_ROOT}/${MODEL_PATH}/checkpoint_best.pt \
 #     --render-beam 1 \

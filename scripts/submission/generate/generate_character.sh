@@ -16,7 +16,7 @@ python scripts/submission/check_ckpt.py ${MODEL_PATH}
 
 # CUDA_VISIBLE_DEVICES=0 \
 python render.py ${DATASET} \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task single_object_rendering \
     --path ${MODEL_ROOT}/${MODEL_PATH}/checkpoint_best.pt \
     --render-beam 1 \
@@ -31,7 +31,7 @@ python render.py ${DATASET} \
 #@ --render-output ${MODEL_ROOT}/supplemental/${DATA}_newmodel/ \
 # CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 # python render.py ${DATASET} \
-#     --user-dir fairdr \
+#     --user-dir fairnr \
 #     --task single_object_rendering \
 #     --path ${MODEL_ROOT}/${MODEL_PATH}/checkpoint_best.pt \
 #     --render-beam 1 \
@@ -47,7 +47,7 @@ python render.py ${DATASET} \
 
 # rm -rf ${MODEL_ROOT}/supplemental/${DATA}_zoomin/
 # python render.py ${DATASET} \
-#     --user-dir fairdr \
+#     --user-dir fairnr \
 #     --task single_object_rendering \
 #     --path ${MODEL_ROOT}/${MODEL_PATH}/checkpoint_best.pt \
 #     --render-beam 1 \

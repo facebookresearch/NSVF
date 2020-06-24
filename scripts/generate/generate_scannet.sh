@@ -9,7 +9,7 @@ MODEL0=scannet0024_00_rgbd_newx2.single.480x640.s1.v4.geo_nerf.emb384.ss0.0125.v
 
 CUDA_VISIBLE_DEVICES=${GPU} \
 python render.py ${DATASET} \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task single_object_rendering \
     --path ${MODEL_PATH}/checkpoint_last.pt \
     --render-beam 2 \

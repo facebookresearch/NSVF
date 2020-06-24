@@ -12,7 +12,7 @@ MODEL=srn_data_biglr.seq.128x128.s16.v1.geo_nerf.qxyz.hyper.emb256.nf3.nt4.id.ss
 python validate.py \
     $ROOT/$DATA/training_set/test_small.txt \
     --object-id-path $ROOT/$DATA/training_set/object_ids.txt \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task sequence_object_rendering \
     --max-sentences 50 \
     --path ${WORK}/${MODEL}/checkpoint_best.pt \

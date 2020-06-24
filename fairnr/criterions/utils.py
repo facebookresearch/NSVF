@@ -13,7 +13,6 @@ TINY = 1e-7
 def rgb_loss(predicts, rgbs, masks, L1=False, sum=False):
     if masks.sum() == 0:
         loss = predicts.new_zeros(1)
-
     elif L1:
         loss = torch.abs(predicts[masks] - rgbs[masks]).sum(-1)
     

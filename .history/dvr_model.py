@@ -18,12 +18,12 @@ from fairseq.models import (
     register_model_architecture
 )
 
-from fairdr.models.fairdr_model import BaseModel, Field, Raymarcher
-from fairdr.modules.implicit import ImplicitField, OccupancyField, TextureField
-from fairdr.modules.raymarcher import UniformSearchRayMarcher
-from fairdr.modules.utils import gradient_bridage
-from fairdr.data.geometry import ray
-from fairdr.data.data_utils import recover_image
+from fairnr.models.fairnr_model import BaseModel, Field, Raymarcher
+from fairnr.modules.implicit import ImplicitField, OccupancyField, TextureField
+from fairnr.modules.raymarcher import UniformSearchRayMarcher
+from fairnr.modules.utils import gradient_bridage
+from fairnr.data.geometry import ray
+from fairnr.data.data_utils import recover_image
 
 
 @register_model('diffentiable_volumetric_rendering')

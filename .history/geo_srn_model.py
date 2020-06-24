@@ -14,15 +14,15 @@ from fairseq.models import (
     register_model,
     register_model_architecture
 )
-from fairdr.modules.pointnet2.pointnet2_utils import ball_ray_intersect, aabb_ray_intersect
-from fairdr.data.geometry import ray
-from fairdr.models.point_srn_model import (
+from fairnr.modules.pointnet2.pointnet2_utils import ball_ray_intersect, aabb_ray_intersect
+from fairnr.data.geometry import ray
+from fairnr.models.point_srn_model import (
     PointSRNModel, PointSRNField, 
     transformer_base_architecture,
     pointnet_base_architecture,
     embedding_base_architecture
 )
-from fairdr.modules.raymarcher import BG_DEPTH, MAX_DEPTH
+from fairnr.modules.raymarcher import BG_DEPTH, MAX_DEPTH
 
 
 @register_model('dev_srn')

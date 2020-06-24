@@ -10,7 +10,7 @@ mkdir -p $MODEL_PATH
 
 CUDA_VISIBLE_DEVICES=0 \
 fairseq-train $DATASET \
-    --user-dir fairdr/ \
+    --user-dir fairnr/ \
     --save-dir $MODEL_PATH \
     --tensorboard-logdir $MODEL_PATH/tensorboard \
     --load-depth \

@@ -14,14 +14,15 @@ from argparse import Namespace
 from fairseq.tasks import FairseqTask, register_task
 from fairseq.optim.fp16_optimizer import FP16Optimizer
 
-from fairdr.data import (
+from fairnr.data import (
     ShapeViewDataset, SampledPixelDataset, ShapeViewStreamDataset,
     WorldCoordDataset, ShapeDataset, InfiniteDataset
 )
-from fairdr.data.data_utils import write_images, compute_psnr, recover_image
-from fairdr.data.geometry import ray, compute_normal_map
-from fairdr.renderer import NeuralRenderer
-from fairdr.data.trajectory import get_trajectory
+from fairnr.data.data_utils import write_images, recover_image
+from fairnr.data.geometry import ray, compute_normal_map
+from fairnr.renderer import NeuralRenderer
+from fairnr.data.trajectory import get_trajectory
+from fairnr import ResetTrainerException
 
 
 @register_task("single_object_rendering")
@@ -117,9 +118,7 @@ class SingleObjRenderingTask(FairseqTask):
         else:
             self.writer = None
 
-        self._num_updates = 0
-        self._safe_steps = 0
-
+        self._num_updates = {'pv': 0, 'sv': 0, 'rs': 0, 're': 0}
         self.pruning_every_steps = getattr(self.args, "pruning_every_steps", None)
         self.pruning_th = getattr(self.args, "pruning_th", 0.5)
         self.rendering_every_steps = getattr(self.args, "rendering_every_steps", None)
@@ -299,48 +298,37 @@ class SingleObjRenderingTask(FairseqTask):
         model."""
         return None
 
-    def update_step(self, num_updates):
+    def update_step(self, num_updates, name='re'):
         """Task level update when number of updates increases.
 
         This is called after the optimization step and learning rate
         update at each iteration.
         """
-        self._num_updates = num_updates
+        self._num_updates[name] = num_updates
 
     def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
         if self.steps_to_half_voxels is not None and \
-            (update_num in self.steps_to_half_voxels) and (update_num > self._num_updates):
+            (update_num in self.steps_to_half_voxels) and \
+            (update_num > self._num_updates['sv']):
             
-            model.adjust('split')
-            if isinstance(optimizer, FP16Optimizer):
-                optimizer.fp32_params.data.copy_(FP16Optimizer.build_fp32_params(optimizer.fp16_params, True).data)  
-    
-            # reset optimizer, forget the optimizer history after pruning.
-            # avoid harmful history of adam
-            for p in optimizer.optimizer.state:
-                for key in optimizer.optimizer.state[p]:
-                    if key != 'step':
-                        optimizer.optimizer.state[p][key] *= 0.0
-            
-            # set safe steps. do not update parameters, accumulate Adam state
-            self._safe_steps = 0
+            model.split_voxels()
+            self.update_step(update_num, 'sv')
+            raise ResetTrainerException
 
         if self.pruning_every_steps is not None and \
             (update_num % self.pruning_every_steps == 0) and \
-            (update_num > 0) and (update_num > self._num_updates):
-            model.eval()
-            if self.args.backbone == 'multi_embedding':
-                K = len(model.field.backbone.backbones)
-                for k in range(K):
-                    ids = torch.ones_like(sample['id']) * k
-                    model.adjust('prune', id=ids, th=self.pruning_th)
-            else:
-                model.adjust('prune', id=sample['id'], th=self.pruning_th)
+            (update_num > 0) and \
+            (update_num > self._num_updates['pv']) and \
+            hasattr(model, 'prune_voxels'):
+          
+            model.prune_voxels(self.pruning_th)
+            self.update_step(update_num, 'pv')
 
         if self.rendering_every_steps is not None and \
             (update_num % self.rendering_every_steps == 0) and \
             (update_num > 0) and \
-            self.renderer is not None and (update_num > self._num_updates):
+            self.renderer is not None and \
+            (update_num > self._num_updates['re']):
 
             sample_clone = {key: sample[key].clone() if sample[key] is not None else None for key in sample }
             outputs = self.inference_step(self.renderer, [model], [sample_clone, 0])[1]
@@ -349,78 +337,22 @@ class SingleObjRenderingTask(FairseqTask):
             self.steps_to_half_voxels = [a for a in self.steps_to_half_voxels if a != update_num]
 
         if self.steps_to_reduce_step is not None and \
-            update_num in self.steps_to_reduce_step and (update_num > self._num_updates):
-            model.adjust('reduce')
+            update_num in self.steps_to_reduce_step and \
+            (update_num > self._num_updates['rs']):
 
-        if self._safe_steps > 0:  # do not update parameters, accumulate Adam state
-            optimizer.set_lr(0.0)
-            self._safe_steps -= 1
-
-        self._num_updates = update_num
+            model.reduce_stepsize()
+            self.update_step(update_num, 'rs')
+        
+        self.update_step(update_num, 'step')
         return super().train_step(sample, model, criterion, optimizer, update_num, ignore_grad)
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
-        predicts, targets = model.cache['predicts'], sample['rgb']
-        h, w, h0, w0 = [c.long() for c in sample['size'][0, 0]]
-        if targets.shape[-2] < (h * w / h0 / w0):
-            # this is a dummy batch
-            logging_output['ssim_loss'] = 0
-            logging_output['psnr_loss'] = 0
-            return loss, sample_size, logging_output            
-
-        # compute PSNR & SSMI for validation
-        ssims, psnrs, lpipss = [], [], []
-        for s in range(predicts.size(0)):
-            for v in range(predicts.size(1)):
-                width = int(sample['size'][s, v][1])
-                p = recover_image(predicts[s, v], width=width)
-                t = recover_image(targets[s, v], width=width)
-                ssim, psnr = compute_psnr(p.numpy(), t.numpy())
-                
-                if criterion.lpips is not None:
-                    with torch.no_grad():
-                        lpips = criterion.lpips.forward(
-                            p.unsqueeze(-1).permute(3,2,0,1),
-                            t.unsqueeze(-1).permute(3,2,0,1),
-                            normalize=True).item()
-                    lpipss.append(lpips)
-
-                if self.output_valid is not None:
-                    self.save_image(p.numpy(), sample['id'][s], sample['view'][s, v], 'srn')
-                    self.save_image(t.numpy(), sample['id'][s], sample['view'][s, v], 'gt')
-                    
-                    normals = compute_normal_map(
-                        sample['ray_start'][s, v].float(),
-                        sample['ray_dir'][s, v].float(),
-                        model.cache['depths'][s, v].float(),
-                        sample['extrinsics'][s, v].float().inverse(),
-                        width=width)
-                    normals = recover_image(normals, width=width)
-                    self.save_image(normals.numpy(), sample['id'][s], sample['view'][s, v], 'normal')
-
-                ssims.append(ssim)
-                psnrs.append(psnr)
-
-        logging_output['ssim_loss'] = np.mean(ssims)
-        logging_output['psnr_loss'] = np.mean(psnr)
-
-        if len(lpipss) > 0:
-            logging_output['lpips_loss'] = np.mean(lpipss)
-        
+        model.add_eval_scores(logging_output, sample, model.cache, criterion)
         if self.writer is not None:
-            images = model.visualize(
-                sample,
-                shape=0, view=0,
-                target_map=True,
-                depth_map=True, 
-                normal_map=True, 
-                error_map=False,
-                hit_map=True)
-
+            images = model.visualize(sample, shape=0, view=0)
             if images is not None:
-                write_images(self.writer, images, self._num_updates)
-        
+                write_images(self.writer, images, self._num_updates['step'])
         return loss, sample_size, logging_output
     
     def save_image(self, img, id, view, group='gt'):
@@ -434,7 +366,6 @@ class SingleObjRenderingTask(FairseqTask):
         imageio.imsave(os.path.join(
             self.output_valid, group, object_name, '{:04d}.png'.format(view)), 
             (img * 255).astype(np.uint8))
-
 
 
 @register_task("sequence_object_rendering")

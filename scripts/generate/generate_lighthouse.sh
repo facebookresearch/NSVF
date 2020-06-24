@@ -5,8 +5,8 @@ MODEL_PATH=$1
 GPU=${3:-0}
 
 CUDA_VISIBLE_DEVICES=${GPU} \
-python fairdr_cli/render.py ${DATASET} \
-    --user-dir fairdr \
+python fairnr_cli/render.py ${DATASET} \
+    --user-dir fairnr \
     --task single_object_rendering \
     --path ${MODEL_PATH} \
     --render-beam 1 \

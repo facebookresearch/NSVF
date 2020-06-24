@@ -5,8 +5,11 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
-from fairdr.data import data_utils as D
+from fairnr.data import data_utils as D
+
+INF = 1000.0
 
 
 def ones_like(x):
@@ -167,3 +170,89 @@ def trilinear_interp(p, q, point_feats):
         point_feats = point_feats.view(point_feats.size(0), 8, -1)
     point_feats = (weights * point_feats).sum(1)
     return point_feats
+
+
+# helper functions for encoder
+
+def padding_points(xs, pad):
+    if len(xs) == 1:
+        return xs[0].unsqueeze(0)
+    
+    maxlen = max([x.size(0) for x in xs])
+    xt = xs[0].new_ones(len(xs), maxlen, xs[0].size(1)).fill_(pad)
+    for i in range(len(xs)):
+        xt[i, :xs[i].size(0)] = xs[i]
+    return xt
+
+
+def pruning_points(feats, points, scores, depth=0, th=0.5):
+    if depth > 0:
+        g = int(8 ** depth)
+        scores = scores.reshape(scores.size(0), -1, g).sum(-1, keepdim=True)
+        scores = scores.expand(*scores.size()[:2], g).reshape(scores.size(0), -1)
+    alpha = (1 - torch.exp(-scores)) > th
+    feats = [feats[i][alpha[i]] for i in range(alpha.size(0))]
+    points = [points[i][alpha[i]] for i in range(alpha.size(0))]
+    points = padding_points(points, INF)
+    feats = padding_points(feats, 0)
+    return feats, points
+
+
+def offset_points(point_xyz, quarter_voxel=1, offset_only=False, bits=2):
+    c = torch.arange(1, 2 * bits, 2, device=point_xyz.device)
+    ox, oy, oz = torch.meshgrid([c, c, c])
+    offset = (torch.cat([
+                    ox.reshape(-1, 1), 
+                    oy.reshape(-1, 1), 
+                    oz.reshape(-1, 1)], 1).type_as(point_xyz) - bits) / float(bits - 1)
+    if not offset_only:
+        return point_xyz.unsqueeze(1) + offset.unsqueeze(0).type_as(point_xyz) * quarter_voxel
+    return offset.type_as(point_xyz) * quarter_voxel
+
+
+def splitting_points(point_xyz, point_feats, values, half_voxel):        
+    # generate new centers
+    quarter_voxel = half_voxel * .5
+    new_points = offset_points(point_xyz, quarter_voxel).reshape(-1, 3)
+    old_coords = (point_xyz / quarter_voxel).floor_().long()
+    new_coords = offset_points(old_coords).reshape(-1, 3)
+    new_keys0  = offset_points(new_coords).reshape(-1, 3)
+    
+    # get unique keys and inverse indices (for original key0, where it maps to in keys)
+    new_keys, new_feats = torch.unique(new_keys0, dim=0, sorted=True, return_inverse=True)
+    new_keys_idx = new_feats.new_zeros(new_keys.size(0)).scatter_(
+        0, new_feats, torch.arange(new_keys0.size(0), device=new_feats.device) // 64)
+    
+    # recompute key vectors using trilinear interpolation 
+    new_feats = new_feats.reshape(-1, 8)
+    p = (new_keys - old_coords[new_keys_idx]).type_as(point_xyz).unsqueeze(1) * .25 + 0.5 # (1/4 voxel size)
+    q = offset_points(p, .5, offset_only=True).unsqueeze(0) + 0.5   # BUG?
+    point_feats = point_feats[new_keys_idx]
+    point_feats = F.embedding(point_feats, values).view(point_feats.size(0), -1)
+    new_values = trilinear_interp(p, q, point_feats)
+    return new_points, new_feats, new_values
+
+
+def expand_points(voxel_points, voxel_size):
+    _voxel_size = min([
+        torch.sqrt(((voxel_points[j:j+1] - voxel_points[j+1:]) ** 2).sum(-1).min())
+        for j in range(100)])
+    depth = int(np.round(torch.log2(_voxel_size / voxel_size)))
+    if depth > 0:
+        half_voxel = _voxel_size / 2.0
+        for _ in range(depth):
+            voxel_points = offset_points(voxel_points, half_voxel / 2.0).reshape(-1, 3)
+            half_voxel = half_voxel / 2.0
+    
+    return voxel_points, depth
+
+
+def get_edge(depth_pts, voxel_pts, voxel_size, th=0.05):
+    voxel_pts = offset_points(voxel_pts, voxel_size / 2.0)
+    diff_pts = (voxel_pts - depth_pts[:, None, :]).norm(dim=2)
+    ab = diff_pts.sort(dim=1)[0][:, :2]
+    a, b = ab[:, 0], ab[:, 1]
+    c = voxel_size
+    p = (ab.sum(-1) + c) / 2.0
+    h = (p * (p - a) * (p - b) * (p - c)) ** 0.5 / c
+    return h < (th * voxel_size)

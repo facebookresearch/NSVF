@@ -5,7 +5,7 @@ mkdir -p ${WORK}
 
 GRID=geo_shapenet_seq1283
 GRID=geo_shapenet_seq1282
-ENGINE=~jgu/work/fairdr-exp
+ENGINE=~jgu/work/fairnr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
@@ -13,7 +13,7 @@ pushd $ENGINE
 python fb_sweep/sweep_shapenet.py \
     --data ${ROOT}/${DATA}/training_set \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard/bigbatch/ \
     --snapshot-code \
@@ -35,7 +35,7 @@ python fb_sweep/sweep_shapenet.py \
 # python fb_sweep/sweep_shapenet.py \
 #     --data ${ROOT}/${DATA}/training_set  \
 #     --grid $GRID \
-#     --user-dir "fairdr" \
+#     --user-dir "fairnr" \
 #     --checkpoints-dir ${WORK} \
 #     --no-tensorboard \
 #     --snapshot-code \

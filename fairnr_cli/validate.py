@@ -21,7 +21,7 @@ logging.basicConfig(
     level=logging.INFO,
     stream=sys.stdout,
 )
-logger = logging.getLogger('fairdr_cli.validate')
+logger = logging.getLogger('fairnr_cli.validate')
 
 
 def main(args, override_args=None):

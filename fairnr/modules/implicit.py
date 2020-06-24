@@ -8,9 +8,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fairseq.utils import get_activation_fn
-from fairdr.modules.utils import FCLayer, ResFCLayer
-from fairdr.modules.hyper import HyperFC
-from fairdr.modules.linear import NeRFPosEmbLinear
+from fairnr.modules.hyper import HyperFC
+from fairnr.modules.linear import (
+    NeRFPosEmbLinear, FCLayer, ResFCLayer
+)
 
 class ImplicitField(nn.Module):
     

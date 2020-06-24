@@ -5,7 +5,7 @@ mkdir -p ${WORK}
 
 GRID=geo_nerf
 # GRID=geo_nerf0
-ENGINE=~jgu/work/fairdr-exp
+ENGINE=~jgu/work/fairnr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
@@ -13,7 +13,7 @@ pushd $ENGINE
 python fb_sweep/sweep_multinerf.py \
     --data ${ROOT}/${DATA}/train_full.txt  \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
@@ -35,7 +35,7 @@ python fb_sweep/sweep_multinerf.py \
 # python fb_sweep/sweep_babyangel.py \
 #     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \
-#     --user-dir "fairdr" \
+#     --user-dir "fairnr" \
 #     --checkpoints-dir ${WORK} \
 #     --no-tensorboard \
 #     --snapshot-code \

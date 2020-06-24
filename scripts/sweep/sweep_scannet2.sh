@@ -6,7 +6,7 @@ mkdir -p ${WORK}
 # GRID=geo_scannet00
 # GRID=geo_scannet01
 GRID=geo_scannet2
-ENGINE=~jgu/work/fairdr-exp
+ENGINE=~jgu/work/fairnr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
@@ -14,7 +14,7 @@ pushd $ENGINE
 python fb_sweep/sweep_scannet2.py \
     --data ${ROOT}/${DATA}/data  \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
@@ -38,7 +38,7 @@ python fb_sweep/sweep_scannet2.py \
 # python fb_sweep/sweep_scannet.py \
 #     --data ${ROOT}/${DATA}/data  \
 #     --grid $GRID \
-#     --user-dir "fairdr" \
+#     --user-dir "fairnr" \
 #     --checkpoints-dir ${WORK} \
 #     --tensorboard-logdir ${WORK}/tensorboard \
 #     --snapshot-code \

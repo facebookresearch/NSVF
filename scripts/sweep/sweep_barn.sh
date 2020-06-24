@@ -5,7 +5,7 @@ mkdir -p ${WORK}
 
 GRID=geo_barn_final
 GRID=geo_barn
-ENGINE=~jgu/work/fairdr-exp
+ENGINE=~jgu/work/fairnr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
@@ -14,7 +14,7 @@ pushd $ENGINE
 python fb_sweep/sweep_barn.py \
     --data ${ROOT}/${DATA}/  \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
@@ -35,7 +35,7 @@ python fb_sweep/sweep_barn.py \
 # python fb_sweep/sweep_ignatius.py \
 #     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \
-#     --user-dir "fairdr" \
+#     --user-dir "fairnr" \
 #     --checkpoints-dir ${WORK} \
 #     --no-tensorboard \
 #     --snapshot-code \

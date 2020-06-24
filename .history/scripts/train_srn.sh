@@ -8,8 +8,8 @@ CRITERION=srn_loss
 
 mkdir -p $MODEL_PATH
 
-fairdr-train $DATASET \
-    --user-dir fairdr/ \
+fairnr-train $DATASET \
+    --user-dir fairnr/ \
     --save-dir $MODEL_PATH \
     --tensorboard-logdir $MODEL_PATH/tensorboard \
     --max-sentences 1 \

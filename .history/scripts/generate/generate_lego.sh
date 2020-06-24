@@ -19,7 +19,7 @@ GPU=${3:-0}
 
 CUDA_VISIBLE_DEVICES=${GPU} \
 python render.py ${DATASET} \
-    --user-dir fairdr \
+    --user-dir fairnr \
     --task single_object_rendering \
     --load-point \
     --path ${MODEL_PATH}/checkpoint_last.pt \

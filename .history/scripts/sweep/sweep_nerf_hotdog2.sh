@@ -15,7 +15,7 @@ pushd $ENGINE
 python fb_sweep/sweep_nerf.py \
     --data ${ROOT}/${DATA} \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \
@@ -37,7 +37,7 @@ popd
 # python fb_sweep/sweep_nerf.py \
 #     --data ${ROOT}/${DATA}  \
 #     --grid $GRID \
-#     --user-dir "fairdr" \
+#     --user-dir "fairnr" \
 #     --checkpoints-dir ${WORK} \
 #     --no-tensorboard \
 #     --snapshot-code \

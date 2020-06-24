@@ -11,7 +11,7 @@ pushd $ENGINE
 python fb_sweep/sweep_neural_rendering.py \
     --data ${ROOT}/${DATA}/0001 \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard \
     --snapshot-code \

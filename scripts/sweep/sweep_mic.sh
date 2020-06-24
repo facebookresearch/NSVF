@@ -4,7 +4,7 @@ WORK=/checkpoint/jgu/space/neuralrendering/debug_new_singlev3
 mkdir -p ${WORK}
 
 GRID=geo_mic2
-ENGINE=~jgu/work/fairdr-exp
+ENGINE=~jgu/work/fairnr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
@@ -12,7 +12,7 @@ pushd $ENGINE
 python fb_sweep/sweep_mic.py \
     --data ${ROOT}/${DATA}/  \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
@@ -34,7 +34,7 @@ python fb_sweep/sweep_mic.py \
 # python fb_sweep/sweep_babyangel.py \
 #     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \
-#     --user-dir "fairdr" \
+#     --user-dir "fairnr" \
 #     --checkpoints-dir ${WORK} \
 #     --no-tensorboard \
 #     --snapshot-code \

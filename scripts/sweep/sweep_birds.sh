@@ -4,7 +4,7 @@ WORK=/checkpoint/jgu/space/neuralrendering/debug_new_birds
 mkdir -p ${WORK}
 
 GRID=geo_birds3
-ENGINE=~jgu/work/fairdr-exp
+ENGINE=~jgu/work/fairnr-exp
 
 pushd $ENGINE
 #  --tensorboard-logdir ${WORK}/tensorboard \
@@ -12,7 +12,7 @@ pushd $ENGINE
 python fb_sweep/sweep_birds.py \
     --data ${ROOT}/${DATA}/  \
     --grid $GRID \
-    --user-dir "fairdr" \
+    --user-dir "fairnr" \
     --checkpoints-dir ${WORK} \
     --tensorboard-logdir ${WORK}/tensorboard/ \
     --snapshot-code \
@@ -34,7 +34,7 @@ python fb_sweep/sweep_birds.py \
 # python fb_sweep/sweep_birds.py \
 #     --data ${ROOT}/${DATA}/  \
 #     --grid $GRID \
-#     --user-dir "fairdr" \
+#     --user-dir "fairnr" \
 #     --checkpoints-dir ${WORK} \
 #     --no-tensorboard \
 #     --snapshot-code \

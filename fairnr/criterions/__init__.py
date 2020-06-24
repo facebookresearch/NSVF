@@ -5,5 +5,5 @@ for file in os.listdir(os.path.dirname(__file__)):
     if file.endswith(".py") and not file.startswith("_"):
         criterion_name = file[: file.find(".py")]
         importlib.import_module(
-            "fairdr.criterions." + criterion_name
+            "fairnr.criterions." + criterion_name
         )
