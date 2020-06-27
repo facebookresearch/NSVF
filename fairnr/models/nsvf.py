@@ -30,6 +30,7 @@ from fairnr.models.fairnr_model import BaseModel
 from fairnr.modules.encoder import SparseVoxelEncoder
 from fairnr.modules.field import RaidanceField
 from fairnr.modules.renderer import VolumeRenderer
+from fairnr.modules.reader import Reader
 from fairnr.modules.linear import Linear, NeRFPosEmbLinear, Embedding
 from fairnr.modules.implicit import (
     ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField,
@@ -59,6 +60,7 @@ class NSVFModel(BaseModel):
         SparseVoxelEncoder.add_args(parser)
         RaidanceField.add_args(parser)
         VolumeRenderer.add_args(parser)
+        Reader.add_args(parser)
 
     def _encode(self, id, action='none', step=0, **kwargs):
         if action == 'none':
@@ -236,7 +238,7 @@ class NSVFModel(BaseModel):
         voxel_edges = fill_in((fullsize, 3), hits, voxel_edges, 1.0)
         bg_color = self.field.bg_color(**kwargs)
         colors = fill_in((fullsize, 3), hits, colors, 0.0) + missed.unsqueeze(-1) * bg_color.reshape(-1, 3)
-
+        
         # model's output
         return {
             'colors': colors.view(S, V, P, 3),
@@ -263,8 +265,8 @@ class NSVFModel(BaseModel):
                 'max_val': 1,
                 'weight':
                     compute_normal_map(
-                        sample['ray_start'][shape, view].float(),
-                        sample['ray_dir'][shape, view].float(),
+                        output['ray_start'][shape, view].float(),
+                        output['ray_dir'][shape, view].float(),
                         output['voxel_depth'][shape, view].float(),
                         sample['extrinsics'][shape, view].float().inverse(),
                         width, proj=True)
@@ -320,6 +322,14 @@ def base_architecture(args):
     args.discrete_regularization = getattr(args, "discrete_regularization", False)
     args.deterministic_step = getattr(args, "deterministic_step", False)
     args.raymarching_tolerance = getattr(args, "raymarching_tolerance", 0)
+
+    # reader
+    args.pixel_per_view = getattr(args, "pixel_per_view", 2048)
+    args.sampling_on_mask = getattr(args, "sampling_on_mask", 0.0)
+    args.sampling_at_center = getattr(args, "sampling_at_center", 1.0)
+    args.sampling_on_bbox = getattr(args, "sampling_on_bbox", False)
+    args.sampling_patch_size = getattr(args, "sampling_patch_size", 1)
+    args.sampling_skipping_size = getattr(args, "sampling_skipping_size", 1)
 
     # others
     args.chunk_size = getattr(args, "chunk_size", 256)

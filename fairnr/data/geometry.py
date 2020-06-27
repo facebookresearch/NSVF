@@ -89,7 +89,6 @@ def get_ray_direction(ray_start, uv, intrinsics, inv_RT, depths=None):
         depths = 1
     rt_cam = uv2cam(uv, depths, intrinsics, True)       
     rt = cam2world(rt_cam, inv_RT)
-    # from fairseq.pdb import set_trace; set_trace()
     ray_dir, _ = normalize(rt - ray_start[:, None], axis=0)
     return ray_dir
 

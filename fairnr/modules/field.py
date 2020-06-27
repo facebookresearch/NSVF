@@ -158,6 +158,7 @@ class RaidanceField(Field):
                 features = torch.cat([features, self.raydir_proj(dir)], -1)
             texture = self.renderer(features)
             _data['texture'] = texture
+        
         return tuple([_data[key] for key in outputs])
 
 

@@ -70,9 +70,9 @@ class NeRFPosEmbLinear(nn.Module):
 
     def forward(self, x):
         assert x.size(-1) == self.in_dim, "size must match"
-        sizes = x.size()
+        sizes = x.size() 
         if self.angular:
-            x = torch.acos(x)
+            x = torch.acos(x.clamp(-1 + 1e-6, 1 - 1e-6))
         x = x.unsqueeze(-1) @ self.emb.unsqueeze(0)
         x = torch.cat([torch.sin(x), torch.cos(x)], dim=-1)
         x = x.view(*sizes[:-1], self.out_dim)

@@ -15,7 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-from fairnr.data.data_utils import load_matrix, unique_points
+from fairnr.data.data_utils import load_matrix
 from fairnr.data.geometry import (
     trilinear_interp, splitting_points, offset_points
 )
@@ -32,8 +32,6 @@ class Encoder(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.use_context = getattr(args, "context", None)
-        self.online_pruning = getattr(args, "online_pruning", False)
 
     def forward(self, **kwargs):
         raise NotImplementedError
@@ -41,11 +39,12 @@ class Encoder(nn.Module):
 
 class SparseVoxelEncoder(Encoder):
 
-    def __init__(self, args):
+    def __init__(self, args, voxel_path=None):
         super().__init__(args)
+        if voxel_path is None:
+            voxel_path = args.voxel_path
+        self.voxel_path = voxel_path
 
-        self.voxel_path = args.voxel_path if args.voxel_path is not None \
-            else os.path.join(args.data, 'voxel.txt')
         assert os.path.exists(self.voxel_path), "Initial voxel file does not exist..."
 
         half_voxel = args.voxel_size * .5
@@ -236,43 +235,52 @@ class SparseVoxelEncoder(Encoder):
 class MultiSparseVoxelEncoder(Encoder):
     def __init__(self, args):
         super().__init__(args)
-        self.voxel_lists = open(args.quantized_voxel_path).readlines()
-        self.backbones = nn.ModuleList(
+
+        self.voxel_lists = open(args.voxel_path).readlines()
+        self.all_voxels = nn.ModuleList(
             [SparseVoxelEncoder(args, vox.strip()) for vox in self.voxel_lists])
         self.current_id = None
-        self.offset = self.backbones[0].offset
 
-    def forward(self, id, *args, **kwargs):
+    def precompute(self, id, *args, **kwargs):
+        # TODO: this is a HACK for simplicity
         assert id.size(0) == 1, "for now, only works for one object"
-        self.current_id = id[0]
-        return self.backbones[id[0]].forward(id, *args, **kwargs)
+        self.cid = id[0]
+        return self.all_voxels[id[0]].precompute(id, *args, **kwargs)
     
-    def get_features(self, x, values):
-        return F.embedding(x, values)
+    def ray_voxel_intersect(self, *args, **kwargs):
+        return self.all_voxels[self.cid].ray_voxel_intersect(*args, **kwargs)
 
-    def pruning(self, keep):
-        self.backbones[self.current_id].pruning(keep)
+    def ray_sample(self, *args, **kwargs):
+        return self.all_voxels[self.cid].ray_sample(*args, **kwargs)
 
-    def splitting(self, *args, **kwargs):
-        for i in range(len(self.backbones)):
-            self.backbones[i].splitting(*args, **kwargs)
+    def forward(self, samples, encoder_states):
+        return self.all_voxels[self.cid].forward(samples, encoder_states)
+
+    @torch.no_grad()
+    def pruning(self, field_fn, th=0.5):
+        for id in range(len(self.all_voxels)):
+           self.all_voxels[id].pruning(field_fn, th)
+    
+    @torch.no_grad()
+    def splitting(self):
+        for id in range(len(self.all_voxels)):
+            self.all_voxels[id].splitting()
 
     @property
     def feature_dim(self):
-        return self.backbones[0].embed_dim
-
-    @property
-    def keep(self):
-        return torch.cat([b.keep for b in self.backbones], -1)
+        return self.all_voxels[0].embed_dim
 
     @property
     def dummy_loss(self):
-        return sum([b.dummy_loss for b in self.backbones])
+        return sum([d.dummy_loss for d in self.all_voxels])
 
-    @staticmethod
-    def add_args(parser):
-        pass
+    @property
+    def voxel_size(self):
+        return self.all_voxels[0].voxel_size
 
+    @property
+    def step_size(self):
+        return self.all_voxels[0].step_size
 
 
 @torch.no_grad()

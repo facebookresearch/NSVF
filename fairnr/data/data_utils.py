@@ -250,10 +250,12 @@ def sample_pixel_from_image(
     except Exception:
         return np.random.choice(num_pixel, num_sample)
 
+
 def colormap(dz):
     # return plt.cm.jet(dz)
     # return plt.cm.viridis(dz)
     return plt.cm.gray(dz)
+
 
 def recover_image(img, min_val=-1, max_val=1, width=512, bg=None, weight=None):
     sizes = img.size()
@@ -292,31 +294,6 @@ def compute_psnr(p, t):
     ssim = skimage.metrics.structural_similarity(p, t, multichannel=True, data_range=1)
     psnr = skimage.metrics.peak_signal_noise_ratio(p, t, data_range=1)
     return ssim, psnr
-
-
-def unique_points(points, old_points=None):
-    def pts2set(points):
-        return sorted(list(set([" ".join([str(pi) for pi in p]) for p in points.cpu().tolist()])))
-
-    if old_points is None:
-        _points = pts2set(points)
-    else:
-        _points = pts2set(points).difference(pts2set(old_points))
-
-    return torch.tensor([[int(p) for p in p.split()] for p in _points]).type_as(points)
-
-
-# def unique_points(points, old_points=None):
-#     def pts2set(points):
-#         return set([" ".join(["{:.1f}".format(round(pi * 10000)) for pi in p]) for p in points.cpu().tolist()])
-    
-#     if old_points is None:
-#         _points = pts2set(points)
-#     else:
-#         _points = pts2set(points).difference(pts2set(old_points))
-
-#     return torch.tensor(
-#         [[float(p) / 10000. for p in p.split()] for p in _points], device=points.device)
 
 
 class InfIndex(object):

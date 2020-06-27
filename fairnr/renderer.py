@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class NeuralRenderer(object):
     
     def __init__(self, 
-                resolution=512, 
+                resolution="512x512", 
                 frames=501, 
                 speed=5,
                 raymarching_steps=None,
@@ -77,10 +77,6 @@ class NeuralRenderer(object):
             else:
                 self.test_poses = data_utils.load_matrix(test_camera_poses)
                 self.test_poses = self.test_poses.reshape(-1, 4, 4)
-
-            # inverse the axis
-            # self.test_poses[:, :, 1] = -self.test_poses[:, :, 1]
-            # self.test_poses[:, :, 2] = -self.test_poses[:, :, 2]
         else:
             self.test_poses = None
 
@@ -111,9 +107,7 @@ class NeuralRenderer(object):
             uv = torch.from_numpy(get_uv(h * rh, w * rw, h, w)[0]).type_as(intrinsics)
 
         uv = uv.reshape(2, -1)
-        ray_start = inv_RT[:3, 3]
-        ray_dir = geometry.get_ray_direction(ray_start, uv, intrinsics, inv_RT)
-        return ray_start[None, :], ray_dir.transpose(0, 1), inv_RT
+        return uv, inv_RT
 
     def parse_sample(self,sample):
         if len(sample) == 1:
@@ -153,7 +147,7 @@ class NeuralRenderer(object):
             max_step = step + frames
             while step < max_step:
                 next_step = min(step + self.beam, max_step)
-                ray_start, ray_dir, inv_RT = zip(*[
+                uv, inv_RT = zip(*[
                     self.generate_rays(
                         k, sample['intrinsics'][shape], sample['size'][shape, 0],
                         self.test_poses[k] if self.test_poses is not None else None,
@@ -168,9 +162,9 @@ class NeuralRenderer(object):
                     'id': sample['id'][shape:shape+1],
                     'offset': float((step % frames)) / float(frames) if self.use_interpolation else None,
                     'colors': torch.cat([real_images[shape:shape+1] for _ in range(step, next_step)], 1),
-                    'ray_start': torch.stack(ray_start, 0).unsqueeze(0),
-                    'ray_dir': torch.stack(ray_dir, 0).unsqueeze(0),
+                    'intrinsics': sample['intrinsics'][shape:shape+1],
                     'extrinsics': torch.stack(inv_RT, 0).unsqueeze(0),
+                    'uv': torch.stack(uv, 0).unsqueeze(0),
                     'shape': sample['shape'][shape:shape+1],
                     'view': torch.arange(
                         step, next_step, 
@@ -184,9 +178,9 @@ class NeuralRenderer(object):
                 }
                 # from fairseq import pdb; pdb.set_trace()
                 timer.start()
-                max_num_rays = 800 * 800
-                if _sample['ray_dir'].shape[2] > max_num_rays:
-                    _sample['ray_split'] = _sample['ray_dir'].shape[2] // max_num_rays
+                # max_num_rays = 800 * 800
+                # if _sample['ray_dir'].shape[2] > max_num_rays:
+                #     _sample['ray_split'] = _sample['ray_dir'].shape[2] // max_num_rays
                 outs = model(**_sample)
                 timer.stop()
                 # logger.info("rendering frames: {} {:.4f} {:.4f}".format(step, outs['other_logs']['spf_log'], outs['other_logs']['sp0_log']))

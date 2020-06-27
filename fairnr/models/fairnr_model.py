@@ -21,6 +21,7 @@ from fairseq.models import BaseFairseqModel
 from fairnr.modules.encoder import Encoder
 from fairnr.modules.field import Field
 from fairnr.modules.renderer import Renderer
+from fairnr.modules.reader import Reader
 from fairnr.data.geometry import ray, compute_normal_map, compute_normal_map
 from fairnr.data.data_utils import recover_image
 
@@ -30,9 +31,10 @@ logger = logging.getLogger(__name__)
 class BaseModel(BaseFairseqModel):
     """Base class"""
 
-    def __init__(self, args, encoder, field, raymarcher):
+    def __init__(self, args, reader, encoder, field, raymarcher):
         super().__init__()
         self.args = args
+        self.reader = reader
         self.encoder = encoder
         self.field = field
         self.raymarcher = raymarcher
@@ -45,10 +47,11 @@ class BaseModel(BaseFairseqModel):
     @classmethod
     def build_model(cls, args, task):
         """Build a new model instance."""
+        reader = cls.build_reader(args)
         encoder = cls.build_encoder(args)
         field = cls.build_field(args)
         raymarcher = cls.build_raymarcher(args)
-        return cls(args, encoder, field, raymarcher)
+        return cls(args, reader, encoder, field, raymarcher)
 
     @classmethod
     def build_field(cls, args):
@@ -62,14 +65,20 @@ class BaseModel(BaseFairseqModel):
     def build_encoder(cls, args):
         return Encoder(args)
 
+    @classmethod
+    def build_reader(cls, args):
+        return Reader(args)
+
     @property
     def dummy_loss(self):
         return sum([p.sum() for p in self.parameters()]) * 0.0
 
-    def forward(self, ray_start, ray_dir, ray_split=1, **kwargs):
+    # def forward(self, ray_start, ray_dir, ray_split=1, **kwargs):
+    def forward(self, ray_split=1, **kwargs):
+        ray_start, ray_dir, uv = self.reader(**kwargs)
+
         if ray_split == 1:
             results = self._forward(ray_start, ray_dir, **kwargs)
-        
         else:
             total_rays = ray_dir.shape[2]
             chunk_size = total_rays // ray_split
@@ -79,7 +88,11 @@ class BaseModel(BaseFairseqModel):
                 for i in range(0, total_rays, chunk_size)
             ]
             results = self.merge_outputs(results)
- 
+
+        results['ray_start'] = ray_start
+        results['ray_dir'] = ray_dir
+        results['sampled_uv'] = uv
+       
         # caching the prediction
         self.cache = {
             w: results[w].detach() 
@@ -133,8 +146,8 @@ class BaseModel(BaseFairseqModel):
                 'max_val': max_depth}
 
             normals = compute_normal_map(
-                sample['ray_start'][shape, view].float(),
-                sample['ray_dir'][shape, view].float(),
+                output['ray_start'][shape, view].float(),
+                output['ray_dir'][shape, view].float(),
                 output['depths'][shape, view].float(),
                 sample['extrinsics'][shape, view].float().inverse(), width)
             images['{}_normal/{}:HWC'.format(name, img_id)] = {

@@ -13,7 +13,7 @@ from torch import Tensor
 from fairseq import metrics
 from fairseq.utils import item
 from fairseq.criterions import FairseqCriterion, register_criterion
-
+from fairnr.criterions.perceptual_loss import VGGPerceptualLoss
 import fairnr.criterions.utils as utils
 import fairnr.criterions.models as LPIPS
 
@@ -76,7 +76,7 @@ class RenderingCriterion(FairseqCriterion):
         
         for w in summed_logging_outputs:
             if '_loss' in w:
-                metrics.log_scalar(w[:5], summed_logging_outputs[w] / sample_size, sample_size, round=3)
+                metrics.log_scalar(w[:5].split('_')[0], summed_logging_outputs[w] / sample_size, sample_size, round=3)
             elif '_weight' in w:
                 metrics.log_scalar('w_' + w[:3], summed_logging_outputs[w] / sample_size, sample_size, round=3)
             elif '_acc' in w:
@@ -101,8 +101,10 @@ class SRNLossCriterion(RenderingCriterion):
 
     def __init__(self, args, task):
         super().__init__(args, task)
+        # HACK: to avoid warnings in c10d
+        self.dummy_loss = torch.nn.Parameter(torch.tensor(0.0, dtype=torch.float32), requires_grad=True)  
         if args.vgg_weight > 0:
-            self.vgg = LPIPS.PerceptualLoss(model='net-lin',net='vgg',use_gpu=False)
+            self.vgg = VGGPerceptualLoss(resize=False)
         if args.eval_lpips:
             self.lpips = LPIPS.PerceptualLoss(model='net-lin',net='alex',use_gpu=False)
 
@@ -126,22 +128,34 @@ class SRNLossCriterion(RenderingCriterion):
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         losses, other_logs = {}, {}
-        masks = torch.ones_like(sample['alpha']).bool() \
-            if not self.args.no_background_loss else (sample['alpha'] > 0)
         
+        # prepare data before computing loss
+        sampled_uv = net_output['sampled_uv']  # S, V, 2, N, P, P (patch-size)
+        S, V, _, N, P1, P2 = sampled_uv.size()
+        H, W = int(sample['size'][0, 0, 0]), int(sample['size'][0, 0, 1])
+        L = N * P1 * P2
+        flatten_uv = sampled_uv.view(S, V, 2, L)
+        flatten_index = (flatten_uv[:,:,0] + flatten_uv[:,:,1] * W).long()
+
+        assert 'colors' in sample and sample['colors'] is not None, "ground-truth colors not provided"
+        target_colors = sample['colors']
+        masks = (sample['alpha'] > 0) if self.args.no_background_loss else None
+        if L < target_colors.size(2):    
+            target_colors = target_colors.gather(2, flatten_index.unsqueeze(-1).repeat(1,1,1,3))
+            masks = masks.gather(2, flatten_uv) if masks is not None else None
+    
         if 'other_logs' in net_output:
             other_logs.update(net_output['other_logs'])
 
+        # computing loss
         if self.args.color_weight > 0:
             color_loss = utils.rgb_loss(
-                net_output['colors'], sample['colors'], 
+                net_output['colors'], target_colors, 
                 masks, self.args.L1)
             losses['color_loss'] = (color_loss, self.args.color_weight)
         
         if self.args.alpha_weight > 0:
             _alpha = net_output['missed'].reshape(-1)
-            # alpha_loss = torch.log(0.1 + alpha) + torch.log(0.1 + 1 - alpha) - math.log(0.11)
-            # alpha_loss = alpha_loss.float().mean().type_as(alpha_loss)
             alpha_loss = torch.log1p(
                 1. / 0.11 * _alpha.float() * (1 - _alpha.float())
             ).mean().type_as(_alpha)
@@ -149,8 +163,9 @@ class SRNLossCriterion(RenderingCriterion):
 
         if self.args.depth_weight > 0:
             if sample['depths'] is not None:
-                depth_mask = masks & (sample['depths'] > 0)
-                depth_loss = utils.depth_loss(net_output['depths'], sample['depths'], depth_mask)
+                target_depths = target_depths.gather(2, flatten_index)
+                depth_mask = masks & (target_depths > 0)
+                depth_loss = utils.depth_loss(net_output['depths'], target_depths, depth_mask)
                 
             else:
                 # no depth map is provided, depth loss only applied on background based on masks
@@ -170,32 +185,17 @@ class SRNLossCriterion(RenderingCriterion):
 
         
         if self.args.vgg_weight > 0:
-            if sample.get('full_rgb', None) is None:
-                target = sample['rgb'] 
-                inputs = net_output['predicts']
-            else:
-                target = sample['full_rgb']
-                inputs = target.scatter(
-                    2, sample['index'].unsqueeze(-1).expand_as(net_output['predicts']),
-                    net_output['predicts'])
+            assert P1 * P2 > 1, "we have to use a patch-based sampling for VGG loss"
+            target_colors = target_colors.reshape(-1, P1, P2, 3).permute(0, 3, 1, 2) * .5 + .5
+            output_colors = net_output['colors'].reshape(-1, P1, P2, 3).permute(0, 3, 1, 2) * .5 + .5
+            vgg_loss = self.vgg(output_colors, target_colors)
+            losses['vgg_loss'] = (vgg_loss, self.args.vgg_weight)
 
-            def transform(x):
-                S, V, D, _ = x.size()
-                H, W = int(sample['size'][0, 0, 0]), int(sample['size'][0, 0, 1])
-                x = x.transpose(2, 3).view(S * V, 3, H, W)
-                return x / 2 + 0.5
-
-            # vgg_ratio = target.numel() / net_output['predicts'].numel()
-            losses['vgg_loss'] = (self.vgg(
-                transform(inputs), transform(target), self.args.vgg_level) + 0.0 * self._dummy, self.args.vgg_weight)
-
-        
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
        
         # from fairseq import pdb; pdb.set_trace()
         # add a dummy loss
-        loss = loss + model.dummy_loss
-        
+        loss = loss + model.dummy_loss + self.dummy_loss * 0.
         logging_outputs = {key: item(losses[key][0]) for key in losses}
         logging_outputs.update(other_logs)
         return loss, logging_outputs

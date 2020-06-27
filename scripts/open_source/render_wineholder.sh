@@ -19,4 +19,4 @@ python render.py ${DATASET} \
     --render-path-args "{'radius': 3, 'h': 2, 'axis': 'z', 't0': -2, 'r':-1}" \
     --render-output ${SAVE}/output \
     --render-output-types "color" "depth" "voxel" "normal" \
-    --render-combine-output # | tee /checkpoint/jgu/space/neuralrendering/results/${DATA}/rendering.log
+    --render-combine-output --log-format "simple" # | tee /checkpoint/jgu/space/neuralrendering/results/${DATA}/rendering.log

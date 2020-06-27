@@ -23,7 +23,6 @@ class ShapeDataset(FairseqDataset):
     """
     def __init__(self, 
                 paths, 
-                load_point=False,
                 preload=True,
                 repeat=1,
                 subsample_valid=-1,
@@ -35,7 +34,6 @@ class ShapeDataset(FairseqDataset):
             self.paths = [line.strip() for line in open(paths)]
 
         self.subsample_valid = subsample_valid
-        self.load_point = load_point
         self.total_num_shape = len(self.paths)
         self.cache = None
         self.repeat = repeat
@@ -43,10 +41,6 @@ class ShapeDataset(FairseqDataset):
         # -- load per-shape data
         _data_per_shape = {}
         _data_per_shape['ixt'] = self.find_intrinsics()
-        if self.load_point:
-            _data_per_shape['pts'] = self.find_point()
-
-        # TODO: FIXME LATER
         _data_per_shape['shape'] = list(range(len(_data_per_shape['ixt'])))
 
         if self.subsample_valid > -1:
@@ -75,15 +69,6 @@ class ShapeDataset(FairseqDataset):
         # group the data together
         self.data = data_list
 
-    def find_point(self):
-        vox_list = []
-        for path in self.paths:
-            if os.path.exists(path + '/voxel.txt'):
-                vox_list.append(path + '/voxel.txt')
-            else:
-                raise FileNotFoundError("CANNOT find intrinsic data")
-        return vox_list
-
     def find_intrinsics(self):
         ixt_list = []
         for path in self.paths:
@@ -97,13 +82,8 @@ class ShapeDataset(FairseqDataset):
 
     def _load_shape(self, packed_data):        
         intrinsics = data_utils.load_intrinsics(packed_data['ixt']).astype('float32')
-        if packed_data.get('pts', None) is not None:
-            voxels = data_utils.load_matrix(packed_data['pts'])
-            voxels, points = voxels[:, :3].astype('int32'), voxels[:, 3:]
-        else:
-            voxels, points = None, None
         shape_id = packed_data['shape']
-        return {'intrinsics': intrinsics, 'voxels': voxels, 'points': points, 'id': shape_id}
+        return {'intrinsics': intrinsics, 'id': shape_id}
 
     def _load_batch(self, data, index):
         return index, self._load_shape(data[index])
@@ -126,32 +106,8 @@ class ShapeDataset(FairseqDataset):
         results['shape'] = torch.from_numpy(np.array([s[0] for s in samples]))    
         for key in samples[0][1]:
             if samples[0][1][key] is not None:
-                if key == 'voxels':
-                    # save for sparse-conv
-                    batch_voxels = np.concatenate(
-                        [
-                            np.concatenate(
-                                [s[1][key], j * np.ones((s[1][key].shape[0], 1))], 1) 
-                            for j, s in enumerate(samples)
-                        ],
-                        axis=0
-                    )
-                    results[key] = torch.from_numpy(batch_voxels).int()
-                
-                elif key == "points":
-                    # save for pointnet++, handling dynamic number of points by duplicating points.
-                    max_num = max(s[1][key].shape[0] for s in samples)
-                    batch_points = np.array([
-                        np.concatenate(
-                            [s[1][key], s[1][key][:(max_num - s[1][key].shape[0])]], 0)
-                            if s[1][key].shape[0] < max_num
-                            else s[1][key]
-                        for s in samples])
-                    results[key] = torch.from_numpy(batch_points)
-                
-                else:
-                    results[key] = torch.from_numpy(
-                        np.array([s[1][key] for s in samples]))
+                results[key] = torch.from_numpy(
+                    np.array([s[1][key] for s in samples]))
             else:
                 results[key] = None
         return results
@@ -162,6 +118,7 @@ class ShapeDataset(FairseqDataset):
         except IndexError:
             results = None
         return results
+
 
 class ShapeViewDataset(ShapeDataset):
     """
@@ -176,17 +133,15 @@ class ShapeViewDataset(ShapeDataset):
                 resolution=None, 
                 load_depth=False,
                 load_mask=False,
-                load_point=False,
                 train=True,
                 preload=True,
                 repeat=1,
                 binarize=True,
-                bg_color=-0.8,
+                bg_color="1,1,1",
                 min_color=-1,
                 ids=None):
         
-        super().__init__(
-            paths, load_point, False, repeat, subsample_valid, ids)
+        super().__init__(paths, False, repeat, subsample_valid, ids)
 
         self.train = train
         self.load_depth = load_depth
@@ -198,7 +153,6 @@ class ShapeViewDataset(ShapeDataset):
             self.resolution = [int(r) for r in resolution.split('x')]
         else:
             self.resolution = [resolution, resolution]
-
         self.world2camera = True
         self.cache_view = None
         
@@ -216,12 +170,10 @@ class ShapeViewDataset(ShapeDataset):
         _data_per_view = {}
         _data_per_view['rgb'] = self.find_rgb()  
         _data_per_view['ext'] = self.find_extrinsics()
-
         if self.load_depth:
             _data_per_view['dep'] = self.find_depth()
         if self.load_mask:
             _data_per_view['mask'] = self.find_mask()
-        
         _data_per_view['view'] = self.summary_view_data(_data_per_view)
 
         # group the data.
@@ -246,7 +198,7 @@ class ShapeViewDataset(ShapeDataset):
                                 f"{'.d' if load_depth else ''}" + \
                                 f"{'.m' if load_mask else ''}" + \
                                 f"{'b' if not self.apply_mask_color else ''}" + \
-                                f"{'.p' if load_point else ''}" + "_full"
+                                "_full"
                     logger.info("preload {}-{}".format(id, phase_name))
                     if binarize:
                         cache = self._load_binary(id, np.arange(total_num_view), phase_name)
@@ -287,7 +239,6 @@ class ShapeViewDataset(ShapeDataset):
     def select(self, file_list):
         if len(file_list[0]) == 0:
             raise FileNotFoundError
-        
         return [[files[i] for i in self.views] for files in file_list]
     
     def find_rgb(self):
@@ -327,9 +278,6 @@ class ShapeViewDataset(ShapeDataset):
 
     def num_tokens(self, index):
         return self.num_view
-        # if isinstance(self.resolution, list):
-        #     return self.num_view * np.prod(self.resolution) 
-        # return self.num_view * self.resolution ** 2  
 
     def _load_view(self, packed_data, view_idx):
         image, uv, ratio = data_utils.load_rgb(
@@ -380,6 +328,10 @@ class ShapeViewDataset(ShapeDataset):
             results[key] = torch.from_numpy(
                 np.array([[d[key] for d in s[2]] for s in samples])
             ) if samples[0][2][0].get(key, None) is not None else None
+            
+        results['colors'] = results['colors'].transpose(2, 3)
+        if results.get('full_rgb', None) is not None:
+            results['full_rgb'] = results['full_rgb'].transpose(2, 3)
         return results
 
 
@@ -388,7 +340,7 @@ class ShapeViewStreamDataset(ShapeViewDataset):
     Different from ShapeViewDataset.
     We merge all the views together into one dataset regardless of the shapes.
 
-    ** HACK **: trying to adapt to the original ShapeViewDataset
+    ** HACK **: an alternative of the ShapeViewDataset
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -429,6 +381,7 @@ class ShapeViewStreamDataset(ShapeViewDataset):
             if data_utils.get_rank() == 0:
                 np.savez(npzfile, cache=cache)
             return cache
+
 
 class SampledPixelDataset(BaseWrapperDataset):
     """
