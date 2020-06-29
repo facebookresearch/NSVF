@@ -12,6 +12,9 @@ import torch
 import sys
 import argparse
 import open3d as o3d
+
+from fairseq import options
+from fairseq import checkpoint_utils
 from plyfile import PlyData, PlyElement
 
 logging.basicConfig(
@@ -28,23 +31,22 @@ def cli_main():
     parser.add_argument('--path', type=str, required=True)
     parser.add_argument('--output', type=str, required=True)
     parser.add_argument('--name', type=str, default='sparsevoxel')
-    args = parser.parse_args()
+    parser.add_argument('--user-dir', default='fairnr')
+    args = options.parse_args_and_arch(parser)
 
-    state = torch.load(args.path)['model']
-    keep = state['field.backbone.keep'].bool()
-    points = state['field.backbone.points'][keep].tolist()
-    voxidx = torch.arange(keep.size(0))[keep].tolist()
-
-    # write to ply file.
-    points = [tuple(points[k] + [voxidx[k]]) for k in range(len(voxidx))]    
-    vertex = np.array(points, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('quality', 'f4')])
-    PlyData([PlyElement.describe(vertex, 'vertex')], text=True).write(args.output + '/some_binary.ply')
-    # from fairseq import pdb; pdb.set_trace()
-    # voxel_size = state['field.VOXEL_SIZE']
-    # pcd = o3d.geometry.PointCloud()
-    # pcd.points = o3d.utility.Vector3dVector(points.numpy())
-    # o3d.io.write_point_cloud("{}/{}_{:.4f}.ply".format(args.output, args.name, voxel_size), pcd)
+    models, model_args, task = checkpoint_utils.load_model_ensemble_and_task(
+        [args.path], suffix=getattr(args, "checkpoint_suffix", ""),
+    )
+    model = models[0]
+    voxel_idx, voxel_pts = model.encoder.extract_voxels()
     
+    # write to ply file.
+    points = [
+        (voxel_pts[k, 0], voxel_pts[k, 1], voxel_pts[k, 2], voxel_idx[k])
+        for k in range(voxel_idx.size(0))
+    ]
+    vertex = np.array(points, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('quality', 'f4')])
+    PlyData([PlyElement.describe(vertex, 'vertex')], text=True).write(args.output)
 
 if __name__ == '__main__':
     cli_main()

@@ -1,7 +1,7 @@
 # just for debugging
 DATA="wineholder"
-DATASET=/private/home/jgu/data/shapenet/${DATA}/0000
-SAVE=/checkpoint/jgu/space/neuralrendering/new_codebase/model7
+DATASET=/private/home/jgu/data/shapenet/${DATA}/scaled2
+SAVE=/checkpoint/jgu/space/neuralrendering/new_codebase/model8
 
 mkdir -p $SAVE
 
@@ -23,9 +23,8 @@ python train.py ${DATASET} \
     --transparent-background "1.0,1.0,1.0" \
     --background-stop-gradient \
     --arch "nsvf_base" \
-    --voxel-path ${DATASET}/voxel0.2.txt \
-    --voxel-size 0.2 \
-    --raymarching-stepsize 0.025 \
+    --initial-boundingbox ${DATASET}/bbox.txt \
+    --raymarching-stepsize 0.015 \
     --discrete-regularization \
     --color-weight 128.0 \
     --alpha-weight 1.0 \
@@ -49,3 +48,4 @@ python train.py ${DATASET} \
     --save-dir ${SAVE} \
     --tensorboard-logdir ${SAVE}/tensorboard \
     
+ #  --voxel-path ${DATASET}/voxel0.2.txt \

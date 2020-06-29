@@ -39,16 +39,33 @@ class Encoder(nn.Module):
 
 class SparseVoxelEncoder(Encoder):
 
-    def __init__(self, args, voxel_path=None):
+    def __init__(self, args, voxel_path=None, bbox_path=None):
         super().__init__(args)
-        if voxel_path is None:
-            voxel_path = args.voxel_path
-        self.voxel_path = voxel_path
+        self.voxel_path = voxel_path if voxel_path is not None else args.voxel_path
+        self.bbox_path = bbox_path if bbox_path is not None else args.initial_boundingbox
+        assert (self.bbox_path is not None) or (self.voxel_path is not None), \
+            "at least initial bounding box or pretrained voxel files are required."
+        
+        self.voxel_index = None
+        if self.voxel_path is not None:
+            assert os.path.exists(self.voxel_path), "voxel file must exist"
+            assert getattr(args, "voxel_size", None) is not None, "final voxel size is essential."
+            from plyfile import PlyData, PlyElement
 
-        assert os.path.exists(self.voxel_path), "Initial voxel file does not exist..."
+            voxel_size = args.voxel_size
+            plydata = PlyData.read(self.voxel_path)['vertex']
+            fine_points = torch.from_numpy(
+                np.stack([plydata['x'], plydata['y'], plydata['z']]).astype('float32').T)
+            try:
+                self.voxel_index = torch.from_numpy(plydata['quality']).long()
+            except ValueError:
+                self.voxel_index = None
+        else:
+            bbox = np.loadtxt(self.bbox_path)
+            voxel_size = bbox[-1]
+            fine_points = torch.from_numpy(bbox2voxels(bbox[:6], voxel_size))
 
-        half_voxel = args.voxel_size * .5
-        fine_points = torch.from_numpy(load_matrix(self.voxel_path)[:, 3:])
+        half_voxel = voxel_size * .5
         fine_length = fine_points.size(0)
  
         # transform from voxel centers to voxel corners (key/values)
@@ -58,23 +75,15 @@ class SparseVoxelEncoder(Encoder):
         fine_feats = fine_feats.reshape(-1, 8)
         num_keys = torch.scalar_tensor(fine_keys.size(0)).long()
         
-        # set total size  # maximum number of voxel allowed
-        self.total_size = getattr(args, "total_num_embedding", None)
-        if self.total_size is None:
-            self.total_size = fine_keys.size(0)
-
-        points, feats = torch.zeros(self.total_size, 3), torch.zeros(self.total_size, 8).long()
-        keys, keep = torch.zeros(self.total_size, 3).long(), torch.zeros(self.total_size).long()    
-
         # assign values
-        points[: fine_length] = fine_points
-        feats[: fine_length] = fine_feats
-        keep[: fine_length] = 1
-        keys[: num_keys] = fine_keys
+        points = fine_points
+        feats = fine_feats.long()
+        keep = fine_feats.new_ones(fine_feats.size(0)).long()
+        keys = fine_keys.long()
 
         # set-up hyperparameters
         self.embed_dim = getattr(args, "voxel_embed_dim", None)
-        self.values = Embedding(self.total_size, self.embed_dim, None)
+        self.values = Embedding(num_keys, self.embed_dim, None)
         self.deterministic_step = getattr(args, "deterministic_step", False)
 
         # register parameters
@@ -84,7 +93,7 @@ class SparseVoxelEncoder(Encoder):
         self.register_buffer("keep", keep)
         self.register_buffer("num_keys", num_keys)
 
-        self.register_buffer("voxel_size", torch.scalar_tensor(args.voxel_size))
+        self.register_buffer("voxel_size", torch.scalar_tensor(voxel_size))
         self.register_buffer("step_size", torch.scalar_tensor(args.raymarching_stepsize))
         self.register_buffer("max_hits", torch.scalar_tensor(args.max_hits))
 
@@ -96,23 +105,29 @@ class SparseVoxelEncoder(Encoder):
         self.total_size = self.values.weight.size(0)
         self.num_keys = self.num_keys * 0 + self.total_size
         
+        if self.voxel_index is not None:
+            state_dict[name + '.points'] = state_dict[name + '.points'][self.voxel_index]
+            state_dict[name + '.feats'] = state_dict[name + '.feats'][self.voxel_index]
+            state_dict[name + '.keep'] = state_dict[name + '.keep'][self.voxel_index]
+        
         # update the buffers shapes
         self.points = self.points.new_zeros(*state_dict[name + '.points'].size())
         self.feats  = self.feats.new_zeros(*state_dict[name + '.feats'].size())
         self.keys   = self.keys.new_zeros(*state_dict[name + '.keys'].size())
         self.keep   = self.keep.new_zeros(*state_dict[name + '.keep'].size())
-
+    
     @staticmethod
     def add_args(parser):
+        parser.add_argument('--initial-boundingbox', type=str, help='the initial bounding box to initialize the model')
         parser.add_argument('--voxel-size', type=float, metavar='D', help='voxel size of the input points (initial')
-        parser.add_argument('--voxel-path', type=str, help='path for initial voxel file')
+        parser.add_argument('--voxel-path', type=str, help='path for pretrained voxel file. if provided no update')
         parser.add_argument('--voxel-embed-dim', type=int, metavar='N', help="embedding size")
         parser.add_argument('--total-num-embedding', type=int, metavar='N', help='totoal number of embeddings to initialize')
         parser.add_argument('--deterministic-step', action='store_true',
                             help='if set, the model runs fixed stepsize, instead of sampling one')
         parser.add_argument('--max-hits', type=int, metavar='N', help='due to restrictions we set a maximum number of hits')
         parser.add_argument('--raymarching-stepsize', type=float, metavar='N', help='ray marching step size for sparse voxels')
-
+        
     def precompute(self, id=None, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
@@ -129,6 +144,12 @@ class SparseVoxelEncoder(Encoder):
             feats = feats + values.size(1) * torch.arange(values.size(0), 
                 device=feats.device, dtype=feats.dtype)[:, None, None]
         return feats, points, values
+
+    def extract_voxels(self):
+        voxel_index = torch.arange(self.keep.size(0), device=self.keep.device)
+        voxel_index = voxel_index[self.keep.bool()]
+        voxel_point = self.points[self.keep.bool()]
+        return voxel_index, voxel_point
 
     def ray_voxel_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
         S, V, P, _ = ray_dir.size()
@@ -281,6 +302,14 @@ class MultiSparseVoxelEncoder(Encoder):
     @property
     def step_size(self):
         return self.all_voxels[0].step_size
+
+
+def bbox2voxels(bbox, voxel_size):
+    vox_min, vox_max = bbox[:3], bbox[3:]
+    steps = ((vox_max - vox_min) / voxel_size).round().astype('int64') + 1
+    x, y, z = [c.reshape(-1).astype('float32') for c in np.meshgrid(np.arange(steps[0]), np.arange(steps[1]), np.arange(steps[2]))]
+    x, y, z = x * voxel_size + vox_min[0], y * voxel_size + vox_min[1], z * voxel_size + vox_min[2]
+    return np.stack([x, y, z]).T.astype('float32')
 
 
 @torch.no_grad()

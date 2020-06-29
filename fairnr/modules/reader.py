@@ -47,14 +47,17 @@ class Reader(nn.Module):
         return ray_start.unsqueeze(-2), ray_dir.transpose(2, 3), uv
     
     @torch.no_grad()
-    def sample_pixels(self, uv, alpha, size, mask=None, **kwargs):
+    def sample_pixels(self, uv, size, alpha=None, mask=None, **kwargs):
         H, W = int(size[0,0,0]), int(size[0,0,1])
-        S, V = alpha.size()[:2]
+        S, V = uv.size()[:2]
         if not self.training:
             return uv.reshape(S, V, 2, 1, H, W)
 
         if mask is None:
-            mask = (alpha > 0)
+            if alpha is not None:
+                mask = (alpha > 0)
+            else:
+                mask = uv.new_ones(S, V, uv.size(-1)).bool()
         mask = mask.float().reshape(S, V, H, W)
 
         if self.args.sampling_at_center < 1.0:

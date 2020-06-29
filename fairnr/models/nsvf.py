@@ -62,130 +62,6 @@ class NSVFModel(BaseModel):
         VolumeRenderer.add_args(parser)
         Reader.add_args(parser)
 
-    def _encode(self, id, action='none', step=0, **kwargs):
-        if action == 'none':
-            # vertex = PlyData.read('/private/home/jgu/data/test_images/some_binary3.ply')['vertex']
-            # x, y, z = vertex['x'][:, None], vertex['y'][:, None], vertex['z'][:, None]
-            # points = torch.from_numpy(np.concatenate([x, y, z], 1)).type_as(self.field.backbone.points)
-            # part_index = torch.from_numpy(vertex['quality']).type_as(self.field.backbone.keep)
-            # self.field.backbone.keep = torch.zeros_like(self.field.backbone.keep).scatter_(0, part_index, 1)
-            # self.field.backbone.points.scatter_(0, part_index[:, None].expand_as(points), points)
-
-            feats, xyz, values, codes = self.field.get_backbone_features(
-                id=id, step=self.set_level(), 
-                pruner=self.field.pruning, 
-                th=getattr(self.args, "pruning_th", 0.5),
-                **kwargs)
-
-        elif action == 'wineholder':
-            feats, xyz, values, codes = self.field.get_backbone_features(
-                            id=torch.zeros_like(id) + 9, 
-                            step=self.set_level(), 
-                            pruner=self.field.pruning, 
-                            th=getattr(self.args, "pruning_th", 0.5),
-                            **kwargs)
-            part_mask = torch.load('/checkpoint/jgu/space/neuralrendering/results/multi_nerf/parts/cut_wineholder.pt').type_as(xyz).bool().unsqueeze(0)
-            xyz_a = xyz[part_mask].unsqueeze(0)
-            feats_a = feats[part_mask].unsqueeze(0)
-            part_mask = ~part_mask
-            xyz_b = xyz[part_mask].unsqueeze(0)
-            feats_b = feats[part_mask].unsqueeze(0)
-            xyz_b[:, :, 2] += 0.3
-            xyz = torch.cat([xyz_a, xyz_b], 1)
-            feats = torch.cat([feats_a, feats_b], 1)
-
-        elif action == 'steamtrain':
-            feats, xyz, values, codes = self.field.get_backbone_features(
-                            id=torch.zeros_like(id) + 8, 
-                            step=self.set_level(), 
-                            pruner=self.field.pruning, 
-                            th=getattr(self.args, "pruning_th", 0.5),
-                            **kwargs)
-           
-            # part_mask = torch.load('/checkpoint/jgu/space/neuralrendering/results/multi_nerf/parts/train_mask.pt').type_as(xyz).bool().unsqueeze(0)
-            # xyz_a = xyz[part_mask].unsqueeze(0)
-            # feats_a = feats[part_mask].unsqueeze(0)
-            
-            # part_mask = ~part_mask
-            # xyz_b = xyz[part_mask].unsqueeze(0)
-            # feats_b = feats[part_mask].unsqueeze(0)
-            
-            # xyz_b[:, :, 1] -= 1.5 
-            # xyz_b[:, :, 0] -= 1.5
-            # xyz = torch.cat([xyz_a, xyz_b], 1)
-            # feats = torch.cat([feats_a, feats_b], 1)
-
-        elif action == 'multi_compose':   # specialized code, DO NOT CHANGE IT!
-            # print('I AM STEP {}'.format(step))
-            DONE = False
-
-            feats, xyz, values = [], [], []
-            size_so_far = 0
-            grids = [[0, -1, -1, 1, 1, -2, 0, -2, 1.7, 0.0],
-                     [0.5, 0.5, -0.5, 0.8, -0.5, 0.5, -0.5, -0.5, -0.5, 1.4]]
-            original_xyz = []
-            tt = 2.3
-            for k in range(10):
-                # if k > step:
-                #     DONE = True
-                #     break
-
-                _feats, _xyz, _values, _ = self.field.get_backbone_features(
-                    id=torch.zeros_like(id) + k, step=self.set_level(), 
-                    pruner=self.field.pruning, 
-                    th=getattr(self.args, "pruning_th", 0.5),
-                    **kwargs)
-                
-                # HACK: fix the ship model
-                if k == 7:
-                    ship_mask = torch.load('/checkpoint/jgu/space/neuralrendering/results/multi_nerf/parts/ship_mask.pt').type_as(_xyz).bool().unsqueeze(0)
-                    _xyz = _xyz.clone()[ship_mask].unsqueeze(0)
-                    _feats = _feats.clone()[ship_mask].unsqueeze(0)
-                original_xyz.append(_xyz.clone())
-
-                _xyz[:, :, 0] += grids[0][k] * tt
-                _xyz[:, :, 1] += grids[1][k] * tt
-                feats.append(_feats + size_so_far)
-                xyz.append(_xyz)
-                values.append(_values)
-                size_so_far += _values.size(1)
-
-            # scene editing
-            grids2 = [[0.5, 0.7, 0.6, -0.55, 0.9, -1.7, -1.2, -1.6, -3, -3.2, -3.1], 
-                        [0, -0.3, 1.0, -0.25, 1.2, 0.1, 0.2, 0.5, -0.3, -0.2, 0.5]]
-            filenames = ['plant_mask', 'plant_mask', 'bottle_mask', 'bottle_mask', 'bottle_mask', 'bike_mask', 'cup_mask', 'cup_mask', 'plant_mask', 'plant_mask', 'plant_mask']
-            new_xyz, new_feats, new_values = [], [], []
-
-            # add a plant
-            def add_stuff(a, b, filename, reverse=False):
-                plant_mask = torch.load('/checkpoint/jgu/space/neuralrendering/results/multi_nerf/parts/{}.pt'.format(filename)).type_as(_xyz).bool().unsqueeze(0)
-                _xyz_plant = xyz[-1].clone()[plant_mask].unsqueeze(0)
-                _xyz_plant[:,:,0] += a * tt
-                _xyz_plant[:,:,1] += b * tt
-                new_xyz.append(_xyz_plant)
-                new_feats.append(feats[-1].clone()[plant_mask].unsqueeze(0) + values[-1].size(1))
-                new_values.append(_values.clone())
-
-            
-            for i in range(len(filenames)):
-                # if i + 10 > step:
-                #     DONE = True
-                #     break
-                add_stuff(grids2[0][i], grids2[1][i], filenames[i])
-
-            xyz = xyz + new_xyz
-            feats = feats + new_feats
-            values = values + new_values
-
-            feats = torch.cat(feats, 1)
-            xyz = torch.cat(xyz, 1)
-            values = torch.cat(values, 1)
-
-            # from fairseq import pdb; pdb.set_trace()
-            codes = None
-
-        return feats, xyz, values, codes
-
     def _forward(self, ray_start, ray_dir, **kwargs):
         BG_DEPTH = self.field.bg_color.depth
 
@@ -299,6 +175,7 @@ def base_architecture(args):
     args.voxel_path = getattr(args, "voxel_path", None)
     args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 32)
     args.total_num_embedding = getattr(args, "total_num_embedding", None)
+    args.initial_boundingbox = getattr(args, "initial_boundingbox", None)
 
     # field
     args.feature_embed_dim = getattr(args, "feature_embed_dim", 256)
