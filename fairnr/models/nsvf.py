@@ -176,6 +176,7 @@ def base_architecture(args):
     args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 32)
     args.total_num_embedding = getattr(args, "total_num_embedding", None)
     args.initial_boundingbox = getattr(args, "initial_boundingbox", None)
+    args.xyz_as_voxel_embed = getattr(args, "xyz_as_voxel_embed", False)
 
     # field
     args.feature_embed_dim = getattr(args, "feature_embed_dim", 256)
@@ -210,4 +211,12 @@ def base_architecture(args):
 
     # others
     args.chunk_size = getattr(args, "chunk_size", 256)
+
+@register_model_architecture("nsvf", "nsvf_xyz")
+def nerf_architecture(args):
+    args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 3)
+    args.add_pos_embed = getattr(args, "add_pos_embed", 10)
+    args.xyz_as_voxel_embed = getattr(args, "xyz_as_voxel_embed", True)
+    base_architecture(args)
+
 

@@ -14,7 +14,7 @@ import math
 import logging
 logger = logging.getLogger(__name__)
 
-
+from pathlib import Path
 from fairnr.data.data_utils import load_matrix
 from fairnr.data.geometry import (
     trilinear_interp, splitting_points, offset_points
@@ -50,16 +50,21 @@ class SparseVoxelEncoder(Encoder):
         if self.voxel_path is not None:
             assert os.path.exists(self.voxel_path), "voxel file must exist"
             assert getattr(args, "voxel_size", None) is not None, "final voxel size is essential."
-            from plyfile import PlyData, PlyElement
-
+            
             voxel_size = args.voxel_size
-            plydata = PlyData.read(self.voxel_path)['vertex']
-            fine_points = torch.from_numpy(
-                np.stack([plydata['x'], plydata['y'], plydata['z']]).astype('float32').T)
-            try:
-                self.voxel_index = torch.from_numpy(plydata['quality']).long()
-            except ValueError:
-                self.voxel_index = None
+
+            if Path(self.voxel_path).suffix == '.ply':
+                from plyfile import PlyData, PlyElement
+                plydata = PlyData.read(self.voxel_path)['vertex']
+                fine_points = torch.from_numpy(
+                    np.stack([plydata['x'], plydata['y'], plydata['z']]).astype('float32').T)
+                try:
+                    self.voxel_index = torch.from_numpy(plydata['quality']).long()
+                except ValueError:
+                    pass
+            else:
+                # supporting the old version voxel points
+                fine_points = torch.from_numpy(np.loadtxt(self.voxel_path)[:, 3:])
         else:
             bbox = np.loadtxt(self.bbox_path)
             voxel_size = bbox[-1]
@@ -70,6 +75,7 @@ class SparseVoxelEncoder(Encoder):
  
         # transform from voxel centers to voxel corners (key/values)
         fine_coords = (fine_points / half_voxel).floor_().long()
+        fine_res = (fine_points - (fine_points / half_voxel).floor_() * half_voxel).mean(0, keepdim=True)
         fine_keys0 = offset_points(fine_coords, 1.0).reshape(-1, 3)
         fine_keys, fine_feats  = torch.unique(fine_keys0, dim=0, sorted=True, return_inverse=True)
         fine_feats = fine_feats.reshape(-1, 8)
@@ -80,11 +86,6 @@ class SparseVoxelEncoder(Encoder):
         feats = fine_feats.long()
         keep = fine_feats.new_ones(fine_feats.size(0)).long()
         keys = fine_keys.long()
-
-        # set-up hyperparameters
-        self.embed_dim = getattr(args, "voxel_embed_dim", None)
-        self.values = Embedding(num_keys, self.embed_dim, None)
-        self.deterministic_step = getattr(args, "deterministic_step", False)
 
         # register parameters
         self.register_buffer("points", points)   # voxel centers
@@ -97,6 +98,13 @@ class SparseVoxelEncoder(Encoder):
         self.register_buffer("step_size", torch.scalar_tensor(args.raymarching_stepsize))
         self.register_buffer("max_hits", torch.scalar_tensor(args.max_hits))
 
+        # set-up other hyperparameters
+        self.embed_dim = getattr(args, "voxel_embed_dim", None)
+        self.values = Embedding(num_keys, self.embed_dim, None)
+        self.deterministic_step = getattr(args, "deterministic_step", False)
+        if getattr(args, "xyz_as_voxel_embed", False):
+            self.values.weight = nn.Parameter(fine_keys.float() * half_voxel + fine_res, requires_grad=False)
+        
     def upgrade_state_dict_named(self, state_dict, name):
         # update the voxel embedding shapes
         loaded_values = state_dict[name + '.values.weight']
@@ -127,7 +135,8 @@ class SparseVoxelEncoder(Encoder):
                             help='if set, the model runs fixed stepsize, instead of sampling one')
         parser.add_argument('--max-hits', type=int, metavar='N', help='due to restrictions we set a maximum number of hits')
         parser.add_argument('--raymarching-stepsize', type=float, metavar='N', help='ray marching step size for sparse voxels')
-        
+        parser.add_argument('--xyz-as-voxel-embed', action='store_true', help='use xyz instead of learnable embeddings, similar to NeRF.')
+
     def precompute(self, id=None, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
