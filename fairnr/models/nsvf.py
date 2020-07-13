@@ -11,31 +11,19 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from plyfile import PlyData, PlyElement
 
 from fairseq.models import (
     register_model,
     register_model_architecture
 )
-from fairnr.modules.pointnet2.pointnet2_utils import (
-    aabb_ray_intersect, 
-    uniform_ray_sampling
-)
-from fairnr.data.geometry import (
-    ray, trilinear_interp, get_edge,
-    pruning_points, offset_points,
-    compute_normal_map
-)
+from fairseq.meters import StopwatchMeter
+
+from fairnr.data.geometry import get_edge, compute_normal_map, fill_in
 from fairnr.models.fairnr_model import BaseModel
 from fairnr.modules.encoder import SparseVoxelEncoder
 from fairnr.modules.field import RaidanceField
 from fairnr.modules.renderer import VolumeRenderer
 from fairnr.modules.reader import Reader
-from fairnr.modules.linear import Linear, NeRFPosEmbLinear, Embedding
-from fairnr.modules.implicit import (
-    ImplicitField, SignedDistanceField, TextureField, DiffusionSpecularField,
-    HyperImplicitField, SphereTextureField
-)
 
 MAX_DEPTH = 10000.0
 
@@ -63,18 +51,20 @@ class NSVFModel(BaseModel):
         Reader.add_args(parser)
 
     def _forward(self, ray_start, ray_dir, **kwargs):
+        timer0, timer1 = StopwatchMeter(), StopwatchMeter()
         BG_DEPTH = self.field.bg_color.depth
-
-        # initialization (typically S == 1)
         S, V, P, _ = ray_dir.size()
         fullsize = S * V * P
+        assert S == 1, "naive NeRF only supports single object."
+
+        timer0.start()
 
         # voxel encoder (precompute for each voxel if needed)
         feats, xyz, values = self.encoder.precompute(**kwargs)  # feats: (S, B, 8), xyz: (S, B, 3),  values: (S, B', D)
 
         # ray-voxel intersection
         ray_start, ray_dir, min_depth, max_depth, pts_idx, hits = \
-            self.encoder.ray_voxel_intersect(ray_start, ray_dir, xyz, feats)
+            self.encoder.ray_intersect(ray_start, ray_dir, xyz, feats)
 
         if hits.sum() > 0:  # check if ray missed everything
             ray_start, ray_dir = ray_start[hits], ray_dir[hits]
@@ -84,9 +74,11 @@ class NSVFModel(BaseModel):
             samples = self.encoder.ray_sample(pts_idx, min_depth, max_depth)
             
             # volume rendering
+            timer1.start()
             encoder_states = (feats.reshape(-1, 8), xyz.reshape(-1, 3), values.reshape(-1, values.size(-1)))
-            colors, depths, missed, var_loss = self.raymarcher(
+            colors, depths, missed, probs, toal_evals = self.raymarcher(
                 self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
+            
             depths = depths + BG_DEPTH * missed
             voxel_edges = get_edge(
                 ray_start + ray_dir * samples[0][:, :1], 
@@ -94,18 +86,10 @@ class NSVFModel(BaseModel):
                 self.encoder.voxel_size).type_as(depths)   # get voxel edges/depth (for visualization)
             voxel_edges = (1 - voxel_edges[:, None].expand(voxel_edges.size(0), 3)) * 0.7
             voxel_depth = samples[0][:, 0]
-        
+            timer1.stop()
+
         else:
             colors, depths, missed, voxel_edges, voxel_depth = None, None, None, None, None
-            var_loss = torch.tensor(0.0).type_as(depths)
-
-        # fill-in
-        def fill_in(shape, hits, input, initial=1.0):
-            output = ray_dir.new_ones(*shape) * initial
-            if input is not None:
-                if len(shape) == 1:
-                    return output.masked_scatter(hits, input)
-                return output.masked_scatter(hits.unsqueeze(-1).expand(*shape), input)
 
         hits = hits.reshape(fullsize)
         missed = fill_in((fullsize,), hits, missed, 1.0)
@@ -114,7 +98,8 @@ class NSVFModel(BaseModel):
         voxel_edges = fill_in((fullsize, 3), hits, voxel_edges, 1.0)
         bg_color = self.field.bg_color(**kwargs)
         colors = fill_in((fullsize, 3), hits, colors, 0.0) + missed.unsqueeze(-1) * bg_color.reshape(-1, 3)
-        
+        timer0.stop()
+
         # model's output
         return {
             'colors': colors.view(S, V, P, 3),
@@ -122,11 +107,15 @@ class NSVFModel(BaseModel):
             'missed': missed.view(S, V, P),
             'voxel_edges': voxel_edges.view(S, V, P, 3),
             'voxel_depth': voxel_depth.view(S, V, P),
-            'var_loss': var_loss,
             'bg_color': bg_color,
             'other_logs': {
                 'voxs_log': self.encoder.voxel_size.item(),
                 'stps_log': self.encoder.step_size.item(),
+                't0_log': timer0.sum,
+                't1_log': timer1.sum,
+                'asf_log': (toal_evals.float() / fullsize).item(),
+                'ash_log': (toal_evals.float() / hits.sum()).item(),
+                'nvox_log': xyz.size(1)
                 }
         }
 
@@ -173,6 +162,8 @@ def base_architecture(args):
     # encoder
     args.voxel_size = getattr(args, "voxel_size", 0.25)
     args.voxel_path = getattr(args, "voxel_path", None)
+    args.max_hits = getattr(args, "max_hits", 60)
+    args.raymarching_stepsize = getattr(args, "raymarching_stepsize", 0.01)
     args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 32)
     args.total_num_embedding = getattr(args, "total_num_embedding", None)
     args.initial_boundingbox = getattr(args, "initial_boundingbox", None)
@@ -195,8 +186,6 @@ def base_architecture(args):
     args.background_depth = getattr(args, "background_depth", 5.0)
     
     # raymarcher
-    args.max_hits = getattr(args, "max_hits", 60)
-    args.raymarching_stepsize = getattr(args, "raymarching_stepsize", 0.01)
     args.discrete_regularization = getattr(args, "discrete_regularization", False)
     args.deterministic_step = getattr(args, "deterministic_step", False)
     args.raymarching_tolerance = getattr(args, "raymarching_tolerance", 0)

@@ -15,6 +15,7 @@ import logging
 import torch
 import torch.nn as nn
 import skimage.metrics
+import imageio, os
 import numpy as np
 
 from fairseq.models import BaseFairseqModel
@@ -155,7 +156,7 @@ class BaseModel(BaseFairseqModel):
         
         return images
 
-    def add_eval_scores(self, logging_output, sample, output, criterion, scores=['ssim', 'psnr', 'lpips']):
+    def add_eval_scores(self, logging_output, sample, output, criterion, scores=['ssim', 'psnr', 'lpips'], outdir=None):
         predicts, targets = output['colors'], sample['colors']
         ssims, psnrs, lpips = [], [], []
         for s in range(predicts.size(0)):
@@ -174,7 +175,18 @@ class BaseModel(BaseFairseqModel):
                             p.unsqueeze(-1).permute(3,2,0,1),
                             t.unsqueeze(-1).permute(3,2,0,1),
                             normalize=True).item()]
-
+                if outdir is not None:
+                    def imsave(filename, image):
+                        imageio.imsave(os.path.join(outdir, filename), (image * 255).astype('uint8'))
+                    
+                    figname = '-{:03d}_{:03d}.png'.format(sample['id'][s], sample['view'][s, v])
+                    imsave('output' + figname, pn)
+                    imsave('target' + figname, tn)
+                    imsave('normal' + figname, recover_image(compute_normal_map(
+                        output['ray_start'][s, v].float(), output['ray_dir'][s, v].float(),
+                        output['depths'][s, v].float(), sample['extrinsics'][s, v].float().inverse(), width=width),
+                        min_val=-1, max_val=1, width=width).numpy())
+                    
         if len(ssims) > 0:
             logging_output['ssim_loss'] = np.mean(ssims)
         if len(psnrs) > 0:

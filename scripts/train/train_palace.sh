@@ -1,13 +1,14 @@
 # just for debugging
-DATA="wineholder"
-DATASET=/private/home/jgu/data/shapenet/${DATA}/scaled2
-SAVE=/checkpoint/jgu/space/neuralrendering/new_codebase/model_nerf1
-# ARCH="nsvf_base"
-ARCH="nsvf_xyz"
+DATA="palace"
+DATASET=/private/home/jgu/data/shapenet/new_renders/data/${DATA}/0000
+SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}
+ARCH="nsvf_base"
+BOXZ="bbox.txt"
+# ARCH="nsvf_xyz"
 mkdir -p $SAVE
 
 # CUDA_VISIBLE_DEVICES=0 \
-python train.py ${DATASET} \
+python -u train.py ${DATASET} \
     --user-dir fairnr \
     --task single_object_rendering \
     --train-views "0..100" \
@@ -16,15 +17,15 @@ python train.py ${DATASET} \
     --view-per-batch 4 \
     --pixel-per-view 2048 \
     --no-preload \
-    --sampling-on-mask 0.9 --sampling-on-bbox \
+    --sampling-on-mask 0.85 --sampling-on-bbox \
     --valid-view-resolution "400x400" \
     --valid-views "100..196" \
     --valid-view-per-batch 1 \
     --transparent-background "1.0,1.0,1.0" \
     --background-stop-gradient \
     --arch ${ARCH} \
-    --initial-boundingbox ${DATASET}/bbox.txt \
-    --raymarching-stepsize 0.015 \
+    --initial-boundingbox ${DATASET}/${BOXZ} \
+    --raymarching-stepsize 0.025 \
     --discrete-regularization \
     --color-weight 128.0 \
     --alpha-weight 1.0 \
@@ -46,5 +47,4 @@ python train.py ${DATASET} \
     --log-format simple --log-interval 1 \
     --save-dir ${SAVE} \
     --tensorboard-logdir ${SAVE}/tensorboard \
-    
- #  --voxel-path ${DATASET}/voxel0.2.txt \
+    | tee -a $SAVE/train.log

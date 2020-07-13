@@ -110,8 +110,8 @@ def main(args, override_args=None):
             try:
                 with torch.no_grad():  # do not save backward passes
                     max_num_rays = 900 * 900
-                    if sample['ray_dir'].shape[2] > max_num_rays:
-                        sample['ray_split'] = sample['ray_dir'].shape[2] // max_num_rays
+                    if sample['uv'].shape[3] > max_num_rays:
+                        sample['ray_split'] = sample['uv'].shape[3] // max_num_rays
                     _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
 
                 progress.log(log_output, step=i)

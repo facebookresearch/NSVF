@@ -57,7 +57,7 @@ class VolumeRenderer(Renderer):
             sample_mask = sample_mask & (~early_stop.unsqueeze(-1))
         
         if sample_mask.sum() == 0:  # miss everything skip
-            return torch.zeros_like(sampled_depth), sampled_depth.new_zeros(*sampled_depth.size(), 3)
+            return torch.zeros_like(sampled_depth), sampled_depth.new_zeros(*sampled_depth.size(), 3), sample_mask.sum()
 
         queries = ray(ray_start.unsqueeze(1), ray_dir.unsqueeze(1), sampled_depth.unsqueeze(2))
         queries = queries[sample_mask]
@@ -77,7 +77,7 @@ class VolumeRenderer(Renderer):
         free_energy = torch.zeros_like(sampled_depth).masked_scatter(sample_mask, free_energy)
         texture = free_energy.new_zeros(*free_energy.size(), 3).masked_scatter(
             sample_mask.unsqueeze(-1).expand(*sample_mask.size(), 3), texture)
-        return free_energy, texture
+        return free_energy, texture, sample_mask.sum()
 
     def forward(self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states, gt_depths=None):
         sampled_depth, sampled_idx, sampled_dists = samples
@@ -90,10 +90,11 @@ class VolumeRenderer(Renderer):
         free_energy, texture = [], []
         size_so_far, start_step = 0, 0
         accumulated_free_energy = 0
+        accumulated_evaluations = 0
         
         for i in range(hits.size(1) + 1):
             if ((i == hits.size(1)) or (size_so_far + hits[:, i].sum() > self.chunk_size)) and (i > start_step):
-                _free_energy, _texture = self.forward_once(
+                _free_energy, _texture, _evals = self.forward_once(
                         input_fn, field_fn, 
                         ray_start, ray_dir, (
                         sampled_depth[:, start_step: i], 
@@ -101,7 +102,7 @@ class VolumeRenderer(Renderer):
                         sampled_dists[:, start_step: i]), 
                         encoder_states, 
                         early_stop=early_stop)
-
+                accumulated_evaluations += _evals
                 accumulated_free_energy += _free_energy.sum(1)
                 if tolerance > 0:
                     early_stop = accumulated_free_energy > tolerance
@@ -125,8 +126,5 @@ class VolumeRenderer(Renderer):
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
         rgb = (texture * probs.unsqueeze(-1)).sum(-2)
-        
-        # additional loss on the variance of depth prediction
-        var_loss = ((sampled_depth ** 2 * probs).sum(-1) - depth ** 2).mean()
-        return rgb, depth, missed, var_loss
+        return rgb, depth, missed, probs, accumulated_evaluations
 

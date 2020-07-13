@@ -18,7 +18,7 @@ from fairnr.data import (
     ShapeViewDataset, SampledPixelDataset, ShapeViewStreamDataset,
     WorldCoordDataset, ShapeDataset, InfiniteDataset
 )
-from fairnr.data.data_utils import write_images, recover_image
+from fairnr.data.data_utils import write_images, recover_image, parse_views
 from fairnr.data.geometry import ray, compute_normal_map
 from fairnr.renderer import NeuralRenderer
 from fairnr.data.trajectory import get_trajectory
@@ -132,24 +132,6 @@ class SingleObjRenderingTask(FairseqTask):
         else:
             self.renderer = None
 
-        def parse_views(view_args):
-            output = []
-            try:
-                xx = view_args.split(':')
-                ids = xx[0].split(',')
-                for id in ids:
-                    if '..' in id:
-                        a, b = id.split('..')
-                        output += list(range(int(a), int(b)))
-                    else:
-                        output += [int(id)]
-                if len(xx) > 1:
-                    output = output[::int(xx[-1])]
-            except Exception as e:
-                raise Exception("parse view args error: {}".format(e))
-
-            return output
-
         self.train_views = parse_views(args.train_views)
         self.valid_views = parse_views(args.valid_views)
         self.test_views  = parse_views(args.test_views)
@@ -249,6 +231,7 @@ class SingleObjRenderingTask(FairseqTask):
             output_type=args.render_output_types,
             test_camera_poses=getattr(args, "render_camera_poses", None),
             test_camera_intrinsics=getattr(args, "render_camera_intrinsics", None),
+            test_camera_views=getattr(args, "render_views", None),
             interpolation=getattr(args, "render_interpolation", False)
         )
 
@@ -314,12 +297,12 @@ class SingleObjRenderingTask(FairseqTask):
 
     def valid_step(self, sample, model, criterion):
         loss, sample_size, logging_output = super().valid_step(sample, model, criterion)
-        
-        model.add_eval_scores(logging_output, sample, model.cache, criterion)
+        model.add_eval_scores(logging_output, sample, model.cache, criterion, outdir=self.output_valid)
         if self.writer is not None:
             images = model.visualize(sample, shape=0, view=0)
             if images is not None:
                 write_images(self.writer, images, self._num_updates['step'])
+        
         return loss, sample_size, logging_output
     
     def save_image(self, img, id, view, group='gt'):
@@ -331,6 +314,7 @@ class SingleObjRenderingTask(FairseqTask):
         _mkdir(os.path.join(self.output_valid, group))  
         _mkdir(os.path.join(self.output_valid, group, object_name))
         imageio.imsave(os.path.join(
-            self.output_valid, group, object_name, '{:04d}.png'.format(view)), 
+            self.output_valid, group, object_name, 
+            '{:04d}.png'.format(view)), 
             (img * 255).astype(np.uint8))
 

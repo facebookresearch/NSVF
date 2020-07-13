@@ -17,7 +17,7 @@ import imageio
 from torchvision.utils import save_image
 from fairnr.data import trajectory, geometry, data_utils
 from fairseq.meters import StopwatchMeter
-from fairnr.data.data_utils import recover_image, get_uv
+from fairnr.data.data_utils import recover_image, get_uv, parse_views
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ class NeuralRenderer(object):
                 fps=24,
                 test_camera_poses=None,
                 test_camera_intrinsics=None,
+                test_camera_views=None,
                 interpolation=False):
 
         self.frames = frames
@@ -77,6 +78,11 @@ class NeuralRenderer(object):
             else:
                 self.test_poses = data_utils.load_matrix(test_camera_poses)
                 self.test_poses = self.test_poses.reshape(-1, 4, 4)
+
+            if test_camera_views is not None:
+                render_views = parse_views(test_camera_views)
+                self.test_poses = np.stack([self.test_poses[r] for r in render_views])
+
         else:
             self.test_poses = None
 

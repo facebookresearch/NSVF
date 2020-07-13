@@ -255,3 +255,12 @@ def get_edge(depth_pts, voxel_pts, voxel_size, th=0.05):
     p = (ab.sum(-1) + c) / 2.0
     h = (p * (p - a) * (p - b) * (p - c)) ** 0.5 / c
     return h < (th * voxel_size)
+
+
+# fill-in image
+def fill_in(shape, hits, input, initial=1.0):
+    output = input.new_ones(*shape) * initial
+    if input is not None:
+        if len(shape) == 1:
+            return output.masked_scatter(hits, input)
+        return output.masked_scatter(hits.unsqueeze(-1).expand(*shape), input)

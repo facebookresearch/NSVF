@@ -37,6 +37,56 @@ class Encoder(nn.Module):
         raise NotImplementedError
     
 
+class VolumeEncoder(Encoder):
+    """
+    simple bounding volume encoder. no voxels are used.
+    if no bounding box is provided, we assume a unit cube centered at origin.
+    """
+    def __init__(self, args, bbox_path=None):
+        super().__init__(args)
+        self.bbox_path = bbox_path if bbox_path is not None else args.initial_boundingbox
+        self.fixed_interval = self.args.sample_fixed_interval
+        if self.bbox_path is None:
+            self.register_buffer("bbox", torch.tensor([[-1., -1., -1.], [1., 1., 1.]]))
+
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument('--initial-boundingbox', type=str, 
+            help='the initial bounding box to initialize the model')
+        parser.add_argument('--sample-fixed-interval', type=float, 
+            help='we can sample points either based on a fixed number of samples or sample through the boundingbox')
+    
+    def ray_intersect(self, ray_start, ray_dir):
+        S, V, P, _ = ray_dir.size()
+
+        # ray<->bounding box intersection
+        ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3)
+        ray_dir = ray_dir.reshape(S, V * P, 3)
+
+        # AABB-test
+        inv_ray_dir = 1. / (ray_dir + 1e-8)
+        f_min, f_max = 0., 100.
+        fL = (self.bbox[0][None, None, :] - ray_start) * inv_ray_dir
+        fH = (self.bbox[1][None, None, :] - ray_start) * inv_ray_dir
+        fmL, fmH = torch.min(fL, fH), torch.max(fL, fH)
+        fmL, fmH = fmL.max(dim=2)[0], fmH.min(dim=2)[0]
+        missed = (fmL > fmH) | (fmH < f_min) | (fmL > f_max)
+
+        hits = ~missed
+        min_depth = fmL.clamp(min=f_min)
+        max_depth = fmH.clamp(max=f_max)
+        
+        # get the pts_index
+        pts_idx = hits.long() - 1
+        pts_idx = (pts_idx + torch.arange(S, 
+                    device=pts_idx.device, dtype=pts_idx.dtype)[:, None]
+                    ).masked_fill_(pts_idx.eq(-1), -1).unsqueeze(-1)
+        return ray_start, ray_dir, min_depth, max_depth, pts_idx, hits
+
+    def ray_sample(self, pts_idx, min_depth, max_depth):
+        pass
+
+
 class SparseVoxelEncoder(Encoder):
 
     def __init__(self, args, voxel_path=None, bbox_path=None):
@@ -69,7 +119,7 @@ class SparseVoxelEncoder(Encoder):
             bbox = np.loadtxt(self.bbox_path)
             voxel_size = bbox[-1]
             fine_points = torch.from_numpy(bbox2voxels(bbox[:6], voxel_size))
-
+            
         half_voxel = voxel_size * .5
         fine_length = fine_points.size(0)
  
@@ -160,7 +210,7 @@ class SparseVoxelEncoder(Encoder):
         voxel_point = self.points[self.keep.bool()]
         return voxel_index, voxel_point
 
-    def ray_voxel_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
+    def ray_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
         S, V, P, _ = ray_dir.size()
         _, H, D = point_feats.size()
 
@@ -277,8 +327,8 @@ class MultiSparseVoxelEncoder(Encoder):
         self.cid = id[0]
         return self.all_voxels[id[0]].precompute(id, *args, **kwargs)
     
-    def ray_voxel_intersect(self, *args, **kwargs):
-        return self.all_voxels[self.cid].ray_voxel_intersect(*args, **kwargs)
+    def ray_intersect(self, *args, **kwargs):
+        return self.all_voxels[self.cid].ray_intersect(*args, **kwargs)
 
     def ray_sample(self, *args, **kwargs):
         return self.all_voxels[self.cid].ray_sample(*args, **kwargs)

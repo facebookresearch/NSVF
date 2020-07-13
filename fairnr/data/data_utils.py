@@ -33,6 +33,25 @@ def get_world_size():
         return 1
         
 
+def parse_views(view_args):
+    output = []
+    try:
+        xx = view_args.split(':')
+        ids = xx[0].split(',')
+        for id in ids:
+            if '..' in id:
+                a, b = id.split('..')
+                output += list(range(int(a), int(b)))
+            else:
+                output += [int(id)]
+        if len(xx) > 1:
+            output = output[::int(xx[-1])]
+    except Exception as e:
+        raise Exception("parse view args error: {}".format(e))
+
+    return output
+
+
 def get_uv(H, W, h, w):
     """
     H, W: real image (intrinsics)
