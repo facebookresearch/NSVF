@@ -1,6 +1,7 @@
-DATA="robot"
-DATASET=/private/home/jgu/data/shapenet/robot2/${DATA}/scaled
-SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}w
+# just for debugging
+DATA="spaceship2_v5"
+DATASET=/private/home/jgu/data/shapenet/new_renders/data/${DATA}/0000
+SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}
 MODEL_PATH=$SAVE/checkpoint_best.pt
 MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f,"tensorboard_logdir":"","eval_lpips":True}'
 MODELARGS=$(printf "$MODELTEMP" 1024 0.01)
@@ -21,6 +22,6 @@ python validate.py ${DATASET} \
     --valid-view-per-batch 1 \
     --path ${MODEL_PATH} \
     --model-overrides $MODELARGS \
-    # --output-valid ${OUTPUT} \
-    # | tee -a ${SAVE}/eval.log
+    --output-valid ${OUTPUT} \
+    | tee -a ${SAVE}/eval.log
 

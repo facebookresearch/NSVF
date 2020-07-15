@@ -145,10 +145,6 @@ class SingleObjRenderingTask(FairseqTask):
 
     def repeat_dataset(self, split):
         return 1
-        # max_view = self.args.max_train_view if split == 'train' \
-        #         else self.args.max_valid_view
-        # return int(np.ceil(max_view / self.args.view_per_batch / 
-        #     self.args.distributed_world_size) * self.args.distributed_world_size)
 
     def load_dataset(self, split, **kwargs):
         """

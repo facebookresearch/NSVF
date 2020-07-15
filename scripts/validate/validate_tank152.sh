@@ -1,7 +1,7 @@
 # just for debugging
 DATA="isu152"
 DATASET=/private/home/jgu/data/shapenet/new_renders/data/${DATA}/0000
-SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}
+SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}w
 MODEL_PATH=$SAVE/checkpoint_last.pt
 MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f,"tensorboard_logdir":"","eval_lpips":True}'
 MODELARGS=$(printf "$MODELTEMP" 1024 0.01)
