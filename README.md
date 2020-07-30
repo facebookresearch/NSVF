@@ -130,7 +130,6 @@ It will output per frame rendered images as well as a merged ``.mp4`` video in `
 <img src='docs/figs/results.gif'/>
 
 ## Citation
-
 ```bibtex
 @article{liu2020neural,
   title={Neural Sparse Voxel Fields},
