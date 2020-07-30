@@ -64,7 +64,7 @@ class SparseVoxelEncoder(Encoder):
                     pass
             else:
                 # supporting the old version voxel points
-                fine_points = torch.from_numpy(np.loadtxt(self.voxel_path)[:, 3:])
+                fine_points = torch.from_numpy(np.loadtxt(self.voxel_path)[:, 3:].astype('float32'))
         else:
             bbox = np.loadtxt(self.bbox_path)
             voxel_size = bbox[-1]
@@ -163,10 +163,10 @@ class SparseVoxelEncoder(Encoder):
     def ray_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
         S, V, P, _ = ray_dir.size()
         _, H, D = point_feats.size()
-
+  
         # ray-voxel intersection
-        ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3)
-        ray_dir = ray_dir.reshape(S, V * P, 3)
+        ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
+        ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
         pts_idx, min_depth, max_depth = aabb_ray_intersect(
             self.voxel_size, self.max_hits, point_xyz, ray_start, ray_dir)
        
@@ -311,6 +311,15 @@ class MultiSparseVoxelEncoder(Encoder):
     @property
     def step_size(self):
         return self.all_voxels[0].step_size
+
+
+class SparseTruncatedSDFEncoder(SparseVoxelEncoder):
+    """
+    Extension to the original SparseVoxelEncoder, enabling surface-based rendering.    
+    """
+    pass
+
+
 
 
 def bbox2voxels(bbox, voxel_size):

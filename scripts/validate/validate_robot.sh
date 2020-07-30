@@ -3,7 +3,7 @@ DATASET=/private/home/jgu/data/shapenet/robot2/${DATA}/scaled
 SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}w
 MODEL_PATH=$SAVE/checkpoint_best.pt
 MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f,"tensorboard_logdir":"","eval_lpips":True}'
-MODELARGS=$(printf "$MODELTEMP" 1024 0.01)
+MODELARGS=$(printf "$MODELTEMP" 1024 0.0)
 
 RES="800x800"
 VALID=${1:-"200..400"}

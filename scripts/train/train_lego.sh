@@ -1,14 +1,14 @@
 # just for debugging
-DATA="wineholder"
-DATASET=/private/home/jgu/data/shapenet/${DATA}/0000
-SAVE=/checkpoint/jgu/space/neuralrendering/new_codebase/model_test10
-# ARCH=nsvf_base
-ARCH=snsvf_base
+DATA="lego_full"
+ARCH="snsvf_base"
+
+DATASET=/private/home/jgu/data/shapenet/${DATA}
+SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}.$ARCH.i
 
 mkdir -p $SAVE
 
-CUDA_VISIBLE_DEVICES=0 \
-python train.py ${DATASET} \
+# CUDA_VISIBLE_DEVICES=0 \
+python -u train.py ${DATASET} \
     --user-dir fairnr \
     --task single_object_rendering \
     --train-views "0..100" \
@@ -17,16 +17,17 @@ python train.py ${DATASET} \
     --view-per-batch 4 \
     --pixel-per-view 2048 \
     --no-preload \
-    --sampling-on-mask 0.8 --sampling-on-bbox \
+    --sampling-on-mask 0.85 --sampling-on-bbox \
     --valid-view-resolution "400x400" \
     --valid-views "100..196" \
     --valid-view-per-batch 1 \
     --transparent-background "1.0,1.0,1.0" \
     --background-stop-gradient \
-    --arch $ARCH \
-    --voxel-path ${DATASET}/voxel0.2.txt \
-    --voxel-size 0.2 \
-    --raymarching-stepsize 0.025 \
+    --arch ${ARCH} \
+    --interp-color \
+    --voxel-path ${DATASET}/voxel.txt \
+    --raymarching-stepsize 0.05 \
+    --voxel-size 0.4 \
     --discrete-regularization \
     --color-weight 128.0 \
     --alpha-weight 1.0 \
@@ -46,5 +47,6 @@ python train.py ${DATASET} \
     --pruning-every-steps 2500 \
     --keep-interval-updates 5 \
     --log-format simple --log-interval 1 \
+    --save-dir ${SAVE} \
     --tensorboard-logdir ${SAVE}/tensorboard \
-    --save-dir ${SAVE}
+    | tee -a $SAVE/train.log

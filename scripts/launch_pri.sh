@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:8
 #SBATCH --mem=500g
 #SBATCH -C volta32gb
-#SBATCH --cpus-per-task=6
+#SBATCH --cpus-per-task=40
 ##SBATCH --signal=B:USR1@60 #Signal is sent to batch script itself
 ##SBATCH --open-mode=append
 #SBATCH --time=4320

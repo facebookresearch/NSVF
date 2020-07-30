@@ -1,13 +1,18 @@
 # just for debugging
-DATA="spaceship2"
+DATA="spaceship2_v6"
 DATASET=/private/home/jgu/data/shapenet/new_renders/data/${DATA}/0000
 SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}
+TESTPOSE=/private/home/jgu/data/shapenet/new_renders/data/pose_test/pose_2.5m/
+OUTPUT=/private/home/jgu/data/shapenet/new_renders/data/pose_test/nsvf_results
+
+mkdir -p $OUTPUT
+
 ARCH="nsvf_base"
 MODEL_PATH=$SAVE/checkpoint_last.pt
 MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f}'
-MODELARGS=$(printf "$MODELTEMP" 1024 0.005)
+MODELARGS=$(printf "$MODELTEMP" 1024 0.01)
 
-CUDA_VISIBLE_DEVICES=0,2,3,4,5,6,7 \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 python render.py ${DATASET} \
     --user-dir fairnr \
     --task single_object_rendering \
@@ -16,12 +21,11 @@ python render.py ${DATASET} \
     --render-angular-speed 3 \
     --render-save-fps 24 \
     --render-num-frames 20 \
-    --render-camera-poses $DATASET/pose \
-    --render-views 200..400 \
+    --render-camera-poses $TESTPOSE \
     --model-overrides $MODELARGS \
-    --render-path-style "circle" \
     --render-resolution "800x800" \
-    --render-path-args "{'radius': 2, 'h': 1.4, 'axis': 'z', 't0': -2, 'r':-1}" \
-    --render-output ${SAVE}/output \
+    --render-output ${SAVE}/test_output25 \
     --render-output-types "color" "depth" "voxel" "normal" \
     --render-combine-output --log-format "simple"
+
+cp -r ${SAVE}/test_output25/color $OUTPUT/${DATA}25

@@ -1,9 +1,9 @@
-DATA="lifestyle"
+DATA="lifestyle_v2"
 DATASET=/private/home/jgu/data/shapenet/new_renders/data/${DATA}/0000
-SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}
-MODEL_PATH=$SAVE/checkpoint_best.pt
+SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}m
+MODEL_PATH=$SAVE/checkpoint_last.pt
 MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f,"tensorboard_logdir":"","eval_lpips":True}'
-MODELARGS=$(printf "$MODELTEMP" 1024 0.01)
+MODELARGS=$(printf "$MODELTEMP" 1024 0.0)
 
 RES="800x800"
 VALID=${1:-"200..400"}
@@ -21,6 +21,6 @@ python validate.py ${DATASET} \
     --valid-view-per-batch 1 \
     --path ${MODEL_PATH} \
     --model-overrides $MODELARGS \
-    #--output-valid ${OUTPUT} \
-    #| tee -a ${SAVE}/eval.log
+    # --output-valid ${OUTPUT} \
+    # | tee -a ${SAVE}/eval.log
 

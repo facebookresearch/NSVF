@@ -1,16 +1,16 @@
-DATA="toad"
-DATASET=/private/home/jgu/data/shapenet/new_renders/data/${DATA}/0000
+DATA="lifestyle"
+DATASET=/private/home/jgu/data/shapenet/new_renders/data/${DATA}_v2/0000
 SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}
 MODEL_PATH=$SAVE/checkpoint_last.pt
-MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f,"tensorboard_logdir":"","eval_lpips":True}'
-MODELARGS=$(printf "$MODELTEMP" 1024 0.0)
+MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f,"tensorboard_logdir":"","eval_lpips":False}'
+MODELARGS=$(printf "$MODELTEMP" 1024 0.01)
 
 RES="800x800"
 VALID=${1:-"200..400"}
-OUTPUT=${SAVE}/eval
+OUTPUT=${SAVE}/eval2
 mkdir -p  ${OUTPUT}
 
-# export CUDA_VISIBLE_DEVICES=0
+#export CUDA_VISIBLE_DEVICES=0 
 python validate.py ${DATASET} \
     --user-dir fairnr \
     --valid-views ${VALID} \
@@ -21,5 +21,6 @@ python validate.py ${DATASET} \
     --valid-view-per-batch 1 \
     --path ${MODEL_PATH} \
     --model-overrides $MODELARGS \
-    # --output-valid ${OUTPUT} \
+    --output-valid ${OUTPUT} \
     # | tee -a ${SAVE}/eval.log
+

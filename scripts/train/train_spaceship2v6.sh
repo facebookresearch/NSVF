@@ -1,8 +1,8 @@
 # just for debugging
 DATA="spaceship2_v6"
 DATASET=/private/home/jgu/data/shapenet/new_renders/data/${DATA}/0000
-SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}
-ARCH="nsvf_base"
+SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_${DATA}_ss
+ARCH="snsvf_base"
 BOXZ="bbox.txt"
 # ARCH="nsvf_xyz"
 mkdir -p $SAVE

@@ -128,3 +128,107 @@ class VolumeRenderer(Renderer):
         rgb = (texture * probs.unsqueeze(-1)).sum(-2)
         return rgb, depth, missed, probs, accumulated_evaluations
 
+
+class DeltaVolumeRenderer(VolumeRenderer):
+
+    @staticmethod
+    def add_args(parser):
+        
+        # additional arguments
+        parser.add_argument('--interp-color', action='store_true',
+            help='If set, we compute the color as an interpolation with bg color.')
+        parser.add_argument('--exp-depth', action='store_true', 
+            help="If set, use the expectation of depths as input, otherwise use expected features.")
+
+
+    def forward_once(self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states, early_stop=None):
+        """
+        chunks: set > 1 if out-of-memory. it can save some memory by time.
+        """
+        sampled_depth, sampled_idx, sampled_dists = samples
+        sampled_idx = sampled_idx.long()
+        
+        # only compute when the ray hits
+        sample_mask = sampled_idx.ne(-1)
+        if early_stop is not None:
+            sample_mask = sample_mask & (~early_stop.unsqueeze(-1))
+        
+        if sample_mask.sum() == 0:  # miss everything skip
+            return torch.zeros_like(sampled_depth), sampled_depth.new_zeros(*sampled_depth.size(), 3), sample_mask.sum()
+
+        queries = ray(ray_start.unsqueeze(1), ray_dir.unsqueeze(1), sampled_depth.unsqueeze(2))
+        queries = queries[sample_mask]
+        querie_dirs = ray_dir.unsqueeze(1).expand(*sampled_depth.size(), ray_dir.size()[-1])[sample_mask]
+        sampled_idx = sampled_idx[sample_mask]
+        sampled_dists = sampled_dists[sample_mask]
+
+        # get encoder features as inputs
+        field_inputs = input_fn((queries, sampled_idx), encoder_states)
+        
+        # forward implicit fields
+        sigma, features = field_fn(field_inputs, dir=querie_dirs, outputs=['sigma', 'features'])
+        
+        # post processing
+        noise = 0 if not self.discrete_reg and (not self.training)  else torch.zeros_like(sigma).normal_()  
+        free_energy = torch.relu(noise + sigma) * sampled_dists    # (optional) free_energy = (F.elu(sigma - 3, alpha=1) + 1) * dists
+        free_energy = torch.zeros_like(sampled_depth).masked_scatter(sample_mask, free_energy)
+        features = free_energy.new_zeros(*free_energy.size(), features.size(-1)).masked_scatter(
+            sample_mask.unsqueeze(-1).expand(*sample_mask.size(), features.size(-1)), features)
+        
+        return free_energy, features, sample_mask.sum()
+
+    def forward(self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states, gt_depths=None):
+        sampled_depth, sampled_idx, sampled_dists = samples
+        tolerance = self.raymarching_tolerance
+        early_stop = None
+        if tolerance > 0:
+            tolerance = -math.log(tolerance)
+
+        hits = sampled_idx.ne(-1).long()
+        size_so_far, start_step = 0, 0
+        accumulated_free_energy = sampled_dists.new_zeros(sampled_depth.size(0))
+        accumulated_evaluations = 0
+        
+        features, depth, missed = 0, 0, 1
+
+        for i in range(hits.size(1) + 1):
+            if ((i == hits.size(1)) or (size_so_far + hits[:, i].sum() > self.chunk_size)) and (i > start_step):
+                _free_energy, _features, _evals = self.forward_once(
+                        input_fn, field_fn, 
+                        ray_start, ray_dir, (
+                        sampled_depth[:, start_step: i], 
+                        sampled_idx[:, start_step: i], 
+                        sampled_dists[:, start_step: i]), 
+                        encoder_states, 
+                        early_stop=early_stop)
+                
+                _shifted_free_enery = torch.cat([_free_energy.new_zeros(sampled_depth.size(0), 1), _free_energy[:, :-1]], dim=-1)
+                _shifted_free_enery = _shifted_free_enery + accumulated_free_energy.unsqueeze(-1)
+                a = 1 - torch.exp(-_free_energy)
+                b = torch.exp(-torch.cumsum(_shifted_free_enery, dim=-1))
+                probs = a * b
+                depth = depth + (sampled_depth[:, start_step: i] * probs).sum(1)
+                features = features + (_features * probs.unsqueeze(-1)).sum(1)
+                missed = missed - probs.sum(1)
+                
+                accumulated_evaluations += _evals
+                accumulated_free_energy += _free_energy.sum(1)
+                if tolerance > 0:
+                    early_stop = accumulated_free_energy > tolerance
+                    hits[early_stop] *= 0
+    
+                start_step, size_so_far = i, 0
+            
+            if (i < hits.size(1)):
+                size_so_far += hits[:, i].sum()
+
+
+        # accumulation done, predict the texture here
+        if not getattr(self.args, "interp_color", False):
+            rgb = field_fn(None, dir=ray_dir, features=features, outputs=['texture'])[0]
+        
+        else:
+            rgb = field_fn(None, dir=ray_dir, features=features / (1 - missed.unsqueeze(-1) + 1e-8), outputs=['texture'])[0] * (1 - missed.unsqueeze(-1))
+    
+        return rgb, depth, missed, probs, accumulated_evaluations
+        

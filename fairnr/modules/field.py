@@ -56,7 +56,7 @@ class BackgroundField(Field):
                             help='do not optimize the background color')
 
     def forward(self, **kwargs):
-        return self.bg_color
+        return self.bg_color * 0 + 1.0  # force to white
 
 
 class RaidanceField(Field):
