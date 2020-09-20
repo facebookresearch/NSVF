@@ -1,0 +1,15 @@
+// Copyright (c) Facebook, Inc. and its affiliates.
+// 
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the root directory of this source tree.
+
+#pragma once
+#include <torch/extension.h>
+#include <utility>
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> ball_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor points, 
+               const float radius, const int n_max);
+std::tuple<at::Tensor, at::Tensor, at::Tensor> aabb_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor points, 
+               const float voxelsize, const int n_max);
+std::tuple<at::Tensor, at::Tensor, at::Tensor> uniform_ray_sampling(at::Tensor pts_idx, at::Tensor min_depth, at::Tensor max_depth, at::Tensor uniform_noise,
+               const float step_size, const int max_steps);

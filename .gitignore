@@ -1,0 +1,16 @@
+*.pyc
+*.so
+*.pkl
+.DS_Store/
+__pycache__/
+*.pt
+.idea/
+.vscode/
+build/
+*.egg-info/
+images/
+*.blend1
+.vscode/
+.history/
+tools/
+fb_sweep/
