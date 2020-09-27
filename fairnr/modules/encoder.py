@@ -107,6 +107,12 @@ class SparseVoxelEncoder(Encoder):
         keep = fine_feats.new_ones(fine_feats.size(0)).long()
         keys = fine_keys.long()
 
+        # ray-marching step size
+        if getattr(args, "raymarching_stepsize_ratio", 0) > 0:
+            step_size = args.raymarching_stepsize_ratio * voxel_size
+        else:
+            step_size = args.raymarching_stepsize
+
         # register parameters
         self.register_buffer("points", points)   # voxel centers
         self.register_buffer("feats", feats)     # for each voxel, 8 vertexs
@@ -115,7 +121,7 @@ class SparseVoxelEncoder(Encoder):
         self.register_buffer("num_keys", num_keys)
 
         self.register_buffer("voxel_size", torch.scalar_tensor(voxel_size))
-        self.register_buffer("step_size", torch.scalar_tensor(args.raymarching_stepsize))
+        self.register_buffer("step_size", torch.scalar_tensor(step_size))
         self.register_buffer("max_hits", torch.scalar_tensor(args.max_hits))
 
         # set-up other hyperparameters
@@ -153,18 +159,18 @@ class SparseVoxelEncoder(Encoder):
         parser.add_argument('--voxel-size', type=float, metavar='D', help='voxel size of the input points (initial')
         parser.add_argument('--voxel-path', type=str, help='path for pretrained voxel file. if provided no update')
         parser.add_argument('--voxel-embed-dim', type=int, metavar='N', help="embedding size")
-        parser.add_argument('--total-num-embedding', type=int, metavar='N', help='totoal number of embeddings to initialize')
         parser.add_argument('--deterministic-step', action='store_true',
                             help='if set, the model runs fixed stepsize, instead of sampling one')
         parser.add_argument('--max-hits', type=int, metavar='N', help='due to restrictions we set a maximum number of hits')
-        parser.add_argument('--raymarching-stepsize', type=float, metavar='N', help='ray marching step size for sparse voxels')
-        
+        parser.add_argument('--raymarching-stepsize', type=float, metavar='D', 
+                            help='ray marching step size for sparse voxels')
+        parser.add_argument('--raymarching-stepsize-ratio', type=float, metavar='D',
+                            help='if the concrete step size is not given (=0), we use the ratio to the voxel size as step size.')
+
     def precompute(self, id=None, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
         values = self.values.weight[: self.num_keys] if self.values is not None else None
-        keys   = self.keys[: self.num_keys]
-       
         if id is not None:
             # extend size to support multi-objects
             feats  = feats.unsqueeze(0).expand(id.size(0), *feats.size()).contiguous()
@@ -172,8 +178,9 @@ class SparseVoxelEncoder(Encoder):
             values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous() if values is not None else None
 
             # moving to multiple objects
-            feats = feats + self.num_keys * torch.arange(id.size(0), 
-                device=feats.device, dtype=feats.dtype)[:, None, None]
+            if id.size(0) > 1:
+                feats = feats + self.num_keys * torch.arange(id.size(0), 
+                    device=feats.device, dtype=feats.dtype)[:, None, None]
         return feats, points, values
 
     def extract_voxels(self):
@@ -200,10 +207,10 @@ class SparseVoxelEncoder(Encoder):
         pts_idx = pts_idx.gather(-1, sorted_idx)
         hits = pts_idx.ne(-1).any(-1)  # remove all points that completely miss the object
         
-        # extend the point-index to multiple shapes
-        pts_idx = (pts_idx + H * torch.arange(S, 
-            device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
-            ).masked_fill_(pts_idx.eq(-1), -1)
+        if S > 1:  # extend the point-index to multiple shapes
+            pts_idx = (pts_idx + H * torch.arange(S, 
+                device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
+                ).masked_fill_(pts_idx.eq(-1), -1)
         return ray_start, ray_dir, min_depth, max_depth, pts_idx, hits
 
     def ray_sample(self, pts_idx, min_depth, max_depth):

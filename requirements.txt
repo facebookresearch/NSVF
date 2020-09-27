@@ -1,7 +1,6 @@
-open3d==0.9.0.0
+open3d==0.10.0
 opencv_python==4.2.0.32
 tqdm==4.43.0
-vtk==8.1.2
 pandas==0.25.3
 imageio==2.6.1
 scikit_image==0.16.2

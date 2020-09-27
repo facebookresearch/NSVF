@@ -39,8 +39,7 @@ class NeuralRenderer(object):
                 fps=24,
                 test_camera_poses=None,
                 test_camera_intrinsics=None,
-                test_camera_views=None,
-                interpolation=False):
+                test_camera_views=None):
 
         self.frames = frames
         self.speed = speed
@@ -58,7 +57,6 @@ class NeuralRenderer(object):
         self.at = at
         self.up = up
         self.fps = fps
-        self.use_interpolation = interpolation
 
         if self.path_gen is None:
             self.path_gen = trajectory.circle()
@@ -164,7 +162,6 @@ class NeuralRenderer(object):
                 
                 _sample = {
                     'id': ids,
-                    'offset': float((step % frames)) / float(frames) if self.use_interpolation else None,
                     'colors': torch.cat([real_images[shape:shape+1] for _ in range(step, next_step)], 1),
                     'intrinsics': sample['intrinsics'][shape:shape+1],
                     'extrinsics': torch.stack(inv_RT, 0).unsqueeze(0),

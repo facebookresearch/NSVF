@@ -53,7 +53,7 @@ class SingleObjRenderingTask(FairseqTask):
                             help="if set > -1, subsample the validation (when training set is too large)")
         parser.add_argument("--view-per-batch", type=int, default=6,
                             help="number of views training each batch (each GPU)")
-        parser.add_argument("--valid-view-per-batch", type=int, default=6,
+        parser.add_argument("--valid-view-per-batch", type=int, default=1,
                             help="number of views training each batch (each GPU)")
         parser.add_argument("--view-resolution", type=str, default='64x64',
                             help="width for the squared image. downsampled from the original.")    
@@ -150,62 +150,38 @@ class SingleObjRenderingTask(FairseqTask):
         """
         Load a given dataset split (train, valid, test)
         """
-        
+        DataLoader = ShapeViewStreamDataset if split == 'valid' else ShapeViewDataset
+        self.datasets[split] = DataLoader(
+            self.train_data if split == 'train' else \
+                self.val_data if split == 'valid' else self.test_data,
+            views=self.train_views if split == 'train' else \
+                self.valid_views if split == 'valid' else self.test_views,
+            num_view=self.args.view_per_batch if split == 'train' else \
+                self.args.valid_view_per_batch if split == 'valid' else 1,
+            resolution=self.args.view_resolution if split == 'train' else \
+                getattr(self.args, "valid_view_resolution", self.args.view_resolution) if split == 'valid' else \
+                    getattr(self.args, "render_resolution", self.args.view_resolution),
+            subsample_valid=self.args.subsample_valid if split == 'valid' else -1,
+            train=(split=='train'),
+            load_depth=self.args.load_depth and (split!='test'),
+            load_mask=self.args.load_mask and (split!='test'),
+            repeat=self.repeat_dataset(split),
+            preload=(not getattr(self.args, "no_preload", False)) and (split!='test'),
+            binarize=(not getattr(self.args, "no_load_binary", False)) and (split!='test'),
+            bg_color=getattr(self.args, "transparent_background", "1,1,1"),
+            min_color=getattr(self.args, "min_color", -1),
+            ids=self.object_ids
+        )
+
         if split == 'train':
-            self.datasets[split] = ShapeViewDataset(
-                self.train_data,
-                views=self.train_views,
-                num_view=self.args.view_per_batch,
-                resolution=self.args.view_resolution,
-                train=True,
-                load_depth=self.args.load_depth,
-                load_mask=self.args.load_mask,
-                repeat=self.repeat_dataset(split),
-                preload=(not getattr(self.args, "no_preload", False)),
-                binarize=(not getattr(self.args, "no_load_binary", False)),
-                bg_color=getattr(self.args, "transparent_background", "1,1,1"),
-                min_color=getattr(self.args, "min_color", -1),
-                ids=self.object_ids)
-            
             max_step = getattr(self.args, "virtual_epoch_steps", None)
             if max_step is not None:
                 total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
-                self.datasets[split] = InfiniteDataset(
-                    self.datasets[split], total_num_models)
+            else:
+                total_num_models = 10000000
+            self.datasets[split] = InfiniteDataset(self.datasets[split], total_num_models)
 
-        elif split == 'valid':
-            self.datasets[split] = ShapeViewStreamDataset(
-                self.val_data,
-                views=self.valid_views,
-                subsample_valid=self.args.subsample_valid,
-                num_view=1,
-                resolution=self.args.view_resolution \
-                    if getattr(self.args, "valid_view_resolution", None) is None \
-                    else self.args.valid_view_resolution,
-                train=False,
-                load_depth=self.args.load_depth,
-                load_mask=self.args.load_mask,
-                preload=(not getattr(self.args, "no_preload", False)),
-                binarize=(not getattr(self.args, "no_load_binary", False)),
-                bg_color=getattr(self.args, "transparent_background", "1,1,1"),
-                min_color=getattr(self.args, "min_color", -1),
-                ids=self.object_ids)
-
-        else:
-            self.datasets[split] = ShapeViewDataset(
-                self.test_data,
-                views=self.test_views,
-                num_view=1, 
-                resolution=self.args.render_resolution,
-                train=False, preload=False, binarize=False,
-                bg_color=getattr(self.args, "transparent_background", "1,1,1"),
-                min_color=getattr(self.args, "min_color", -1),
-                ids=self.object_ids)
-
-            # self.datasets[split] = ShapeDataset(
-            #     self.args.data,
-            #     load_point=self.args.load_point)
-
+      
     def build_generator(self, args):
         """
         build a neural renderer for visualization
@@ -227,8 +203,7 @@ class SingleObjRenderingTask(FairseqTask):
             output_type=args.render_output_types,
             test_camera_poses=getattr(args, "render_camera_poses", None),
             test_camera_intrinsics=getattr(args, "render_camera_intrinsics", None),
-            test_camera_views=getattr(args, "render_views", None),
-            interpolation=getattr(args, "render_interpolation", False)
+            test_camera_views=getattr(args, "render_views", None)
         )
 
     @property

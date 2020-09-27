@@ -34,8 +34,6 @@ def add_rendering_args(parser):
     group.add_argument("--render-path-style", default="circle", choices=["circle", "zoomin_circle", "zoomin_line"], type=str)
     group.add_argument("--render-path-args", default="{'radius': 2.5, 'h': 0.0}",
                        help="specialized arguments for rendering paths")
-    group.add_argument("--render-interpolation", action='store_true', 
-                       help='used for latent code interpolation')
     group.add_argument("--render-output", default=None, type=str)
     group.add_argument("--render-at-vector", default="(0,0,0)", type=str)
     group.add_argument("--render-up-vector", default="(0,0,-1)", type=str)

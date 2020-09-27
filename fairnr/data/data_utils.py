@@ -103,14 +103,14 @@ def load_depth(path, resolution=None, depth_plane=5):
         return None
     
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float32)
-    ret, img = cv2.threshold(img, depth_plane, depth_plane, cv2.THRESH_TRUNC)
+    # ret, img = cv2.threshold(img, depth_plane, depth_plane, cv2.THRESH_TRUNC)
     
     H, W = img.shape[:2]
     h, w = resolution
     if (h < H) or (w < W):
         img  = cv2.resize(img, (w, h), interpolation=cv2.INTER_NEAREST).astype('float32')
         #img = cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
-    #img *= 1e-4
+
     if len(img.shape) ==3:
         img = img[:,:,:1]
         img = img.transpose(2,0,1)
@@ -151,29 +151,6 @@ def load_intrinsics(filepath, resized_width=None, invert_y=False):
     # Get camera intrinsics
     with open(filepath, 'r') as file:
         f, cx, cy, _ = map(float, file.readline().split())
-    #     grid_barycenter = torch.Tensor(list(map(float, file.readline().split())))
-    #     scale = float(file.readline())
-    #     #print(file.readline())
-    #     file.readline()#what's this ? skip
-    #     height, width = map(float, file.readline().split())
-
-    #     try:
-    #         world2cam_poses = int(file.readline())
-    #     except ValueError:
-    #         world2cam_poses = None
-
-    # if world2cam_poses is None:
-    #     world2cam_poses = False
-
-    # world2cam_poses = bool(world2cam_poses)
-    
-    # if resized_width is not None:
-    #     resized_height = int(height/float(width)*resized_width)
-
-    #     cx = cx/width * resized_width
-    #     cy = cy/height * resized_height
-    #     f = resized_width / width * f
-
     fx = f
     if invert_y:
         fy = -f

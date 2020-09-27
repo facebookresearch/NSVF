@@ -260,6 +260,9 @@ def validate(args, trainer, task, epoch_itr, subsets):
     if args.fixed_validation_seed is not None:
         # set fixed seed for every validation
         utils.set_torch_seed(args.fixed_validation_seed)
+    
+    # reset dummy batch only for validation
+    trainer._dummy_batch = "DUMMY"  # reset dummy batch
 
     valid_losses = []
     for subset in subsets:
@@ -302,6 +305,9 @@ def validate(args, trainer, task, epoch_itr, subsets):
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
 
         valid_losses.append(stats[args.best_checkpoint_metric])
+    
+    # reset dummy batch again for continuing training
+    trainer._dummy_batch = "DUMMY"
     return valid_losses
 
 

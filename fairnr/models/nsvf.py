@@ -171,15 +171,16 @@ class NSVFModel(BaseModel):
 
 @register_model_architecture("nsvf", "nsvf_base")
 def base_architecture(args):
-    # encoder
+    # parameter needs to be changed
     args.voxel_size = getattr(args, "voxel_size", 0.25)
-    args.voxel_path = getattr(args, "voxel_path", None)
     args.max_hits = getattr(args, "max_hits", 60)
     args.raymarching_stepsize = getattr(args, "raymarching_stepsize", 0.01)
+    args.raymarching_stepsize_ratio = getattr(args, "raymarching_stepsize_ratio", 0.0)
+    
+    # encoder default parameter
     args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 32)
-    args.total_num_embedding = getattr(args, "total_num_embedding", None)
+    args.voxel_path = getattr(args, "voxel_path", None)
     args.initial_boundingbox = getattr(args, "initial_boundingbox", None)
-    # args.xyz_as_voxel_embed = getattr(args, "xyz_as_voxel_embed", False)
 
     # field
     args.inputs_to_density = getattr(args, "inputs_to_density", "emb:6:32")

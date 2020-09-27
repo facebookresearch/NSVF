@@ -14,18 +14,24 @@ This is the official repo including instructions for the following paper:
 ## Requirements and Installation
 This code is largely following the structure of [fairseq-py](https://github.com/pytorch/fairseq) where we implemented custom modules for supporting neural rendering. 
 
-System requirements:
+We have tested the following system:
 * Python version >= 3.6
-* PyTorch >= 1.4.0
-* NVIDIA GPU and NCCL (we only support GPU learning for now. Note that, the CUDA version must match with pytorch )
+* PyTorch 1.4.0
+* Nvidia GPU (Tesla V100 32GB) CUDA 10.1
 
-To install, first clone this repo and install all the requirements by
+We only support GPU learning and inference.
+
+To install, first clone this repo and install all dependencies by
 ```bash
 pip install -r requirements.txt
 ```
 Then,  run
 ```bash
 pip install --editable ./
+```
+or if you want to install the code locally:
+```
+python setup.py build_ext --inplace
 ```
 
 ## Dataset
@@ -53,7 +59,8 @@ Given the single object dataset as ``{DATASET}``, the following command trains a
 
 We assume the dataset views have already split into ``train (0..100)``, ``valid (100..200)`` and ``test (200..400)``.
 
-In this example, we use a pre-defined architecture ``nsvf_base``. Please check other or modify your own architectures from ``fairnr/models/nsvf.py``.
+In this example, we use a pre-defined architecture ``nsvf_base``. 
+Please check other or modify your own architectures from ``fairnr/models/nsvf.py``.
 
 ```bash
 python -u train.py ${DATASET} \
@@ -68,7 +75,7 @@ python -u train.py ${DATASET} \
     --transparent-background "1.0,1.0,1.0" --background-stop-gradient \
     --arch nsvf_base \
     --initial-boundingbox ${DATASET}/bbox.txt \
-    --raymarching-stepsize 0.02 \
+    --raymarching-stepsize-ratio 0.125 \
     --discrete-regularization \
     --color-weight 128.0 --alpha-weight 1.0 \
     --optimizer "adam" --adam-betas "(0.9, 0.999)" \

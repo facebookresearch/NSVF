@@ -1,7 +1,0 @@
-queue=${1:-dev}                                                                                                                                                                                                                                                                                                             
-hour=${2:-72}                                                                                                                                                                                                                                                                                                               
-jname=${3:-critical}                                                                                                                                                                                                                                                                                                        
-comment=${4:-AAAIdeadline}                                                                                                                                                                                                                                                                                                  
-srun --job-name=${jname} --gres=gpu:8 -c 48 -C volta32gb -v --partition=${queue} --comment ${comment} \
---time=${hour}:00:00 --mem 500GB --pty  \
-bash 

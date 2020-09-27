@@ -1,36 +1,44 @@
 # just for debugging
-DATA="lego_full"
-# ARCH="nsvf_base"
-ARCH="nsvf_xyz"
-# ARCH="nsvf_embn"
+DATA="wineholder"
+RES="800x800"
+ARCH="nsvf_xyzn"
+DATASET=/private/home/jgu/data/shapenet/${DATA}/scaled2
+SAVE=/checkpoint/jgu/space/neuralrendering/new_test/test_$DATA
 
-DATASET=/private/home/jgu/data/shapenet/${DATA}
-SAVE=/checkpoint/jgu/space/neuralrendering/new_test/model_LingPurple_scaled
-NAME=legoxyz3
+mkdir -p $SAVE
 
-mkdir -p ${SAVE}_${NAME}
+SLURM_ARGS = """
+{
+    'job-name': 'nsvf',
+    'partition': 'priority',
+    'comment': 'ICLR2021', 
+    'nodes': 1, 
+    'gpus': 8,
+    'output': '$SAVE/$ARCH/train.out',
+    'error': '$SAVE/$ARCH/train.%j.err',
+    'constraint': 'volta32gb'
+}"""
 
 # CUDA_VISIBLE_DEVICES=0 \
-python -u train.py ${DATASET} \
+python train.py ${DATASET} \
+    --slurm-args $SLURM_ARGS \
     --user-dir fairnr \
     --task single_object_rendering \
     --train-views "0..100" \
-    --view-resolution "800x800" \
+    --view-resolution $RES \
     --max-sentences 1 \
     --view-per-batch 4 \
     --pixel-per-view 2048 \
-    --inputs-to-texture "pos:10,normal:4,ray:4" \
-    --no-preload --no-sampling-at-reader \
-    --sampling-on-mask 1.0 \
-    --valid-view-resolution "800x800" \
-    --valid-views "100..196" \
+    --no-preload \
+    --sampling-on-mask 1.0 --no-sampling-at-reader \
+    --valid-view-resolution $RES \
+    --valid-views "100..200" \
     --valid-view-per-batch 1 \
     --transparent-background "1.0,1.0,1.0" \
     --background-stop-gradient \
-    --arch ${ARCH} \
-    --voxel-path ${DATASET}/voxel.txt \
-    --raymarching-stepsize 0.05 \
-    --voxel-size 0.4 \
+    --arch $ARCH \
+    --initial-boundingbox ${DATASET}/bbox.txt \
+    --raymarching-stepsize-ratio 0.125 \
     --discrete-regularization \
     --color-weight 128.0 \
     --alpha-weight 1.0 \
@@ -50,6 +58,5 @@ python -u train.py ${DATASET} \
     --pruning-every-steps 2500 \
     --keep-interval-updates 5 \
     --log-format simple --log-interval 1 \
-    --save-dir ${SAVE}_${NAME} \
-    --tensorboard-logdir ${SAVE}/tensorboard/${NAME} \
-    | tee -a ${SAVE}_${NAME}/train.log
+    --tensorboard-logdir ${SAVE}/tensorboard/${ARCH} \
+    --save-dir ${SAVE}/${ARCH}
