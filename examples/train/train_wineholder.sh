@@ -1,27 +1,27 @@
 # just for debugging
 DATA="wineholder"
 RES="800x800"
-ARCH="nsvf_xyzn"
+ARCH="nsvf_xyz"
 DATASET=/private/home/jgu/data/shapenet/${DATA}/scaled2
 SAVE=/checkpoint/jgu/space/neuralrendering/new_test/test_$DATA
 
 mkdir -p $SAVE
 
-SLURM_ARGS = """
-{
-    'job-name': 'nsvf',
+SLURM_ARGS="""
+{   'job-name': 'nsvf',
     'partition': 'priority',
-    'comment': 'ICLR2021', 
-    'nodes': 1, 
+    'comment': 'ICLR2021',
+    'nodes': 1,
     'gpus': 8,
     'output': '$SAVE/$ARCH/train.out',
     'error': '$SAVE/$ARCH/train.%j.err',
-    'constraint': 'volta32gb'
-}"""
+    'constraint': 'volta32gb',
+    'local': True}
+"""
 
 # CUDA_VISIBLE_DEVICES=0 \
 python train.py ${DATASET} \
-    --slurm-args $SLURM_ARGS \
+    --slurm-args ${SLURM_ARGS//[[:space:]]/} \
     --user-dir fairnr \
     --task single_object_rendering \
     --train-views "0..100" \
