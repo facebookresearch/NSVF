@@ -7,9 +7,8 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 import glob
 
-# build pointnet++ as additional library
-
-_ext_src_root = "fairnr/modules/pointnet2/_ext_src"
+# build clib
+_ext_src_root = "fairnr/clib"
 _ext_sources = glob.glob("{}/src/*.cpp".format(_ext_src_root)) + glob.glob(
     "{}/src/*.cu".format(_ext_src_root)
 )
@@ -19,7 +18,7 @@ setup(
     name='fairnr',
     ext_modules=[
         CUDAExtension(
-            name='fairnr.modules.pointnet2._ext',
+            name='fairnr.clib._ext',
             sources=_ext_sources,
             extra_compile_args={
                 "cxx": ["-O2", "-I{}".format("{}/include".format(_ext_src_root))],

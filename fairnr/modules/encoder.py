@@ -19,7 +19,7 @@ from fairnr.data.data_utils import load_matrix
 from fairnr.data.geometry import (
     trilinear_interp, splitting_points, offset_points
 )
-from fairnr.modules.pointnet2.pointnet2_utils import aabb_ray_intersect
+from fairnr.clib import aabb_ray_intersect
 from fairnr.modules.linear import FCBlock, Linear, Embedding
 
 MAX_DEPTH = 10000.0

@@ -1,0 +1,161 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+# 
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+''' Modified based on: https://github.com/erikwijmans/Pointnet2_PyTorch '''
+from __future__ import (
+    division,
+    absolute_import,
+    with_statement,
+    print_function,
+    unicode_literals,
+)
+import os, sys
+import torch
+from torch.autograd import Function
+import torch.nn as nn
+import sys
+import numpy as np
+
+try:
+    import builtins
+except:
+    import __builtin__ as builtins
+
+try:
+    import fairnr.clib._ext as _ext
+except ImportError:
+    raise ImportError(
+        "Could not import _ext module.\n"
+        "Please see the setup instructions in the README"
+    )
+
+class BallRayIntersect(Function):
+    @staticmethod
+    def forward(ctx, radius, n_max, points, ray_start, ray_dir):
+        r"""
+
+        Parameters
+        ----------
+        radius : float
+            radius of the balls
+        n_max: int
+            maximum number of points to intersect.
+        xyz : torch.Tensor
+            (B, N, 3) xyz coordinates of the features
+        new_xyz : torch.Tensor
+            (B, npoint, 3) centers of the ball query
+
+        Returns
+        -------
+        torch.Tensor
+            (B, npoint) tensor with the nearest indicies of the features that form the query balls
+        """
+        inds, min_depth, max_depth = _ext.ball_intersect(
+            ray_start.float(), ray_dir.float(), points.float(), radius, n_max)
+        min_depth = min_depth.type_as(ray_start)
+        max_depth = max_depth.type_as(ray_start)
+
+        ctx.mark_non_differentiable(inds)
+        ctx.mark_non_differentiable(min_depth)
+        ctx.mark_non_differentiable(max_depth)
+        return inds, min_depth, max_depth
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None
+
+ball_ray_intersect = BallRayIntersect.apply
+
+
+class AABBRayIntersect(Function):
+    @staticmethod
+    def forward(ctx, voxelsize, n_max, points, ray_start, ray_dir):
+        r"""
+
+        Parameters
+        ----------
+        radius : float
+            radius of the balls
+        n_max: int
+            maximum number of points to intersect.
+        xyz : torch.Tensor
+            (B, N, 3) xyz coordinates of the features
+        new_xyz : torch.Tensor
+            (B, npoint, 3) centers of the ball query
+
+        Returns
+        -------
+        torch.Tensor
+            (B, npoint) tensor with the nearest indicies of the features that form the query balls
+        """
+        # HACK: speed-up ray-voxel intersection by batching...
+        G = 2048
+        S, N = ray_start.shape[:2]
+        K = int(np.ceil(N / G))
+        H = K * G
+        if H > N:
+            ray_start = torch.cat([ray_start, ray_start[:, :H-N]], 1)
+            ray_dir = torch.cat([ray_dir, ray_dir[:, :H-N]], 1)
+        ray_start = ray_start.reshape(S * G, K, 3)
+        ray_dir = ray_dir.reshape(S * G, K, 3)
+        points = points.expand(S * G, *points.size()[1:]).contiguous()
+
+        inds, min_depth, max_depth = _ext.aabb_intersect(
+            ray_start.float(), ray_dir.float(), points.float(), voxelsize, n_max)
+        min_depth = min_depth.type_as(ray_start)
+        max_depth = max_depth.type_as(ray_start)
+        
+        inds = inds.reshape(S, H, -1)
+        min_depth = min_depth.reshape(S, H, -1)
+        max_depth = max_depth.reshape(S, H, -1)
+        if H > N:
+            inds = inds[:, :N]
+            min_depth = min_depth[:, :N]
+            max_depth = max_depth[:, :N]
+        
+        ctx.mark_non_differentiable(inds)
+        ctx.mark_non_differentiable(min_depth)
+        ctx.mark_non_differentiable(max_depth)
+        return inds, min_depth, max_depth
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None
+
+aabb_ray_intersect = AABBRayIntersect.apply
+
+
+class UniformRaySampling(Function):
+    @staticmethod
+    def forward(ctx, step_size, pts_idx, min_depth, max_depth, deterministic=False):
+        max_steps = int(((max_depth - min_depth).sum(-1) / step_size).ceil_().max())
+        pts_idx, min_depth, max_depth = \
+            pts_idx.unsqueeze(0), min_depth.unsqueeze(0), max_depth.unsqueeze(0)
+        
+        noise = min_depth.new_zeros(*min_depth.size()[:-1], max_steps)
+        if deterministic:
+            noise += 0.5
+        else:
+            noise = noise.uniform_()
+
+        sampled_idx, sampled_depth, sampled_dists = _ext.uniform_ray_sampling(
+            pts_idx, min_depth.float(), max_depth.float(), noise.float(), step_size, max_steps)
+        sampled_depth = sampled_depth.type_as(min_depth)
+        sampled_dists = sampled_dists.type_as(min_depth)
+        
+        sampled_idx, sampled_depth, sampled_dists = \
+            sampled_idx.squeeze(0), sampled_depth.squeeze(0), sampled_dists.squeeze(0)
+        
+        ctx.mark_non_differentiable(sampled_idx)
+        ctx.mark_non_differentiable(sampled_depth)
+        ctx.mark_non_differentiable(sampled_dists)
+
+        return sampled_idx, sampled_depth, sampled_dists
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None, None
+
+uniform_ray_sampling = UniformRaySampling.apply
