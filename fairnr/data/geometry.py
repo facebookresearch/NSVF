@@ -44,8 +44,7 @@ def normalize(x, axis=-1, order=2):
     else:
         l2 = np.linalg.norm(x, order, axis)
         l2 = np.expand_dims(l2, axis)
-        l2[l2==0] = 1
-    
+    l2[l2==0] = 1
     return x / l2, l2
 
 
@@ -174,7 +173,7 @@ def compute_normal_map(ray_start, ray_dir, depths, RT, width=512, proj=False):
     _normal = normal.new_zeros(*cam_coords.size())
     _normal[:, 1:-1, 1:-1] = normal
     _normal = _normal.reshape(3, -1).transpose(0, 1)
-
+    
     # compute the projected color
     if proj:
         _normal = normalize(_normal, axis=1)[0]

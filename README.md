@@ -163,10 +163,8 @@ python render.py ${DATASET} \
     --render-output-types "color" "depth" "voxel" "normal" --render-combine-output \
     --log-format "simple"
 ```
+We also support rendering with a trajectory file where the camera poses are written in a ``.txt`` file. Please refer to this [example](./examples/render/blended_mvs/render_jade.sh).
 
-
-
-You can find more examples in [examples](./examples/render/).
 
 ## Citation
 ```bibtex

@@ -138,7 +138,6 @@ class BaseModel(BaseFairseqModel):
                 'img': output['depths'][shape, view], 
                 'min_val': min_depth, 
                 'max_val': max_depth}
-
             normals = compute_normal_map(
                 output['ray_start'][shape, view].float(),
                 output['ray_dir'][shape, view].float(),
