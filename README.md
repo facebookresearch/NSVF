@@ -15,11 +15,11 @@ This is the official repo including instructions for the following paper:
 This code is largely following the structure of [fairseq-py](https://github.com/pytorch/fairseq) where we implemented custom modules for supporting neural rendering. 
 
 We have tested the following system:
-* Python version >= 3.6
+* Python >= 3.6
 * PyTorch 1.4.0
 * Nvidia GPU (Tesla V100 32GB) CUDA 10.1
 
-We only support GPU learning and inference.
+We only support GPU learning and rendering.
 
 To install, first clone this repo and install all dependencies by
 ```bash
@@ -38,7 +38,8 @@ python setup.py build_ext --inplace
 You can download the synthetic and real data used in the paper [here](https://www.dropbox.com/sh/arwxt2sye1u68ov/AACW8NJKU5oQqYVILdjTXt4ia?dl=0).
 
 ### Prepare your own dataset
-Here we also show steps to prepare new datasets for training and rendering on single objects. Please follow the data structure:
+Here we also show steps to prepare new datasets for training and rendering on single objects. 
+Please follow the data structure:
 ```
 <dataset_name>
 |-- bbox.txt         # bounding-box file
@@ -52,15 +53,23 @@ Here we also show steps to prepare new datasets for training and rendering on si
     |-- 1.txt
     ...
 ```
+where the ``bbox.txt`` file contains a line describing the initial bounding box and voxel size:
+```
+x_min y_min z_min x_max y_max z_max initial_voxel_size
+```
+
+The names of target images and camera poses do not have to be the same, however, the order of names (sorted by string)
+must be matched to represent views. Typically, we use views to split the datasets.
+For example, we assume the dataset views have already split into ``train (0..100)``, ``valid (100..200)`` and ``test (200..400)``.
 
 
 ## Train a new model
-Given the single object dataset as ``{DATASET}``, the following command trains a new NSVF model in a resolution of ``800x800``, with a batch size of ``4`` images per GPU and ``2048`` rays per image. In default, the code will automatically detect all available GPUs. By setting ``--no-sampling-at-reader``, the model will use the visibility of sparse voxels to sample pixels for training.
-
-We assume the dataset views have already split into ``train (0..100)``, ``valid (100..200)`` and ``test (200..400)``.
+Given the single object dataset as ``{DATASET}``, the following command trains a new NSVF model in a resolution of ``800x800``, with a batch size of ``4`` images per GPU and ``2048`` rays per image. In default, the code will automatically detect all available GPUs.
 
 In this example, we use a pre-defined architecture ``nsvf_base``. 
-Please check other or modify your own architectures from ``fairnr/models/nsvf.py``.
+By setting ``--no-sampling-at-reader``, the model will use the visibility of sparse voxels to sample pixels for training. In default, we set the ray-marching step size as a ratio ``1/8`` of the voxel size.
+During training, the model will automatically prune the voxels every ``2500`` steps, and progressively increase capacity at ``5k``, ``25k`` and ``75k``, respectively. All other parameters are set default.
+Please check other or modify your own architectures in the model file ``fairnr/models/nsvf.py``.
 
 ```bash
 python -u train.py ${DATASET} \
@@ -70,7 +79,7 @@ python -u train.py ${DATASET} \
     --max-sentences 1 --view-per-batch 4 --pixel-per-view 2048 \
     --no-preload \
     --sampling-on-mask 1.0 --no-sampling-at-reader \
-    --valid-views "100..196" --valid-view-resolution "400x400" \
+    --valid-views "100..200" --valid-view-resolution "400x400" \
     --valid-view-per-batch 1 \
     --transparent-background "1.0,1.0,1.0" --background-stop-gradient \
     --arch nsvf_base \
@@ -99,7 +108,7 @@ The output checkpoitns are saved in ``{SAVE}``. To check the training progress, 
 tensorboard --logdir=${SAVE}/tensorboard --port=10000
 ```
 
-You can find more examples to produce the results of our paper under ``scripts/train/``.
+You can find detailed examples to produce the results of our paper under [examples](./examples/train/).
 
 
 ## Evaluation
@@ -138,7 +147,26 @@ python render.py ${DATASET} \
 It will output per frame rendered images as well as a merged ``.mp4`` video in ``${SAVE}/output`` as follows:
 <img src='docs/figs/results.gif'/>
 
-You can find more examples in [scripts](./scripts).
+Our code also support rendering given existing camera poses.
+For instance, we can render the same model on the poses from the testing views (``200..400``) by:
+```bash
+python render.py ${DATASET} \
+    --user-dir fairnr \
+    --task single_object_rendering \
+    --path ${MODEL_PATH} \
+    --model-overrides '{"chunk_size":1024,"raymarching_tolerance":0.01}' \
+    --render-save-fps 24 \
+    --render-resolution "800x800" \
+    --render-camera-poses ${DATASET}/pose \
+    --render-views "200..400" \
+    --render-output ${SAVE}/output \
+    --render-output-types "color" "depth" "voxel" "normal" --render-combine-output \
+    --log-format "simple"
+```
+
+
+
+You can find more examples in [examples](./examples/render/).
 
 ## Citation
 ```bibtex

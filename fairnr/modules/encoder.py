@@ -198,7 +198,7 @@ class SparseVoxelEncoder(Encoder):
         ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
         pts_idx, min_depth, max_depth = aabb_ray_intersect(
             self.voxel_size, self.max_hits, point_xyz, ray_start, ray_dir)
-       
+
         # sort the depths
         min_depth.masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
         max_depth.masked_fill_(pts_idx.eq(-1), MAX_DEPTH)

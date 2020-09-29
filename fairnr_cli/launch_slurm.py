@@ -74,6 +74,7 @@ def launch_cluster(slurm_args, model_args):
         if 'CUDA_VISIBLE_DEVICES' not in env:
             env['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, range(gpus)))
         env['NCCL_DEBUG'] = 'INFO'
+        
         train_proc = subprocess.Popen(train_cmd, env=env)
         train_proc.wait()
 

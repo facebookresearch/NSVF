@@ -236,6 +236,14 @@ def nerf4_architecture(args):
     base_architecture(args)
 
 
+@register_model_architecture("nsvf", "nsvf_emb0")
+def nerf5_architecture(args):
+    args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 384)
+    args.inputs_to_density = getattr(args, "inputs_to_density", "emb:0:384")
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, ray:4")
+    base_architecture(args)
+
+
 @register_model('rnsvf')
 class ResampledNSVFModel(NSVFModel):
 
