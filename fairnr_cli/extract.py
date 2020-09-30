@@ -9,7 +9,7 @@ This code is used for extact voxels/meshes from the learne model
 import logging
 import numpy as np
 import torch
-import sys
+import sys, os
 import argparse
 import open3d as o3d
 
@@ -33,7 +33,7 @@ def cli_main():
     parser.add_argument('--name', type=str, default='sparsevoxel')
     parser.add_argument('--user-dir', default='fairnr')
     args = options.parse_args_and_arch(parser)
-
+    
     models, model_args, task = checkpoint_utils.load_model_ensemble_and_task(
         [args.path], suffix=getattr(args, "checkpoint_suffix", ""),
     )
@@ -46,7 +46,18 @@ def cli_main():
         for k in range(voxel_idx.size(0))
     ]
     vertex = np.array(points, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('quality', 'f4')])
-    PlyData([PlyElement.describe(vertex, 'vertex')], text=True).write(args.output)
+    PlyData([PlyElement.describe(vertex, 'vertex')], text=True).write(os.path.join(args.output, args.name + '.ply'))
+    
+    # model = torch.load(args.path)
+    # voxel_pts = model['model']['encoder.points'][model['model']['encoder.keep'].bool()]
+    # from fairseq import pdb;pdb.set_trace()
+    # # write to ply file.
+    # points = [
+    #     (voxel_pts[k, 0], voxel_pts[k, 1], voxel_pts[k, 2])
+    #     for k in range(voxel_pts.size(0))
+    # ]
+    # vertex = np.array(points, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+    # PlyData([PlyElement.describe(vertex, 'vertex')], text=True).write(os.path.join(args.output, args.name + '.ply'))
 
 if __name__ == '__main__':
     cli_main()

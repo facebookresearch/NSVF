@@ -11,8 +11,7 @@ from torch.autograd import grad
 from collections import OrderedDict
 from fairnr.modules.implicit import (
     ImplicitField, SignedDistanceField,
-    TextureField, DiffusionSpecularField,
-    HyperImplicitField
+    TextureField, HyperImplicitField, BackgroundField
 )
 from fairnr.modules.linear import NeRFPosEmbLinear
 
@@ -50,39 +49,6 @@ class Field(nn.Module):
         pass
 
 
-class BackgroundField(Field):
-    """
-    Background (we assume a uniform color)
-    """
-    def __init__(self, args):
-        super().__init__(args)
-
-        # TODO: we assume a constant background error everywhere
-        bg_color = getattr(args, "transparent_background", "1.0,1.0,1.0")
-        bg_color = [float(b) for b in bg_color.split(',')] if isinstance(bg_color, str) else [bg_color]
-        if getattr(args, "min_color", -1) == -1:
-            bg_color = [b * 2 - 1 for b in bg_color]
-        if len(bg_color) == 1:
-            bg_color = bg_color + bg_color + bg_color
-        self.bg_color = nn.Parameter(
-            torch.tensor(bg_color), 
-            requires_grad=(
-                not getattr(args, "background_stop_gradient", False)
-            ))
-        self.depth = args.background_depth
-
-    @staticmethod
-    def add_args(parser):
-        # background color
-        parser.add_argument('--background-depth', type=float,
-                            help='the depth of background. used for depth visualization')
-        parser.add_argument('--background-stop-gradient', action='store_true',
-                            help='do not optimize the background color')
-
-    def forward(self, ray_start, ray_dir, **kwargs):
-        return self.bg_color.unsqueeze(0) * torch.ones_like(ray_dir)
-
-
 @register_field('radiance_field')
 class RaidanceField(Field):
     
@@ -94,7 +60,10 @@ class RaidanceField(Field):
         self.deterministic_step = getattr(args, "deterministic_step", False)       
         
         # background field
-        self.bg_color = BackgroundField(args)       
+        self.bg_color = BackgroundField(
+            bg_color=getattr(args, "transparent_background", "1.0,1.0,1.0"),
+            min_color=getattr(args, "min_color", -1), 
+            stop_grad=getattr(args, "background_stop_gradient", False))       
         self.den_filters, self.den_ori_dims, self.den_input_dims = self.parse_inputs(args.inputs_to_density)
         self.tex_filters, self.tex_ori_dims, self.tex_input_dims = self.parse_inputs(args.inputs_to_texture)
         self.den_filters, self.tex_filters = nn.ModuleDict(self.den_filters), nn.ModuleDict(self.tex_filters)
@@ -103,14 +72,14 @@ class RaidanceField(Field):
 
         # build networks
         if not getattr(args, "hypernetwork", False):
-            self.feature_field = ImplicitField(args, den_input_dim, den_feat_dim, 
+            self.feature_field = ImplicitField(den_input_dim, den_feat_dim, 
                 args.feature_embed_dim, args.feature_layers)
         else:
             den_contxt_dim = self.den_input_dims[-1]
-            self.feature_field = HyperImplicitField(args, den_contxt_dim, den_input_dim - den_contxt_dim, 
+            self.feature_field = HyperImplicitField(den_contxt_dim, den_input_dim - den_contxt_dim, 
                 den_feat_dim, args.feature_embed_dim, args.feature_layers)
-        self.predictor = SignedDistanceField(args, den_feat_dim, args.density_embed_dim, recurrent=False)
-        self.renderer = TextureField(args, tex_input_dim, args.texture_embed_dim, args.texture_layers) 
+        self.predictor = SignedDistanceField(den_feat_dim, args.density_embed_dim, recurrent=False)
+        self.renderer = TextureField(tex_input_dim, args.texture_embed_dim, args.texture_layers) 
 
     def parse_inputs(self, arguments):
         def fillup(p):
@@ -193,7 +162,10 @@ class RaidanceField(Field):
                             help='feature dimension used to predict the hypernetwork. consistent with context embedding')
 
         # backgound parameters
-        BackgroundField.add_args(parser)
+        parser.add_argument('--background-depth', type=float,
+                            help='the depth of background. used for depth visualization')
+        parser.add_argument('--background-stop-gradient', action='store_true',
+                            help='do not optimize the background color')
 
     @torch.enable_grad()  # tracking the gradient in case we need to have normal at testing time.
     def forward(self, inputs, outputs=['sigma', 'texture']):
@@ -248,3 +220,20 @@ class RaidanceField(Field):
 
         return inputs
 
+
+
+@register_field('disentangled_radiance_field')
+class DisentangledRaidanceField(RaidanceField):
+
+    def __init__(self, args):
+        super().__init__(args)
+
+        # rebuild the renderer
+        self.projected_dim = getattr(args, "projected_dim", 32)  # D
+        self.renderer = nn.ModuleDict(
+            {
+                "light-transport": ImplicitField(args, ),
+                "visibility": ImplicitField(args, ),
+                "lighting": BackgroundField(args)
+            }
+        )

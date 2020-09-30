@@ -13,16 +13,40 @@ from fairnr.modules.linear import (
     NeRFPosEmbLinear, FCLayer, ResFCLayer
 )
 
+
+class BackgroundField(nn.Module):
+    """
+    Background (we assume a uniform color)
+    """
+    def __init__(self, out_dim=3, bg_color="1.0,1.0,1.0", min_color=-1, stop_grad=False, background_depth=5.0):
+        super().__init__()
+
+        if out_dim == 3:  # directly model RGB
+            bg_color = [float(b) for b in bg_color.split(',')] if isinstance(bg_color, str) else [bg_color]
+            if min_color == -1:
+                bg_color = [b * 2 - 1 for b in bg_color]
+            if len(bg_color) == 1:
+                bg_color = bg_color + bg_color + bg_color
+            bg_color = torch.tensor(bg_color)
+        else:    
+            bg_color = torch.ones(out_dim).uniform_()
+            if min_color == -1:
+                bg_color = bg_color * 2 - 1
+            
+        self.bg_color = nn.Parameter(bg_color, requires_grad=not stop_grad)
+        self.depth = background_depth
+
+    def forward(self, ray_start, ray_dir, **kwargs):
+        return self.bg_color.unsqueeze(0) * torch.ones_like(ray_dir)
+
+
 class ImplicitField(nn.Module):
     
     """
     An implicit field is a neural network that outputs a vector given any query point.
     """
-    def __init__(self, 
-        args, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
+    def __init__(self, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
         super().__init__()
-        self.args = args
-
         if pos_proj > 0:
             new_in_dim = in_dim * 2 * pos_proj
             self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
@@ -55,10 +79,9 @@ class ImplicitField(nn.Module):
 
 class HyperImplicitField(nn.Module):
 
-    def __init__(self, args, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
+    def __init__(self, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
         super().__init__()
 
-        self.args = args
         self.hyper_in_dim = hyper_in_dim
         self.in_dim = in_dim
 
@@ -88,9 +111,8 @@ class HyperImplicitField(nn.Module):
 
 class SignedDistanceField(nn.Module):
 
-    def __init__(self, args, in_dim, hidden_dim, recurrent=False):
+    def __init__(self, in_dim, hidden_dim, recurrent=False):
         super().__init__()
-        self.args = args
         self.recurrent = recurrent
 
         if recurrent:
@@ -120,47 +142,9 @@ class TextureField(ImplicitField):
     """
     Pixel generator based on 1x1 conv networks
     """
-    def __init__(self, args, in_dim, hidden_dim, num_layers, with_alpha=False):
+    def __init__(self, in_dim, hidden_dim, num_layers, with_alpha=False):
         out_dim = 3 if not with_alpha else 4
-        super().__init__(args, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=True)
-
-
-class SphereTextureField(TextureField):
-
-    def forward(self, ray_start, ray_dir, min_depth=5.0, steps=10):
-        from fairseq import pdb; pdb.set_trace()
-
-
-
-class DiffusionSpecularField(nn.Module):
-    def __init__(self, args, in_dim, hidden_dim, raydir_dim, num_layers, dropout=0.0):
-        super().__init__()
-        self.args = args
-        self.raydir_dim = raydir_dim
-
-        self.featureField = ImplicitField(args, in_dim, hidden_dim, hidden_dim, num_layers-2, outmost_linear=False)
-        self.diffuseField = ImplicitField(args, hidden_dim, 3, hidden_dim, num_layers=1, outmost_linear=True)
-        self.specularField = ImplicitField(args, hidden_dim + raydir_dim, 3, hidden_dim, num_layers=1, outmost_linear=True)
-        self.dropout = dropout
-
-    def forward(self, x):
-        x, r = x[:, :-self.raydir_dim], x[:, -self.raydir_dim:]
-        f = self.featureField(x)
-        cd = self.diffuseField(f)
-        cs = self.specularField(torch.cat([f, r], -1))
-
-        if self.dropout == 0:
-            return cd + cs
-            
-        # BUG: my default rgb is -1 ~ 1
-        if self.training and self.dropout > 0:
-            cs = cs * (cs.new_ones(cs.size(0)).uniform_() > self.dropout).type_as(cs)[:, None]
-        else:
-            cs = cs * (1 - self.dropout)
-
-        if getattr(self.args, "min_color", -1) == -1:
-            return  (cd + cs) * 2 - 1  # 0 ~ 1 --> -1 ~ 1
-        return cd + cs
+        super().__init__(in_dim, out_dim, hidden_dim, num_layers, outmost_linear=True)
 
 
 # bash scripts/generate/generate_lego.sh $MODEL bulldozer6 2 &
@@ -168,8 +152,8 @@ class OccupancyField(ImplicitField):
     """
     Occupancy Network which predicts 0~1 at every space
     """
-    def __init__(self, args, in_dim, hidden_dim, num_layers):
-        super().__init__(args, in_dim, 1, hidden_dim, num_layers, outmost_linear=True)
+    def __init__(self, in_dim, hidden_dim, num_layers):
+        super().__init__(in_dim, 1, hidden_dim, num_layers, outmost_linear=True)
 
     def forward(self, x):
         return torch.sigmoid(super().forward(x)).squeeze(-1)
