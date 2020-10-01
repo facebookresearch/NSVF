@@ -458,6 +458,17 @@ class SharedSparseVoxelEncoder(Encoder):
         parser.add_argument('--context-embed-dim', type=int, help='context embedding for each view')
 
 
+@register_encoder('triangle_mesh_encoder')
+class TriangleMeshEncoder(SparseVoxelEncoder):
+    def __init__(self, args, mesh_path=None, shared_values=None):
+        super(SparseVoxelEncoder, self).__init__(args)
+        self.mesh_path = mesh_path if mesh_path is not None else args.mesh_path
+        assert (self.mesh_path is not None) and os.path.exists(self.mesh_path)
+        
+        import open3d as o3d
+        mesh = o3d.io.read_triangle_mesh(self.mesh_path)
+        
+
 def bbox2voxels(bbox, voxel_size):
     vox_min, vox_max = bbox[:3], bbox[3:]
     steps = ((vox_max - vox_min) / voxel_size).round().astype('int64') + 1

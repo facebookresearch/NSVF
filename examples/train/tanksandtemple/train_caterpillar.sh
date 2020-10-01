@@ -11,7 +11,7 @@ SLURM_ARGS="""
     'partition': 'priority',
     'comment': 'NeurIPS open-source',
     'nodes': 1,
-    'gpus': 1,
+    'gpus': 8,
     'output': '$SAVE/$ARCH/train.out',
     'error': '$SAVE/$ARCH/train.stderr.%j',
     'constraint': 'volta32gb',
