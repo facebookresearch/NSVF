@@ -32,12 +32,13 @@ class BackgroundField(nn.Module):
             bg_color = torch.ones(out_dim).uniform_()
             if min_color == -1:
                 bg_color = bg_color * 2 - 1
-            
+        self.out_dim = out_dim
         self.bg_color = nn.Parameter(bg_color, requires_grad=not stop_grad)
         self.depth = background_depth
 
-    def forward(self, ray_start, ray_dir, **kwargs):
-        return self.bg_color.unsqueeze(0) * torch.ones_like(ray_dir)
+    def forward(self, x, **kwargs):
+        return self.bg_color.unsqueeze(0).expand(
+            *x.size()[:-1], self.out_dim)
 
 
 class ImplicitField(nn.Module):

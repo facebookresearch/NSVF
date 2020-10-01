@@ -73,7 +73,7 @@ class NSVFModel(BaseModel):
         fullsize = S * V * P
         
         BG_DEPTH = self.field.bg_color.depth
-        bg_color = self.field.bg_color(ray_start, ray_dir, **kwargs)
+        bg_color = self.field.bg_color(ray_dir)
         
         all_results = defaultdict(lambda: None)
         if hits.sum() > 0:  # check if ray missed everything
@@ -253,3 +253,15 @@ class ResampledNSVFModel(NSVFModel):
 @register_model_architecture("rnsvf", "rnsvf_base")
 def rnsvf_architecture(args):
     base_architecture(args)
+
+
+@register_model('disco_nsvf')
+class ResampledNSVFModel(NSVFModel):
+
+    FIELD = "disentangled_radiance_field"
+
+
+@register_model_architecture("disco_nsvf", "disco_nsvf")
+def disco_nsvf_architecture(args):
+    args.compressed_light_dim = getattr(args, "compressed_light_dim", 64)
+    nerf3_architecture(args)

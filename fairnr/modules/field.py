@@ -60,10 +60,10 @@ class RaidanceField(Field):
         self.deterministic_step = getattr(args, "deterministic_step", False)       
         
         # background field
-        self.bg_color = BackgroundField(
-            bg_color=getattr(args, "transparent_background", "1.0,1.0,1.0"),
-            min_color=getattr(args, "min_color", -1), 
-            stop_grad=getattr(args, "background_stop_gradient", False))       
+        self.min_color = getattr(args, "min_color", -1)
+        self.trans_bg = getattr(args, "transparent_background", "1.0,1.0,1.0")
+        self.sgbg = getattr(args, "background_stop_gradient", False)
+        self.bg_color = BackgroundField(bg_color=self.trans_bg, min_color=self.min_color, stop_grad=self.sgbg)       
         self.den_filters, self.den_ori_dims, self.den_input_dims = self.parse_inputs(args.inputs_to_density)
         self.tex_filters, self.tex_ori_dims, self.tex_input_dims = self.parse_inputs(args.inputs_to_texture)
         self.den_filters, self.tex_filters = nn.ModuleDict(self.den_filters), nn.ModuleDict(self.tex_filters)
@@ -197,16 +197,16 @@ class RaidanceField(Field):
             assert 'feat' in inputs, "feature must be pre-computed"
             inputs['sigma'] = self.predictor(inputs['feat'])[0]
 
-        if 'texture' in outputs:
-            if "normal" in self.tex_filters:
-                assert 'sigma' in inputs, "sigma must be pre-computed"
-                assert 'pos' in inputs, "position is used to compute sigma"
-                grad_pos, = grad(
-                    outputs=inputs['sigma'], inputs=inputs['pos'], 
-                    grad_outputs=torch.ones_like(inputs['sigma']), 
-                    retain_graph=True)
-                inputs['normal'] = F.normalize(-grad_pos, p=2, dim=1)  # BUG: gradient direction reversed.
-                
+        if (('texture' in outputs) and ("normal" in self.tex_filters)) or ("normal" in outputs):
+            assert 'sigma' in inputs, "sigma must be pre-computed"
+            assert 'pos' in inputs, "position is used to compute sigma"
+            grad_pos, = grad(
+                outputs=inputs['sigma'], inputs=inputs['pos'], 
+                grad_outputs=torch.ones_like(inputs['sigma']), 
+                retain_graph=True)
+            inputs['normal'] = F.normalize(-grad_pos, p=2, dim=1)  # BUG: gradient direction reversed.
+
+        if 'texture' in outputs:        
             filtered_inputs = []
             for i, name in enumerate(self.tex_filters):
                 d_in, func = self.tex_ori_dims[i], self.tex_filters[name]
@@ -227,13 +227,56 @@ class DisentangledRaidanceField(RaidanceField):
 
     def __init__(self, args):
         super().__init__(args)
+        
+        # for now we fix the input types
+        assert [name for name in self.tex_filters] == ['feat', 'pos', 'normal', 'ray']
 
         # rebuild the renderer
-        self.projected_dim = getattr(args, "projected_dim", 32)  # D
+        self.D = getattr(args, "compressed_light_dim", 64)  # D
         self.renderer = nn.ModuleDict(
             {
-                "light-transport": ImplicitField(args, ),
-                "visibility": ImplicitField(args, ),
-                "lighting": BackgroundField(args)
+                "light-transport": nn.Sequential(
+                    ImplicitField(
+                    in_dim=sum([self.tex_input_dims[t] for t in [2, 3]]),
+                    out_dim=self.D * 3,
+                    hidden_dim=args.texture_embed_dim,
+                    num_layers=args.texture_layers,
+                    outmost_linear=True
+                ), nn.Sigmoid()),  # f(v, n, w)
+                "visibility": nn.Sequential(
+                    ImplicitField(
+                    in_dim=sum([self.tex_input_dims[t] for t in [0, 1]]),
+                    out_dim=self.D,
+                    hidden_dim=args.texture_embed_dim,
+                    num_layers=args.texture_layers,
+                    outmost_linear=True
+                ), nn.Sigmoid()), # v(x, w)
+                "lighting": nn.Sequential(
+                    BackgroundField(
+                    out_dim=self.D * 3, min_color=0
+                ), nn.ReLU())   # L(w)
             }
         )
+       
+    @staticmethod
+    def add_args(parser):
+        RaidanceField.add_args(parser)
+        parser.add_argument('---compressed-light-dim', type=int,
+                            help='instead of sampling light directions physically, we compressed the light directions')
+
+    @torch.enable_grad()  # tracking the gradient in case we need to have normal at testing time.
+    def forward(self, inputs, outputs=['sigma', 'texture']):
+        inputs = super().forward(inputs, outputs=['sigma', 'normal'])
+        if 'texture' in outputs:
+            lt = self.renderer['light-transport'](
+                torch.cat([self.tex_filters['normal'](inputs['normal']),
+                           self.tex_filters['ray'](inputs['ray'])], -1)).reshape(-1, self.D, 3)
+            vs = self.renderer['visibility'](
+                torch.cat([self.tex_filters['feat'](inputs['feat']),
+                           self.tex_filters['pos'](inputs['pos'])], -1)).reshape(-1, self.D, 1)
+            light = self.renderer['lighting'](inputs['ray']).reshape(-1, self.D, 3)
+            texture = (lt * vs * light).mean(1)
+            if self.min_color == -1:
+                texture = 2 * texture - 1
+            inputs['texture'] = texture
+        return inputs
