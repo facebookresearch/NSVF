@@ -53,7 +53,8 @@ class VolumeRenderer(Renderer):
 
     def __init__(self, args):
         super().__init__(args) 
-        self.chunk_size = 256 * getattr(args, "chunk_size", 256)
+        self.chunk_size = 1024 * getattr(args, "chunk_size", 64)
+        self.valid_chunk_size = 1024 * getattr(args, "valid_chunk_size", self.chunk_size)
         self.discrete_reg = getattr(args, "discrete_regularization", False)
         self.raymarching_tolerance = getattr(args, "raymarching_tolerance", 0.0)
 
@@ -65,7 +66,9 @@ class VolumeRenderer(Renderer):
         
         # additional arguments
         parser.add_argument('--chunk-size', type=int, metavar='D', 
-                            help='set chunks to go through the network. trade time for memory')
+                            help='set chunks to go through the network (~K forward passes). trade time for memory. ')
+        parser.add_argument('--valid-chunk-size', type=int, metavar='D', 
+                            help='chunk size used when no training. In default the same as chunk-size.')
         parser.add_argument('--raymarching-tolerance', type=float, default=0)
     
     def forward_once(
@@ -78,7 +81,7 @@ class VolumeRenderer(Renderer):
         sampled_depth, sampled_idx, sampled_dists = samples
         sampled_idx = sampled_idx.long()
         sampled_size = sampled_depth.size(0)
-
+        
         # only compute when the ray hits
         sample_mask = sampled_idx.ne(-1)
         if early_stop is not None:
@@ -121,12 +124,13 @@ class VolumeRenderer(Renderer):
             outputs['normal'] = masked_scatter(sample_mask, field_outputs['normal'])
         return outputs, sample_mask.sum()
 
-    def forward(
+    def forward_chunk(
         self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states,
         gt_depths=None, output_types=['sigma', 'texture'], global_weights=None,
         ):
         sampled_depth, sampled_idx, sampled_dists = samples
         tolerance = self.raymarching_tolerance
+        chunk_size = self.chunk_size if self.training else self.valid_chunk_size
         early_stop = None
         if tolerance > 0:
             tolerance = -math.log(tolerance)
@@ -138,7 +142,7 @@ class VolumeRenderer(Renderer):
         accumulated_evaluations = 0
         
         for i in range(hits.size(1) + 1):
-            if ((i == hits.size(1)) or (size_so_far + hits[:, i].sum() > self.chunk_size)) and (i > start_step):
+            if ((i == hits.size(1)) or (size_so_far + hits[:, i].sum() > chunk_size)) and (i > start_step):
                 _outputs, _evals = self.forward_once(
                         input_fn, field_fn, 
                         ray_start, ray_dir, (
@@ -196,17 +200,33 @@ class VolumeRenderer(Renderer):
             results['normal'] = (outputs['normal'] * probs.unsqueeze(-1)).sum(-2)
         return results
 
+    def forward(self, input_fn, field_fn, ray_start, ray_dir, samples, *args, **kwargs):
+        chunk_size = self.chunk_size if self.training else self.valid_chunk_size
+        if ray_start.size(0) <= chunk_size:
+            return self.forward_chunk(input_fn, field_fn, ray_start, ray_dir, samples, *args, **kwargs)
+
+        # the number of rays is larger than maximum forward passes. pre-chuncking..
+        results = [
+            self.forward_chunk(input_fn, field_fn, 
+                ray_start[i: i+chunk_size], ray_dir[i: i+chunk_size],
+                [s[i: i+chunk_size] for s in samples], *args, **kwargs)
+            for i in range(0, ray_start.size(0), chunk_size)
+        ]
+        return {name: torch.cat([r[name] for r in results], 0) 
+                    if results[0][name].dim() > 0 else sum([r[name] for r in results])
+                for name in results[0]}
+        
 
 @register_renderer("resampled_volume_rendering")
 class ResampledVolumeRenderer(VolumeRenderer):
     
-    def forward(self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states, gt_depths=None):
-        results0 = super().forward(
+    def forward_chunk(self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states, gt_depths=None):
+        results0 = super().forward_chunk(
             input_fn, field_fn, ray_start, ray_dir, samples,
             encoder_states, output_types=['sigma'])  # infer probability
         # resample based on piecewise distribution with inverse CDF (only sample non-missing points)
         new_samples = resample_pdf(results0['probs'], samples, n_samples=16, deterministic=True)  
-        return super().forward(input_fn, field_fn, ray_start, ray_dir, new_samples, 
+        return super().forward_chunk(input_fn, field_fn, ray_start, ray_dir, new_samples, 
             encoder_states, output_types=['texture'], 
             global_weights=results0['probs'].sum(-1, keepdims=True))  # get texture
         

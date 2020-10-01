@@ -379,8 +379,8 @@ class ShapeViewStreamDataset(ShapeViewDataset):
     def __len__(self):
         return len(self.data_index)
 
-    def _load_batch(self, data, shape_id, view_id):
-        return shape_id, self._load_shape(data[shape_id]), [self._load_view(data[shape_id], view_id)]
+    def _load_batch(self, data, shape_id, view_ids):
+        return shape_id, self._load_shape(data[shape_id]), [self._load_view(data[shape_id], view_id) for view_id in view_ids]
 
     def __getitem__(self, index):
         shape_id, view_id = self.data_index[index]

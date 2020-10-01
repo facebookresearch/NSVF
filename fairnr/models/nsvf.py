@@ -62,8 +62,7 @@ class NSVFModel(BaseModel):
             ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, ray_dir.size(-1))
             min_depth = min_depth[sampled_masks.expand_as(min_depth)].reshape(S, -1, min_depth.size(-1))
             max_depth = max_depth[sampled_masks.expand_as(max_depth)].reshape(S, -1, max_depth.size(-1))
-            pts_idx = pts_idx[sampled_masks.expand_as(pts_idx)].reshape(S, -1, pts_idx.size(-1))
-            
+            pts_idx = pts_idx[sampled_masks.expand_as(pts_idx)].reshape(S, -1, pts_idx.size(-1))  
             P = hits.size(-1) // V   # the number of pixels per image
 
         else:
@@ -212,7 +211,7 @@ def base_architecture(args):
     args.sampling_skipping_size = getattr(args, "sampling_skipping_size", 1)
 
     # others
-    args.chunk_size = getattr(args, "chunk_size", 256)
+    args.chunk_size = getattr(args, "chunk_size", 64)
 
 
 @register_model_architecture("nsvf", "nsvf_xyz")
