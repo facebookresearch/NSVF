@@ -19,7 +19,7 @@ from fairnr.data.data_utils import load_matrix
 from fairnr.data.geometry import (
     trilinear_interp, splitting_points, offset_points
 )
-from fairnr.clib import aabb_ray_intersect
+from fairnr.clib import aabb_ray_intersect, uniform_ray_sampling
 from fairnr.modules.linear import FCBlock, Linear, Embedding
 
 MAX_DEPTH = 10000.0
@@ -215,11 +215,23 @@ class SparseVoxelEncoder(Encoder):
 
     def ray_sample(self, pts_idx, min_depth, max_depth):
         # ray_sampler = uniform_ray_sampling
-        sampled_idx, sampled_depth, sampled_dists = parallel_ray_sampling(
-            self.step_size, pts_idx, min_depth, max_depth, 
+        # from fairseq import pdb; pdb.set_trace()
+        # self.deterministic_step = True
+        max_ray_length = (max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(-1)[0] - min_depth.min(-1)[0]).max()
+        sampled_idx, sampled_depth, sampled_dists = uniform_ray_sampling(
+            pts_idx, min_depth, max_depth, self.step_size, max_ray_length, 
             self.deterministic_step or (not self.training))
+        # sampled_idx1, sampled_depth1, sampled_dists1 = parallel_ray_sampling(
+        #     self.step_size, pts_idx, min_depth, max_depth, 
+        #     self.deterministic_step or (not self.training))
+        # for k in range(sampled_depth.size(0)):
+        #     try:
+        #         print(sampled_depth[k][sampled_idx[k].ne(-1)].eq(sampled_depth1[k][sampled_idx1[k].ne(-1)]).all())
+        #     except RuntimeError:
+        #         from fairseq import pdb; pdb.set_trace()
         sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
+        sampled_dists.masked_fill_(sampled_idx.eq(-1), 0.0)
         return sampled_depth, sampled_idx, sampled_dists
 
     @torch.enable_grad()
@@ -487,7 +499,7 @@ def _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, determinis
     # include all boundary points
     sampled_depth = torch.cat([min_depth, max_depth, sampled_depth], -1)
     sampled_idx = torch.cat([pts_idx, pts_idx, sampled_idx], -1)
-
+    
     # reorder
     sampled_depth, ordered_index = sampled_depth.sort(-1)
     sampled_idx = sampled_idx.gather(1, ordered_index)
@@ -520,7 +532,7 @@ def parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, determinist
     full_size = min_depth.shape[0]
     if full_size <= chunk_size:
         return _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=deterministic)
-
+    
     outputs = zip(*[
             _parallel_ray_sampling(
                 MARCH_SIZE, 

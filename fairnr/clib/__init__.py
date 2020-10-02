@@ -129,29 +129,48 @@ aabb_ray_intersect = AABBRayIntersect.apply
 
 class UniformRaySampling(Function):
     @staticmethod
-    def forward(ctx, step_size, pts_idx, min_depth, max_depth, deterministic=False):
-        max_steps = int(((max_depth - min_depth).sum(-1) / step_size).ceil_().max())
-        pts_idx, min_depth, max_depth = \
-            pts_idx.unsqueeze(0), min_depth.unsqueeze(0), max_depth.unsqueeze(0)
-        
+    def forward(ctx, pts_idx, min_depth, max_depth, step_size, max_ray_length, deterministic=False):
+        G, N, P = 256, pts_idx.size(0), pts_idx.size(1)
+        H = int(np.ceil(N / G)) * G
+        if H > N:
+            pts_idx = torch.cat([pts_idx, pts_idx[:H-N]], 0)
+            min_depth = torch.cat([min_depth, min_depth[:H-N]], 0)
+            max_depth = torch.cat([max_depth, max_depth[:H-N]], 0)
+        pts_idx = pts_idx.reshape(G, -1, P)
+        min_depth = min_depth.reshape(G, -1, P)
+        max_depth = max_depth.reshape(G, -1, P)
+
+        # pre-generate noise
+        max_steps = int(max_ray_length / step_size)
+        max_steps = max_steps + min_depth.size(-1) * 2
         noise = min_depth.new_zeros(*min_depth.size()[:-1], max_steps)
         if deterministic:
             noise += 0.5
         else:
             noise = noise.uniform_()
-
+        
+        # call cuda function
         sampled_idx, sampled_depth, sampled_dists = _ext.uniform_ray_sampling(
             pts_idx, min_depth.float(), max_depth.float(), noise.float(), step_size, max_steps)
         sampled_depth = sampled_depth.type_as(min_depth)
         sampled_dists = sampled_dists.type_as(min_depth)
         
-        sampled_idx, sampled_depth, sampled_dists = \
-            sampled_idx.squeeze(0), sampled_depth.squeeze(0), sampled_dists.squeeze(0)
+        sampled_idx = sampled_idx.reshape(H, -1)
+        sampled_depth = sampled_depth.reshape(H, -1)
+        sampled_dists = sampled_dists.reshape(H, -1)
+        if H > N:
+            sampled_idx = sampled_idx[: N]
+            sampled_depth = sampled_depth[: N]
+            sampled_dists = sampled_dists[: N]
         
+        max_len = sampled_idx.ne(-1).sum(-1).max()
+        sampled_idx = sampled_idx[:, :max_len]
+        sampled_depth = sampled_depth[:, :max_len]
+        sampled_dists = sampled_dists[:, :max_len]
+
         ctx.mark_non_differentiable(sampled_idx)
         ctx.mark_non_differentiable(sampled_depth)
         ctx.mark_non_differentiable(sampled_dists)
-
         return sampled_idx, sampled_depth, sampled_dists
 
     @staticmethod

@@ -2,18 +2,20 @@
 DATA="Family"
 RES="1080x1920"
 ARCH="nsvf_base"
+SUFFIX="v3"
 DATASET=/private/home/jgu/data/shapenet/release/TanksAndTemple/${DATA}
 SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
-mkdir -p $SAVE/$ARCH
+MODEL=$ARCH$SUFFIX
+mkdir -p $SAVE/$MODEL
 
 SLURM_ARGS="""
-{   'job-name': '${DATA}-${ARCH}',
+{   'job-name': '${DATA}-${MODEL}',
     'partition': 'priority',
     'comment': 'NeurIPS open-source',
     'nodes': 1,
     'gpus': 8,
-    'output': '$SAVE/$ARCH/train.out',
-    'error': '$SAVE/$ARCH/train.stderr.%j',
+    'output': '$SAVE/$MODEL/train.out',
+    'error': '$SAVE/$MODEL/train.stderr.%j',
     'constraint': 'volta32gb',
     'local': True}
 """
@@ -27,7 +29,8 @@ python train.py ${DATASET} \
     --max-sentences 1 \
     --view-per-batch 2 \
     --pixel-per-view 2048 \
-    --no-load-binary \
+    --valid-chunk-size 512 \
+    --no-preload\
     --sampling-on-mask 1.0 --no-sampling-at-reader \
     --valid-view-resolution $RES \
     --valid-views "133..152" \
@@ -56,5 +59,5 @@ python train.py ${DATASET} \
     --pruning-every-steps 2500 \
     --keep-interval-updates 5 \
     --log-format simple --log-interval 1 \
-    --tensorboard-logdir ${SAVE}/tensorboard/${ARCH} \
-    --save-dir ${SAVE}/${ARCH}
+    --tensorboard-logdir ${SAVE}/tensorboard/${MODEL} \
+    --save-dir ${SAVE}/${MODEL}
