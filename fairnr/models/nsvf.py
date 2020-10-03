@@ -20,7 +20,7 @@ from fairseq.models import (
 )
 
 from fairnr.data.data_utils import Timer
-from fairnr.data.geometry import get_edge, compute_normal_map, fill_in
+from fairnr.data.geometry import compute_normal_map, fill_in
 from fairnr.models.fairnr_model import BaseModel
 
 MAX_DEPTH = 10000.0
@@ -40,11 +40,12 @@ class NSVFModel(BaseModel):
 
         # voxel encoder (precompute for each voxel if needed)
         feats, xyz, values = self.encoder.precompute(**kwargs)  # feats: (S, B, 8), xyz: (S, B, 3),  values: (S, B', D)
-
+        
         # ray-voxel intersection
         with Timer() as timer0:
             ray_start, ray_dir, min_depth, max_depth, pts_idx, hits = \
                 self.encoder.ray_intersect(ray_start, ray_dir, xyz, feats)
+
             if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
                 uv, size = kwargs['uv'], kwargs['size']
                 mask = hits.reshape(*uv.size()[:2], uv.size(-1))
@@ -81,18 +82,12 @@ class NSVFModel(BaseModel):
             
             # volume rendering
             with Timer() as timer2:
-                encoder_states = (
-                    feats.reshape(-1, 8), 
-                    xyz.reshape(-1, 3), 
+                encoder_states = (feats.reshape(-1, feats.size(-1)), xyz.reshape(-1, 3), 
                     values.reshape(-1, values.size(-1)) if values is not None else None)
                 all_results = self.raymarcher(
                     self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
                 all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
-                all_results['voxel_edges'] = get_edge(
-                    ray_start + ray_dir * samples[0][:, :1], 
-                    xyz.reshape(-1, 3)[samples[1][:, 0].long()], 
-                    self.encoder.voxel_size).type_as(all_results['depths'])   # get voxel edges/depth (for visualization)
-                all_results['voxel_edges'] = (1 - all_results['voxel_edges'][:, None].expand(all_results['voxel_edges'].size(0), 3)) * 0.7
+                all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, xyz)
                 all_results['voxel_depth'] = samples[0][:, 0]
 
         # fill out the full size

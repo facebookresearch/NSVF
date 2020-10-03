@@ -54,7 +54,7 @@ class VolumeRenderer(Renderer):
     def __init__(self, args):
         super().__init__(args) 
         self.chunk_size = 1024 * getattr(args, "chunk_size", 64)
-        self.valid_chunk_size = 1024 * getattr(args, "valid_chunk_size", self.chunk_size)
+        self.valid_chunk_size = 1024 * getattr(args, "valid_chunk_size", self.chunk_size // 1024)
         self.discrete_reg = getattr(args, "discrete_regularization", False)
         self.raymarching_tolerance = getattr(args, "raymarching_tolerance", 0.0)
 
@@ -95,7 +95,7 @@ class VolumeRenderer(Renderer):
         querie_dirs = ray_dir.unsqueeze(1).expand(*sampled_depth.size(), ray_dir.size()[-1])[sample_mask]
         sampled_idx = sampled_idx[sample_mask]
         sampled_dists = sampled_dists[sample_mask]
-
+       
         # get encoder features as inputs
         field_inputs = input_fn((queries, sampled_idx), encoder_states)
         field_inputs['ray'] = querie_dirs
@@ -140,7 +140,6 @@ class VolumeRenderer(Renderer):
         size_so_far, start_step = 0, 0
         accumulated_free_energy = 0
         accumulated_evaluations = 0
-        
         for i in range(hits.size(1) + 1):
             if ((i == hits.size(1)) or (size_so_far + hits[:, i].sum() > chunk_size)) and (i > start_step):
                 _outputs, _evals = self.forward_once(

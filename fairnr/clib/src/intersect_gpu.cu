@@ -9,14 +9,9 @@
 #include <stdlib.h>
 
 #include "cuda_utils.h"
+#include "cutil_math.h"  // required for float3 vector math
 
 
-// input: ray_start (b, m, 3)
-//        ray_dir (b, m, 3)
-//        points (b, n, 3)
-// output: idx (b, m, n_max)
-//         min_d (b, m, n_max)
-//         max_d (b, m, n_max)
 __global__ void ball_intersect_point_kernel(
             int b, int n, int m, float radius,
             int n_max,
@@ -156,6 +151,80 @@ __global__ void aabb_intersect_point_kernel(
   }
 }
 
+
+__device__ float RayTriangleIntersection(
+  const float3 &ori,
+  const float3 &dir,
+	const float3 &v0,
+	const float3 &v1,
+	const float3 &v2) {
+  
+  float3 v0v1 = v1 - v0;
+  float3 v0v2 = v2 - v0;
+  float3 v0O = ori - v0;
+  float3 dir_crs_v0v2 = cross(dir, v0v2);
+  
+  float det = dot(v0v1, dir_crs_v0v2);
+  det = __fdividef(1.0f, det);  // CUDA intrinsic function 
+  
+	float u = dot(v0O, dir_crs_v0v2) * det;
+	if (u < 0.0f || u > 1.0f)
+		return -1.0f;
+
+  float3 v0O_crs_v0v1 = cross(v0O, v0v1);
+	float v = dot(dir, v0O_crs_v0v1) * det;
+	if (v < 0.0f || (u + v) > 1.0f)
+		return -1.0f;
+
+	return dot(v0v2, v0O_crs_v0v1) * det;
+}
+
+
+__global__ void triangle_intersect_point_kernel(
+            int b, int n, int m, float cagesize,
+            int n_max,
+            const float *__restrict__ ray_start,
+            const float *__restrict__ ray_dir,
+            const float *__restrict__ face_points,
+            int *__restrict__ idx,
+            float *__restrict__ min_depth,
+            float *__restrict__ max_depth) {
+  
+  int batch_index = blockIdx.x;
+  face_points += batch_index * n * 9;
+  ray_start += batch_index * m * 3;
+  ray_dir += batch_index * m * 3;
+  idx += batch_index * m * n_max;
+  min_depth += batch_index * m * n_max;
+  max_depth += batch_index * m * n_max;
+    
+  int index = threadIdx.x;
+  int stride = blockDim.x;
+  for (int j = index; j < m; j += stride) {
+    // go over rays
+    for (int l = 0; l < n_max; ++l) {
+      idx[j * n_max + l] = -1;
+    }
+
+    for (int k = 0, cnt = 0; k < n && cnt < n_max; ++k) {
+      // go over triangles
+      float t = RayTriangleIntersection(
+        make_float3(ray_start[j * 3 + 0], ray_start[j * 3 + 1], ray_start[j * 3 + 2]),
+        make_float3(ray_dir[j * 3 + 0], ray_dir[j * 3 + 1], ray_dir[j * 3 + 2]),
+        make_float3(face_points[k * 9 + 0], face_points[k * 9 + 1], face_points[k * 9 + 2]),
+        make_float3(face_points[k * 9 + 3], face_points[k * 9 + 4], face_points[k * 9 + 5]),
+        make_float3(face_points[k * 9 + 6], face_points[k * 9 + 7], face_points[k * 9 + 8]));
+
+      if (t > 0) {
+        idx[j * n_max + cnt] = k;
+        min_depth[j * n_max + cnt] = fmaxf(t - cagesize, 0.);
+        max_depth[j * n_max + cnt] = t + cagesize;
+        cnt++;
+      }
+    }
+  }
+}
+
 void ball_intersect_point_kernel_wrapper(
   int b, int n, int m, float radius, int n_max,
   const float *ray_start, const float *ray_dir, const float *points,
@@ -177,6 +246,19 @@ void aabb_intersect_point_kernel_wrapper(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   aabb_intersect_point_kernel<<<b, opt_n_threads(m), 0, stream>>>(
       b, n, m, voxelsize, n_max, ray_start, ray_dir, points, idx, min_depth, max_depth);
+  
+  CUDA_CHECK_ERRORS();
+}
+
+
+void triangle_intersect_point_kernel_wrapper(
+  int b, int n, int m, float cagesize, int n_max,
+  const float *ray_start, const float *ray_dir, const float *face_points,
+  int *idx, float *min_depth, float *max_depth) {
+  
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  triangle_intersect_point_kernel<<<b, opt_n_threads(m), 0, stream>>>(
+      b, n, m, cagesize, n_max, ray_start, ray_dir, face_points, idx, min_depth, max_depth);
   
   CUDA_CHECK_ERRORS();
 }

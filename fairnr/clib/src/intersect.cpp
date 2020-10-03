@@ -75,6 +75,40 @@ std::tuple< at::Tensor, at::Tensor, at::Tensor > aabb_intersect(at::Tensor ray_s
 }
 
 
+void triangle_intersect_point_kernel_wrapper(
+  int b, int n, int m, float cagesize, int n_max,
+  const float *ray_start, const float *ray_dir, const float *face_points,
+  int *idx, float *min_depth, float *max_depth);
+
+std::tuple< at::Tensor, at::Tensor, at::Tensor > triangle_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor face_points, 
+               const float cagesize, const int n_max){
+  CHECK_CONTIGUOUS(ray_start);
+  CHECK_CONTIGUOUS(ray_dir);
+  CHECK_CONTIGUOUS(face_points);
+  CHECK_IS_FLOAT(ray_start);
+  CHECK_IS_FLOAT(ray_dir);
+  CHECK_IS_FLOAT(face_points);
+  CHECK_CUDA(ray_start);
+  CHECK_CUDA(ray_dir);
+  CHECK_CUDA(face_points);
+
+  at::Tensor idx =
+      torch::zeros({ray_start.size(0), ray_start.size(1), n_max},
+                    at::device(ray_start.device()).dtype(at::ScalarType::Int));
+  at::Tensor min_depth =
+      torch::zeros({ray_start.size(0), ray_start.size(1), n_max},
+                    at::device(ray_start.device()).dtype(at::ScalarType::Float));
+  at::Tensor max_depth =
+      torch::zeros({ray_start.size(0), ray_start.size(1), n_max},
+                    at::device(ray_start.device()).dtype(at::ScalarType::Float));
+  triangle_intersect_point_kernel_wrapper(face_points.size(0), face_points.size(1), ray_start.size(1),
+                                          cagesize, n_max,
+                                          ray_start.data<float>(), ray_dir.data<float>(), face_points.data<float>(),
+                                          idx.data<int>(), min_depth.data<float>(), max_depth.data<float>());
+  return std::make_tuple(idx, min_depth, max_depth);
+}
+
+
 void uniform_ray_sampling_kernel_wrapper(
   int b, int num_rays, int max_hits, int max_steps, float step_size,
   const int *pts_idx, const float *min_depth, const float *max_depth, const float *uniform_noise,

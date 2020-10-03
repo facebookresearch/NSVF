@@ -17,9 +17,13 @@ logger = logging.getLogger(__name__)
 from pathlib import Path
 from fairnr.data.data_utils import load_matrix
 from fairnr.data.geometry import (
-    trilinear_interp, splitting_points, offset_points
+    trilinear_interp, splitting_points, offset_points,
+    get_edge
 )
-from fairnr.clib import aabb_ray_intersect, uniform_ray_sampling
+from fairnr.clib import (
+    aabb_ray_intersect, triangle_ray_intersect,
+    uniform_ray_sampling
+)
 from fairnr.modules.linear import FCBlock, Linear, Embedding
 
 MAX_DEPTH = 10000.0
@@ -189,6 +193,14 @@ class SparseVoxelEncoder(Encoder):
         voxel_point = self.points[self.keep.bool()]
         return voxel_index, voxel_point
 
+    def get_edge(self, ray_start, ray_dir, samples, xyz, *args, **kwargs):
+        outs = get_edge(
+            ray_start + ray_dir * samples[0][:, :1], 
+            xyz.reshape(-1, 3)[samples[1][:, 0].long()], 
+            self.voxel_size).type_as(ray_dir)   # get voxel edges/depth (for visualization)
+        outs = (1 - outs[:, None].expand(outs.size(0), 3)) * 0.7
+        return outs
+
     def ray_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
         S, V, P, _ = ray_dir.size()
         _, H, D = point_feats.size()
@@ -207,7 +219,7 @@ class SparseVoxelEncoder(Encoder):
         pts_idx = pts_idx.gather(-1, sorted_idx)
         hits = pts_idx.ne(-1).any(-1)  # remove all points that completely miss the object
         
-        if S > 1:  # extend the point-index to multiple shapes
+        if S > 1:  # extend the point-index to multiple shapes (just in case)
             pts_idx = (pts_idx + H * torch.arange(S, 
                 device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
                 ).masked_fill_(pts_idx.eq(-1), -1)
@@ -461,6 +473,9 @@ class SharedSparseVoxelEncoder(Encoder):
 
 @register_encoder('triangle_mesh_encoder')
 class TriangleMeshEncoder(SparseVoxelEncoder):
+    """
+    Training on fixed mesh model. Cannot pruning..
+    """
     def __init__(self, args, mesh_path=None, shared_values=None):
         super(SparseVoxelEncoder, self).__init__(args)
         self.mesh_path = mesh_path if mesh_path is not None else args.mesh_path
@@ -468,7 +483,80 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
         
         import open3d as o3d
         mesh = o3d.io.read_triangle_mesh(self.mesh_path)
+        vertices = torch.from_numpy(np.asarray(mesh.vertices, dtype=np.float32))
+        faces = torch.from_numpy(np.asarray(mesh.triangles, dtype=np.long))
+    
+        step_size = args.raymarching_stepsize
+        cage_size = step_size * 10  # truncated space around the triangle surfaces
+        self.register_buffer("cage_size", torch.scalar_tensor(cage_size))
+        self.register_buffer("step_size", torch.scalar_tensor(step_size))
+        self.register_buffer("max_hits", torch.scalar_tensor(args.max_hits))
+
+        self.register_buffer("vertices", vertices)
+        self.register_buffer("faces", faces)
+
+        # set-up other hyperparameters
+        self.embed_dim = getattr(args, "voxel_embed_dim", None)
+        self.deterministic_step = getattr(args, "deterministic_step", False)
+        self.values = None
+
+    def upgrade_state_dict_named(self, state_dict, name):
+        pass
+
+    def precompute(self, id=None, *args, **kwargs):
+        feats, points, values = self.faces, self.vertices, None
+        if id is not None:
+            # extend size to support multi-objects
+            feats  = feats.unsqueeze(0).expand(id.size(0), *feats.size()).contiguous()
+            points = points.unsqueeze(0).expand(id.size(0), *points.size()).contiguous()
+            values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous() if values is not None else None
+            # moving to multiple objects
+            if id.size(0) > 1:
+                feats = feats + points.size(1) * torch.arange(id.size(0), 
+                    device=feats.device, dtype=feats.dtype)[:, None, None]
+        return feats, points, values
+
+    def get_edge(self, ray_start, ray_dir, *args, **kwargs):
+        return torch.ones_like(ray_dir) * 0.7
+
+    @property
+    def voxel_size(self):
+        return self.cage_size
+
+    def ray_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
+        S, V, P, _ = ray_dir.size()
+        F, G = point_feats.size(1), point_xyz.size(1)
+  
+        # ray-voxel intersection
+        ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
+        ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
+        pts_idx, min_depth, max_depth = triangle_ray_intersect(
+            self.cage_size, self.max_hits, point_xyz, point_feats, ray_start, ray_dir)
+
+        # sort the depths
+        min_depth.masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
+        max_depth.masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
+        min_depth, sorted_idx = min_depth.sort(dim=-1)
+        max_depth = max_depth.gather(-1, sorted_idx)
+        pts_idx = pts_idx.gather(-1, sorted_idx)
+        hits = pts_idx.ne(-1).any(-1)  # remove all points that completely miss the object
         
+        if S > 1:  # extend the point-index to multiple shapes (just in case)
+            pts_idx = (pts_idx + G * torch.arange(S, 
+                device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
+                ).masked_fill_(pts_idx.eq(-1), -1)
+        return ray_start, ray_dir, min_depth, max_depth, pts_idx, hits
+
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument('--mesh-path', type=str, help='path for initial mesh file')
+        parser.add_argument('--voxel-embed-dim', type=int, metavar='N', help="embedding size")
+        parser.add_argument('--deterministic-step', action='store_true',
+                            help='if set, the model runs fixed stepsize, instead of sampling one')
+        parser.add_argument('--max-hits', type=int, metavar='N', help='due to restrictions we set a maximum number of hits')
+        parser.add_argument('--raymarching-stepsize', type=float, metavar='D', 
+                            help='ray marching step size for sparse voxels')
+
 
 def bbox2voxels(bbox, voxel_size):
     vox_min, vox_max = bbox[:3], bbox[3:]

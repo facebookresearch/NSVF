@@ -3,6 +3,10 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
+logger = logging.getLogger(__name__)
+
+import torch
 from fairseq.models import (
     register_model,
     register_model_architecture
@@ -17,6 +21,16 @@ class NMFModel(NSVFModel):
     """
     ENCODER = 'triangle_mesh_encoder'
 
+    @torch.no_grad()
+    def prune_voxels(self, *args, **kwargs):
+        pass
+    
+    @torch.no_grad()
+    def split_voxels(self):
+        logger.info("half the global cage size {:.4f} -> {:.4f}".format(
+            self.encoder.case_size.item(), self.encoder.cage_size.item() * .5))
+        self.encoder.splitting()
+        self.encoder.cage_size *= .5
 
 @register_model_architecture("nmf", "nmf_base")
 def base_architecture(args):
@@ -25,13 +39,12 @@ def base_architecture(args):
     args.raymarching_stepsize = getattr(args, "raymarching_stepsize", 0.01)
     
     # encoder default parameter
-    args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 32)
+    args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 0)
     args.voxel_path = getattr(args, "voxel_path", None)
-    args.initial_boundingbox = getattr(args, "initial_boundingbox", None)
 
     # field
-    args.inputs_to_density = getattr(args, "inputs_to_density", "emb:6:32")
-    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, ray:4")
+    args.inputs_to_density = getattr(args, "inputs_to_density", "pos:10")
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:10, ray:4")
     args.feature_embed_dim = getattr(args, "feature_embed_dim", 256)
     args.density_embed_dim = getattr(args, "density_embed_dim", 128)
     args.texture_embed_dim = getattr(args, "texture_embed_dim", 256)
