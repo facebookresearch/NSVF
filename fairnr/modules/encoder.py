@@ -214,21 +214,10 @@ class SparseVoxelEncoder(Encoder):
         return ray_start, ray_dir, min_depth, max_depth, pts_idx, hits
 
     def ray_sample(self, pts_idx, min_depth, max_depth):
-        # ray_sampler = uniform_ray_sampling
-        # from fairseq import pdb; pdb.set_trace()
-        # self.deterministic_step = True
         max_ray_length = (max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(-1)[0] - min_depth.min(-1)[0]).max()
         sampled_idx, sampled_depth, sampled_dists = uniform_ray_sampling(
             pts_idx, min_depth, max_depth, self.step_size, max_ray_length, 
             self.deterministic_step or (not self.training))
-        # sampled_idx1, sampled_depth1, sampled_dists1 = parallel_ray_sampling(
-        #     self.step_size, pts_idx, min_depth, max_depth, 
-        #     self.deterministic_step or (not self.training))
-        # for k in range(sampled_depth.size(0)):
-        #     try:
-        #         print(sampled_depth[k][sampled_idx[k].ne(-1)].eq(sampled_depth1[k][sampled_idx1[k].ne(-1)]).all())
-        #     except RuntimeError:
-        #         from fairseq import pdb; pdb.set_trace()
         sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
         sampled_dists.masked_fill_(sampled_idx.eq(-1), 0.0)
@@ -477,85 +466,4 @@ def bbox2voxels(bbox, voxel_size):
     x, y, z = x * voxel_size + vox_min[0], y * voxel_size + vox_min[1], z * voxel_size + vox_min[2]
     return np.stack([x, y, z]).T.astype('float32')
 
-
-@torch.no_grad()
-def _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
-    # uniform sampling
-    _min_depth = min_depth.min(1)[0]
-    _max_depth = max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(1)[0]
-    max_ray_length = (_max_depth - _min_depth).max()
-    
-    delta = torch.arange(int(max_ray_length / MARCH_SIZE), device=min_depth.device, dtype=min_depth.dtype)
-    delta = delta[None, :].expand(min_depth.size(0), delta.size(-1))
-    if deterministic:
-        delta = delta + 0.5
-    else:
-        delta = delta + delta.clone().uniform_().clamp(min=0.01, max=0.99)
-    delta = delta * MARCH_SIZE
-    sampled_depth = min_depth[:, :1] + delta
-    sampled_idx = (sampled_depth[:, :, None] >= min_depth[:, None, :]).sum(-1) - 1
-    sampled_idx = pts_idx.gather(1, sampled_idx)    
-    
-    # include all boundary points
-    sampled_depth = torch.cat([min_depth, max_depth, sampled_depth], -1)
-    sampled_idx = torch.cat([pts_idx, pts_idx, sampled_idx], -1)
-    
-    # reorder
-    sampled_depth, ordered_index = sampled_depth.sort(-1)
-    sampled_idx = sampled_idx.gather(1, ordered_index)
-    sampled_dists = sampled_depth[:, 1:] - sampled_depth[:, :-1]          # distances
-    sampled_depth = .5 * (sampled_depth[:, 1:] + sampled_depth[:, :-1])   # mid-points
-
-    # remove all invalid depths
-    min_ids = (sampled_depth[:, :, None] >= min_depth[:, None, :]).sum(-1) - 1
-    max_ids = (sampled_depth[:, :, None] >= max_depth[:, None, :]).sum(-1)
-
-    sampled_depth.masked_fill_(
-        (max_ids.ne(min_ids)) |
-        (sampled_depth > _max_depth[:, None]) |
-        (sampled_dists == 0.0)
-        , MAX_DEPTH)
-    sampled_depth, ordered_index = sampled_depth.sort(-1) # sort again
-    sampled_masks = sampled_depth.eq(MAX_DEPTH)
-    num_max_steps = (~sampled_masks).sum(-1).max()
-    
-    sampled_depth = sampled_depth[:, :num_max_steps]
-    sampled_dists = sampled_dists.gather(1, ordered_index).masked_fill_(sampled_masks, 0.0)[:, :num_max_steps]
-    sampled_idx = sampled_idx.gather(1, ordered_index).masked_fill_(sampled_masks, -1)[:, :num_max_steps]
-    
-    return sampled_idx, sampled_depth, sampled_dists
-
-
-@torch.no_grad()
-def parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
-    chunk_size=4096
-    full_size = min_depth.shape[0]
-    if full_size <= chunk_size:
-        return _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=deterministic)
-    
-    outputs = zip(*[
-            _parallel_ray_sampling(
-                MARCH_SIZE, 
-                pts_idx[i:i+chunk_size], min_depth[i:i+chunk_size], max_depth[i:i+chunk_size],
-                deterministic=deterministic) 
-            for i in range(0, full_size, chunk_size)])
-    sampled_idx, sampled_depth, sampled_dists = outputs
-    
-    def padding_points(xs, pad):
-        if len(xs) == 1:
-            return xs[0]
-        
-        maxlen = max([x.size(1) for x in xs])
-        full_size = sum([x.size(0) for x in xs])
-        xt = xs[0].new_ones(full_size, maxlen).fill_(pad)
-        st = 0
-        for i in range(len(xs)):
-            xt[st: st + xs[i].size(0), :xs[i].size(1)] = xs[i]
-            st += xs[i].size(0)
-        return xt
-
-    sampled_idx = padding_points(sampled_idx, -1)
-    sampled_depth = padding_points(sampled_depth, MAX_DEPTH)
-    sampled_dists = padding_points(sampled_dists, 0.0)
-    return sampled_idx, sampled_depth, sampled_dists
 

@@ -29,7 +29,7 @@ python train.py ${DATASET} \
     --max-sentences 1 \
     --view-per-batch 2 \
     --pixel-per-view 2048 \
-    --valid-chunk-size 512 \
+    --valid-chunk-size 256 \
     --no-preload\
     --sampling-on-mask 1.0 --no-sampling-at-reader \
     --valid-view-resolution $RES \
