@@ -18,8 +18,8 @@ from fairseq.models import (
     register_model,
     register_model_architecture
 )
-from fairseq.meters import StopwatchMeter
 
+from fairnr.data.data_utils import Timer
 from fairnr.data.geometry import get_edge, compute_normal_map, fill_in
 from fairnr.models.fairnr_model import BaseModel
 
@@ -35,9 +35,6 @@ class NSVFModel(BaseModel):
     RAYMARCHER = 'volume_rendering'
 
     def _forward(self, ray_start, ray_dir, **kwargs):
-        timer0, timer1 = StopwatchMeter(), StopwatchMeter()
-        timer0.start()
-
         S, V, P, _ = ray_dir.size()
         assert S == 1, "naive NeRF only supports single object."
 
@@ -45,28 +42,27 @@ class NSVFModel(BaseModel):
         feats, xyz, values = self.encoder.precompute(**kwargs)  # feats: (S, B, 8), xyz: (S, B, 3),  values: (S, B', D)
 
         # ray-voxel intersection
-        ray_start, ray_dir, min_depth, max_depth, pts_idx, hits = \
-            self.encoder.ray_intersect(ray_start, ray_dir, xyz, feats)
+        with Timer() as timer0:
+            ray_start, ray_dir, min_depth, max_depth, pts_idx, hits = \
+                self.encoder.ray_intersect(ray_start, ray_dir, xyz, feats)
+            if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
+                uv, size = kwargs['uv'], kwargs['size']
+                mask = hits.reshape(*uv.size()[:2], uv.size(-1))
 
-        if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
-            uv, size = kwargs['uv'], kwargs['size']
-            mask = hits.reshape(*uv.size()[:2], uv.size(-1))
-
-            # sample rays based on voxel intersections
-            sampled_uv, sampled_masks = self.reader.sample_pixels(
-                uv, size, mask=mask, return_mask=True)
-            sampled_masks = sampled_masks.reshape(uv.size(0), -1).bool()
-            
-            hits, sampled_masks = hits[sampled_masks].reshape(S, -1), sampled_masks.unsqueeze(-1)
-            ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, ray_start.size(-1))
-            ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, ray_dir.size(-1))
-            min_depth = min_depth[sampled_masks.expand_as(min_depth)].reshape(S, -1, min_depth.size(-1))
-            max_depth = max_depth[sampled_masks.expand_as(max_depth)].reshape(S, -1, max_depth.size(-1))
-            pts_idx = pts_idx[sampled_masks.expand_as(pts_idx)].reshape(S, -1, pts_idx.size(-1))  
-            P = hits.size(-1) // V   # the number of pixels per image
-
-        else:
-            sampled_uv = None
+                # sample rays based on voxel intersections
+                sampled_uv, sampled_masks = self.reader.sample_pixels(
+                    uv, size, mask=mask, return_mask=True)
+                sampled_masks = sampled_masks.reshape(uv.size(0), -1).bool()
+                
+                hits, sampled_masks = hits[sampled_masks].reshape(S, -1), sampled_masks.unsqueeze(-1)
+                ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, ray_start.size(-1))
+                ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, ray_dir.size(-1))
+                min_depth = min_depth[sampled_masks.expand_as(min_depth)].reshape(S, -1, min_depth.size(-1))
+                max_depth = max_depth[sampled_masks.expand_as(max_depth)].reshape(S, -1, max_depth.size(-1))
+                pts_idx = pts_idx[sampled_masks.expand_as(pts_idx)].reshape(S, -1, pts_idx.size(-1))  
+                P = hits.size(-1) // V   # the number of pixels per image
+            else:
+                sampled_uv = None
 
         # neural ray-marching
         fullsize = S * V * P
@@ -80,26 +76,24 @@ class NSVFModel(BaseModel):
             pts_idx, min_depth, max_depth = pts_idx[hits], min_depth[hits], max_depth[hits]
             
             # sample evalution points along the ray
-            samples = self.encoder.ray_sample(pts_idx, min_depth, max_depth)
+            with Timer() as timer1:
+                samples = self.encoder.ray_sample(pts_idx, min_depth, max_depth)
             
             # volume rendering
-            timer1.start()
-            encoder_states = (
-                feats.reshape(-1, 8), 
-                xyz.reshape(-1, 3), 
-                values.reshape(-1, values.size(-1)) if values is not None else None)
-            
-            all_results = self.raymarcher(
-                self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
-            
-            all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
-            all_results['voxel_edges'] = get_edge(
-                ray_start + ray_dir * samples[0][:, :1], 
-                xyz.reshape(-1, 3)[samples[1][:, 0].long()], 
-                self.encoder.voxel_size).type_as(all_results['depths'])   # get voxel edges/depth (for visualization)
-            all_results['voxel_edges'] = (1 - all_results['voxel_edges'][:, None].expand(all_results['voxel_edges'].size(0), 3)) * 0.7
-            all_results['voxel_depth'] = samples[0][:, 0]
-            timer1.stop()
+            with Timer() as timer2:
+                encoder_states = (
+                    feats.reshape(-1, 8), 
+                    xyz.reshape(-1, 3), 
+                    values.reshape(-1, values.size(-1)) if values is not None else None)
+                all_results = self.raymarcher(
+                    self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
+                all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
+                all_results['voxel_edges'] = get_edge(
+                    ray_start + ray_dir * samples[0][:, :1], 
+                    xyz.reshape(-1, 3)[samples[1][:, 0].long()], 
+                    self.encoder.voxel_size).type_as(all_results['depths'])   # get voxel edges/depth (for visualization)
+                all_results['voxel_edges'] = (1 - all_results['voxel_edges'][:, None].expand(all_results['voxel_edges'].size(0), 3)) * 0.7
+                all_results['voxel_depth'] = samples[0][:, 0]
 
         # fill out the full size
         hits = hits.reshape(fullsize)
@@ -120,6 +114,7 @@ class NSVFModel(BaseModel):
                 'stps_log': self.encoder.step_size.item(),
                 't0_log': timer0.sum,
                 't1_log': timer1.sum,
+                't2_log': timer2.sum,
                 'asf_log': (all_results['ae'].float() / fullsize).item(),
                 'ash_log': (all_results['ae'].float() / hits.sum()).item(),
                 'nvox_log': xyz.size(1)

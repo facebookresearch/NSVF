@@ -98,7 +98,7 @@ std::tuple< at::Tensor, at::Tensor, at::Tensor> uniform_ray_sampling(
   CHECK_CUDA(uniform_noise);
 
   at::Tensor sampled_idx =
-      torch::zeros({pts_idx.size(0), pts_idx.size(1), max_steps},
+      -torch::ones({pts_idx.size(0), pts_idx.size(1), max_steps},
                     at::device(pts_idx.device()).dtype(at::ScalarType::Int));
   at::Tensor sampled_depth =
       torch::zeros({min_depth.size(0), min_depth.size(1), max_steps},

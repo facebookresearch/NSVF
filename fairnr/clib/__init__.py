@@ -129,29 +129,48 @@ aabb_ray_intersect = AABBRayIntersect.apply
 
 class UniformRaySampling(Function):
     @staticmethod
-    def forward(ctx, step_size, pts_idx, min_depth, max_depth, deterministic=False):
-        max_steps = int(((max_depth - min_depth).sum(-1) / step_size).ceil_().max())
-        pts_idx, min_depth, max_depth = \
-            pts_idx.unsqueeze(0), min_depth.unsqueeze(0), max_depth.unsqueeze(0)
-        
+    def forward(ctx, pts_idx, min_depth, max_depth, step_size, max_ray_length, deterministic=False):
+        G, N, P = 256, pts_idx.size(0), pts_idx.size(1)
+        H = int(np.ceil(N / G)) * G
+        if H > N:
+            pts_idx = torch.cat([pts_idx, pts_idx[:H-N]], 0)
+            min_depth = torch.cat([min_depth, min_depth[:H-N]], 0)
+            max_depth = torch.cat([max_depth, max_depth[:H-N]], 0)
+        pts_idx = pts_idx.reshape(G, -1, P)
+        min_depth = min_depth.reshape(G, -1, P)
+        max_depth = max_depth.reshape(G, -1, P)
+
+        # pre-generate noise
+        max_steps = int(max_ray_length / step_size)
+        max_steps = max_steps + min_depth.size(-1) * 2
         noise = min_depth.new_zeros(*min_depth.size()[:-1], max_steps)
         if deterministic:
             noise += 0.5
         else:
             noise = noise.uniform_()
-
+        
+        # call cuda function
         sampled_idx, sampled_depth, sampled_dists = _ext.uniform_ray_sampling(
             pts_idx, min_depth.float(), max_depth.float(), noise.float(), step_size, max_steps)
         sampled_depth = sampled_depth.type_as(min_depth)
         sampled_dists = sampled_dists.type_as(min_depth)
         
-        sampled_idx, sampled_depth, sampled_dists = \
-            sampled_idx.squeeze(0), sampled_depth.squeeze(0), sampled_dists.squeeze(0)
+        sampled_idx = sampled_idx.reshape(H, -1)
+        sampled_depth = sampled_depth.reshape(H, -1)
+        sampled_dists = sampled_dists.reshape(H, -1)
+        if H > N:
+            sampled_idx = sampled_idx[: N]
+            sampled_depth = sampled_depth[: N]
+            sampled_dists = sampled_dists[: N]
         
+        max_len = sampled_idx.ne(-1).sum(-1).max()
+        sampled_idx = sampled_idx[:, :max_len]
+        sampled_depth = sampled_depth[:, :max_len]
+        sampled_dists = sampled_dists[:, :max_len]
+
         ctx.mark_non_differentiable(sampled_idx)
         ctx.mark_non_differentiable(sampled_depth)
         ctx.mark_non_differentiable(sampled_dists)
-
         return sampled_idx, sampled_depth, sampled_dists
 
     @staticmethod
@@ -159,3 +178,87 @@ class UniformRaySampling(Function):
         return None, None, None, None, None, None
 
 uniform_ray_sampling = UniformRaySampling.apply
+
+
+# back-up for ray point sampling
+@torch.no_grad()
+def _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
+    # uniform sampling
+    _min_depth = min_depth.min(1)[0]
+    _max_depth = max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(1)[0]
+    max_ray_length = (_max_depth - _min_depth).max()
+    
+    delta = torch.arange(int(max_ray_length / MARCH_SIZE), device=min_depth.device, dtype=min_depth.dtype)
+    delta = delta[None, :].expand(min_depth.size(0), delta.size(-1))
+    if deterministic:
+        delta = delta + 0.5
+    else:
+        delta = delta + delta.clone().uniform_().clamp(min=0.01, max=0.99)
+    delta = delta * MARCH_SIZE
+    sampled_depth = min_depth[:, :1] + delta
+    sampled_idx = (sampled_depth[:, :, None] >= min_depth[:, None, :]).sum(-1) - 1
+    sampled_idx = pts_idx.gather(1, sampled_idx)    
+    
+    # include all boundary points
+    sampled_depth = torch.cat([min_depth, max_depth, sampled_depth], -1)
+    sampled_idx = torch.cat([pts_idx, pts_idx, sampled_idx], -1)
+    
+    # reorder
+    sampled_depth, ordered_index = sampled_depth.sort(-1)
+    sampled_idx = sampled_idx.gather(1, ordered_index)
+    sampled_dists = sampled_depth[:, 1:] - sampled_depth[:, :-1]          # distances
+    sampled_depth = .5 * (sampled_depth[:, 1:] + sampled_depth[:, :-1])   # mid-points
+
+    # remove all invalid depths
+    min_ids = (sampled_depth[:, :, None] >= min_depth[:, None, :]).sum(-1) - 1
+    max_ids = (sampled_depth[:, :, None] >= max_depth[:, None, :]).sum(-1)
+
+    sampled_depth.masked_fill_(
+        (max_ids.ne(min_ids)) |
+        (sampled_depth > _max_depth[:, None]) |
+        (sampled_dists == 0.0)
+        , MAX_DEPTH)
+    sampled_depth, ordered_index = sampled_depth.sort(-1) # sort again
+    sampled_masks = sampled_depth.eq(MAX_DEPTH)
+    num_max_steps = (~sampled_masks).sum(-1).max()
+    
+    sampled_depth = sampled_depth[:, :num_max_steps]
+    sampled_dists = sampled_dists.gather(1, ordered_index).masked_fill_(sampled_masks, 0.0)[:, :num_max_steps]
+    sampled_idx = sampled_idx.gather(1, ordered_index).masked_fill_(sampled_masks, -1)[:, :num_max_steps]
+    
+    return sampled_idx, sampled_depth, sampled_dists
+
+
+@torch.no_grad()
+def parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
+    chunk_size=4096
+    full_size = min_depth.shape[0]
+    if full_size <= chunk_size:
+        return _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=deterministic)
+    
+    outputs = zip(*[
+            _parallel_ray_sampling(
+                MARCH_SIZE, 
+                pts_idx[i:i+chunk_size], min_depth[i:i+chunk_size], max_depth[i:i+chunk_size],
+                deterministic=deterministic) 
+            for i in range(0, full_size, chunk_size)])
+    sampled_idx, sampled_depth, sampled_dists = outputs
+    
+    def padding_points(xs, pad):
+        if len(xs) == 1:
+            return xs[0]
+        
+        maxlen = max([x.size(1) for x in xs])
+        full_size = sum([x.size(0) for x in xs])
+        xt = xs[0].new_ones(full_size, maxlen).fill_(pad)
+        st = 0
+        for i in range(len(xs)):
+            xt[st: st + xs[i].size(0), :xs[i].size(1)] = xs[i]
+            st += xs[i].size(0)
+        return xt
+
+    sampled_idx = padding_points(sampled_idx, -1)
+    sampled_depth = padding_points(sampled_depth, MAX_DEPTH)
+    sampled_dists = padding_points(sampled_dists, 0.0)
+    return sampled_idx, sampled_depth, sampled_dists
+

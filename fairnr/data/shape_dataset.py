@@ -388,7 +388,7 @@ class ShapeViewStreamDataset(ShapeViewDataset):
             return copy.deepcopy(self.cache[shape_id % self.total_num_shape][0]), \
                    copy.deepcopy(self.cache[shape_id % self.total_num_shape][1]), \
                   [copy.deepcopy(self.cache[shape_id % self.total_num_shape][2][view_id])]
-        return self._load_batch(self.data, shape_id, view_id)
+        return self._load_batch(self.data, shape_id, [view_id])
 
     def _load_binary(self, id, views, phase='train'):
         root = os.path.dirname(self.data[id]['ixt'])

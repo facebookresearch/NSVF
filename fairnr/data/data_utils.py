@@ -17,7 +17,7 @@ import skimage.metrics
 import pandas as pd
 import pylab as plt
 import fairseq.distributed_utils as du
-
+from fairseq.meters import StopwatchMeter
 
 def get_rank():    
     try:
@@ -316,3 +316,14 @@ class InfIndex(object):
 
     def __len__(self):
         return self.size
+
+
+class Timer(StopwatchMeter):
+    def __enter__(self):
+        """Start a new timer as a context manager"""
+        self.start()
+        return self
+
+    def __exit__(self, *exc_info):
+        """Stop the context manager timer"""
+        self.stop()
