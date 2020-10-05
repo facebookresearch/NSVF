@@ -223,9 +223,9 @@ class SparseVoxelEncoder(Encoder):
             pts_idx = (pts_idx + H * torch.arange(S, 
                 device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
                 ).masked_fill_(pts_idx.eq(-1), -1)
-        return ray_start, ray_dir, min_depth, max_depth, pts_idx, hits
+        return ray_start, ray_dir, (min_depth, max_depth, pts_idx), hits
 
-    def ray_sample(self, pts_idx, min_depth, max_depth):
+    def ray_sample(self, min_depth, max_depth, pts_idx):
         max_ray_length = (max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(-1)[0] - min_depth.min(-1)[0]).max()
         sampled_idx, sampled_depth, sampled_dists = uniform_ray_sampling(
             pts_idx, min_depth, max_depth, self.step_size, max_ray_length, 
@@ -499,6 +499,7 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
         self.embed_dim = getattr(args, "voxel_embed_dim", None)
         self.deterministic_step = getattr(args, "deterministic_step", False)
         self.values = None
+        self.blur_ratio = getattr(args, "blur_ratio", 0.0)
 
     def upgrade_state_dict_named(self, state_dict, name):
         pass
@@ -530,22 +531,28 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
         # ray-voxel intersection
         ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
         ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
-        pts_idx, min_depth, max_depth = triangle_ray_intersect(
-            self.cage_size, self.max_hits, point_xyz, point_feats, ray_start, ray_dir)
-
-        # sort the depths
-        min_depth.masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
-        max_depth.masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
-        min_depth, sorted_idx = min_depth.sort(dim=-1)
-        max_depth = max_depth.gather(-1, sorted_idx)
-        pts_idx = pts_idx.gather(-1, sorted_idx)
+        pts_idx, depth, uv = triangle_ray_intersect(
+            self.cage_size, self.blur_ratio, self.max_hits, point_xyz, point_feats, ray_start, ray_dir)
+        min_depth = (depth[:,:,:,0] + depth[:,:,:,1]).masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
+        max_depth = (depth[:,:,:,0] + depth[:,:,:,2]).masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
         hits = pts_idx.ne(-1).any(-1)  # remove all points that completely miss the object
         
         if S > 1:  # extend the point-index to multiple shapes (just in case)
             pts_idx = (pts_idx + G * torch.arange(S, 
                 device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
                 ).masked_fill_(pts_idx.eq(-1), -1)
-        return ray_start, ray_dir, min_depth, max_depth, pts_idx, hits
+        return ray_start, ray_dir, (min_depth, max_depth, pts_idx, uv), hits
+
+    def ray_sample(self, min_depth, max_depth, pts_idx, uv):
+        sampled_depth, sampled_idx, sampled_dists = super().ray_sample(min_depth, max_depth, pts_idx)
+        sampled_idx, uv = sampled_idx.long(), uv.reshape(*pts_idx.size(), 2)
+        sampled_uv = uv.gather(1, 
+            torch.cat([
+                sampled_idx.new_zeros(pts_idx.size(0), 1), 
+                sampled_idx[:,1:].ne(sampled_idx[:,:-1]).cumsum(-1)], -1
+                ).unsqueeze(-1).expand(*sampled_idx.size(), 2)
+            )
+        from fairseq import pdb; pdb.set_trace()
 
     @staticmethod
     def add_args(parser):
@@ -556,6 +563,8 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
         parser.add_argument('--max-hits', type=int, metavar='N', help='due to restrictions we set a maximum number of hits')
         parser.add_argument('--raymarching-stepsize', type=float, metavar='D', 
                             help='ray marching step size for sparse voxels')
+        parser.add_argument('--blur-ratio', type=float, default=0,
+                            help="it is possible to shoot outside the triangle. default=0")
 
 
 def bbox2voxels(bbox, voxel_size):

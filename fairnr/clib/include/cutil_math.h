@@ -52,6 +52,7 @@ inline float rsqrtf(float x)
 {
     return 1.0f / sqrtf(x);
 }
+
 #endif
 
 // float functions
@@ -68,6 +69,21 @@ inline __device__ __host__ float clamp(float f, float a, float b)
 {
     return fmaxf(a, fminf(f, b));
 }
+
+inline __device__ __host__ void swap(float &a, float &b)
+{
+    float c = a;
+    a = b;
+    b = c;
+}
+
+inline __device__ __host__ void swap(int &a, int &b)
+{
+    float c = a;
+    a = b;
+    b = c;
+}
+
 
 // int2 functions
 ////////////////////////////////////////////////////////////////////////////////
@@ -766,5 +782,7 @@ inline __device__ __host__ uint3 clamp(uint3 v, uint3 a, uint3 b)
 {
     return make_uint3(clamp(v.x, a.x, b.x), clamp(v.y, a.y, b.y), clamp(v.z, a.z, b.z));
 }
+
+
 
 #endif

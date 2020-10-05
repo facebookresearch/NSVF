@@ -130,7 +130,7 @@ aabb_ray_intersect = AABBRayIntersect.apply
 
 class TriangleRayIntersect(Function):
     @staticmethod
-    def forward(ctx, cagesize, n_max, points, faces, ray_start, ray_dir):
+    def forward(ctx, cagesize, blur_ratio, n_max, points, faces, ray_start, ray_dir):
         # HACK: speed-up ray-voxel intersection by batching...
         G = 2048
         S, N = ray_start.shape[:2]
@@ -143,23 +143,23 @@ class TriangleRayIntersect(Function):
         ray_dir = ray_dir.reshape(S * G, K, 3)
         face_points = F.embedding(faces.reshape(-1, 3), points.reshape(-1, 3))
         face_points = face_points.unsqueeze(0).expand(S * G, *face_points.size()).contiguous()
-        inds, min_depth, max_depth = _ext.triangle_intersect(
-            ray_start.float(), ray_dir.float(), face_points.float(), cagesize, n_max)
-        min_depth = min_depth.type_as(ray_start)
-        max_depth = max_depth.type_as(ray_start)
+        inds, depth, uv = _ext.triangle_intersect(
+            ray_start.float(), ray_dir.float(), face_points.float(), cagesize, blur_ratio, n_max)
+        depth = depth.type_as(ray_start)
+        uv = uv.type_as(ray_start)
         
         inds = inds.reshape(S, H, -1)
-        min_depth = min_depth.reshape(S, H, -1)
-        max_depth = max_depth.reshape(S, H, -1)
+        depth = depth.reshape(S, H, -1, 3)
+        uv = uv.reshape(S, H, -1)
         if H > N:
             inds = inds[:, :N]
-            min_depth = min_depth[:, :N]
-            max_depth = max_depth[:, :N]
+            depth = depth[:, :N]
+            uv = uv[:, :N]
         
         ctx.mark_non_differentiable(inds)
-        ctx.mark_non_differentiable(min_depth)
-        ctx.mark_non_differentiable(max_depth)
-        return inds, min_depth, max_depth
+        ctx.mark_non_differentiable(depth)
+        ctx.mark_non_differentiable(uv)
+        return inds, depth, uv
 
     @staticmethod
     def backward(ctx, a, b, c):

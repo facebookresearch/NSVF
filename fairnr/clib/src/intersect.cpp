@@ -35,8 +35,8 @@ std::tuple< at::Tensor, at::Tensor, at::Tensor > ball_intersect(at::Tensor ray_s
                     at::device(ray_start.device()).dtype(at::ScalarType::Float));
   ball_intersect_point_kernel_wrapper(points.size(0), points.size(1), ray_start.size(1),
                                       radius, n_max,
-                                      ray_start.data<float>(), ray_dir.data<float>(), points.data<float>(),
-                                      idx.data<int>(), min_depth.data<float>(), max_depth.data<float>());
+                                      ray_start.data_ptr <float>(), ray_dir.data_ptr <float>(), points.data_ptr <float>(),
+                                      idx.data_ptr <int>(), min_depth.data_ptr <float>(), max_depth.data_ptr <float>());
   return std::make_tuple(idx, min_depth, max_depth);
 }
 
@@ -69,19 +69,19 @@ std::tuple< at::Tensor, at::Tensor, at::Tensor > aabb_intersect(at::Tensor ray_s
                     at::device(ray_start.device()).dtype(at::ScalarType::Float));
   aabb_intersect_point_kernel_wrapper(points.size(0), points.size(1), ray_start.size(1),
                                       voxelsize, n_max,
-                                      ray_start.data<float>(), ray_dir.data<float>(), points.data<float>(),
-                                      idx.data<int>(), min_depth.data<float>(), max_depth.data<float>());
+                                      ray_start.data_ptr <float>(), ray_dir.data_ptr <float>(), points.data_ptr <float>(),
+                                      idx.data_ptr <int>(), min_depth.data_ptr <float>(), max_depth.data_ptr <float>());
   return std::make_tuple(idx, min_depth, max_depth);
 }
 
 
 void triangle_intersect_point_kernel_wrapper(
-  int b, int n, int m, float cagesize, int n_max,
+  int b, int n, int m, float cagesize, float blur, int n_max,
   const float *ray_start, const float *ray_dir, const float *face_points,
-  int *idx, float *min_depth, float *max_depth);
+  int *idx, float *depth, float *uv);
 
 std::tuple< at::Tensor, at::Tensor, at::Tensor > triangle_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor face_points, 
-               const float cagesize, const int n_max){
+               const float cagesize, const float blur, const int n_max){
   CHECK_CONTIGUOUS(ray_start);
   CHECK_CONTIGUOUS(ray_dir);
   CHECK_CONTIGUOUS(face_points);
@@ -95,17 +95,17 @@ std::tuple< at::Tensor, at::Tensor, at::Tensor > triangle_intersect(at::Tensor r
   at::Tensor idx =
       torch::zeros({ray_start.size(0), ray_start.size(1), n_max},
                     at::device(ray_start.device()).dtype(at::ScalarType::Int));
-  at::Tensor min_depth =
-      torch::zeros({ray_start.size(0), ray_start.size(1), n_max},
+  at::Tensor depth =
+      torch::zeros({ray_start.size(0), ray_start.size(1), n_max * 3},
                     at::device(ray_start.device()).dtype(at::ScalarType::Float));
-  at::Tensor max_depth =
-      torch::zeros({ray_start.size(0), ray_start.size(1), n_max},
+  at::Tensor uv =
+      torch::zeros({ray_start.size(0), ray_start.size(1), n_max * 2},
                     at::device(ray_start.device()).dtype(at::ScalarType::Float));
   triangle_intersect_point_kernel_wrapper(face_points.size(0), face_points.size(1), ray_start.size(1),
-                                          cagesize, n_max,
-                                          ray_start.data<float>(), ray_dir.data<float>(), face_points.data<float>(),
-                                          idx.data<int>(), min_depth.data<float>(), max_depth.data<float>());
-  return std::make_tuple(idx, min_depth, max_depth);
+                                          cagesize, blur, n_max,
+                                          ray_start.data_ptr <float>(), ray_dir.data_ptr <float>(), face_points.data_ptr <float>(),
+                                          idx.data_ptr <int>(), depth.data_ptr <float>(), uv.data_ptr <float>());
+  return std::make_tuple(idx, depth, uv);
 }
 
 
@@ -142,8 +142,8 @@ std::tuple< at::Tensor, at::Tensor, at::Tensor> uniform_ray_sampling(
                     at::device(min_depth.device()).dtype(at::ScalarType::Float));
   uniform_ray_sampling_kernel_wrapper(min_depth.size(0), min_depth.size(1), min_depth.size(2), sampled_depth.size(2),
                                       step_size,
-                                      pts_idx.data<int>(), min_depth.data<float>(), max_depth.data<float>(),
-                                      uniform_noise.data<float>(), sampled_idx.data<int>(), 
-                                      sampled_depth.data<float>(), sampled_dists.data<float>());
+                                      pts_idx.data_ptr <int>(), min_depth.data_ptr <float>(), max_depth.data_ptr <float>(),
+                                      uniform_noise.data_ptr <float>(), sampled_idx.data_ptr <int>(), 
+                                      sampled_depth.data_ptr <float>(), sampled_dists.data_ptr <float>());
   return std::make_tuple(sampled_idx, sampled_depth, sampled_dists);
 }

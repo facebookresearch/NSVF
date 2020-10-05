@@ -40,12 +40,12 @@ class NSVFModel(BaseModel):
 
         # voxel encoder (precompute for each voxel if needed)
         feats, xyz, values = self.encoder.precompute(**kwargs)  # feats: (S, B, 8), xyz: (S, B, 3),  values: (S, B', D)
-        
+
         # ray-voxel intersection
         with Timer() as timer0:
-            ray_start, ray_dir, min_depth, max_depth, pts_idx, hits = \
+            ray_start, ray_dir, intersection_outputs, hits = \
                 self.encoder.ray_intersect(ray_start, ray_dir, xyz, feats)
-
+            
             if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
                 uv, size = kwargs['uv'], kwargs['size']
                 mask = hits.reshape(*uv.size()[:2], uv.size(-1))
@@ -54,13 +54,11 @@ class NSVFModel(BaseModel):
                 sampled_uv, sampled_masks = self.reader.sample_pixels(
                     uv, size, mask=mask, return_mask=True)
                 sampled_masks = sampled_masks.reshape(uv.size(0), -1).bool()
-                
                 hits, sampled_masks = hits[sampled_masks].reshape(S, -1), sampled_masks.unsqueeze(-1)
-                ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, ray_start.size(-1))
-                ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, ray_dir.size(-1))
-                min_depth = min_depth[sampled_masks.expand_as(min_depth)].reshape(S, -1, min_depth.size(-1))
-                max_depth = max_depth[sampled_masks.expand_as(max_depth)].reshape(S, -1, max_depth.size(-1))
-                pts_idx = pts_idx[sampled_masks.expand_as(pts_idx)].reshape(S, -1, pts_idx.size(-1))  
+                intersection_outputs = tuple([outs[sampled_masks.expand_as(outs)].reshape(S, -1, outs.size(-1)) 
+                    for outs in intersection_outputs])
+                ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, 3)
+                ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, 3)
                 P = hits.size(-1) // V   # the number of pixels per image
             else:
                 sampled_uv = None
@@ -73,12 +71,12 @@ class NSVFModel(BaseModel):
         
         all_results = defaultdict(lambda: None)
         if hits.sum() > 0:  # check if ray missed everything
+            intersection_outputs = tuple([outs[hits] for outs in intersection_outputs])
             ray_start, ray_dir = ray_start[hits], ray_dir[hits]
-            pts_idx, min_depth, max_depth = pts_idx[hits], min_depth[hits], max_depth[hits]
             
             # sample evalution points along the ray
             with Timer() as timer1:
-                samples = self.encoder.ray_sample(pts_idx, min_depth, max_depth)
+                samples = self.encoder.ray_sample(*intersection_outputs)
             
             # volume rendering
             with Timer() as timer2:

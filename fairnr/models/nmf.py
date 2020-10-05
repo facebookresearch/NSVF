@@ -28,9 +28,9 @@ class NMFModel(NSVFModel):
     @torch.no_grad()
     def split_voxels(self):
         logger.info("half the global cage size {:.4f} -> {:.4f}".format(
-            self.encoder.case_size.item(), self.encoder.cage_size.item() * .5))
-        self.encoder.splitting()
+            self.encoder.cage_size.item(), self.encoder.cage_size.item() * .5))
         self.encoder.cage_size *= .5
+
 
 @register_model_architecture("nmf", "nmf_base")
 def base_architecture(args):
