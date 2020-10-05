@@ -8,7 +8,7 @@ MODEL_PATH=$SAVE/$ARCH/checkpoint_last.pt
 
 # additional rendering args
 MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f}'
-MODELARGS=$(printf "$MODELTEMP" 1024 0.0)
+MODELARGS=$(printf "$MODELTEMP" 128 0.0)
 
 python render.py ${DATASET} \
     --user-dir fairnr \

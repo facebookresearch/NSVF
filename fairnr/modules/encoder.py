@@ -238,15 +238,15 @@ class SparseVoxelEncoder(Encoder):
     @torch.enable_grad()
     def forward(self, samples, encoder_states):
         point_feats, point_xyz, values = encoder_states
-        sampled_xyz, sampled_idx = samples
+        _, sampled_idx, _, sampled_xyz, sampled_dir = samples
         sampled_idx = sampled_idx.long()
-        sampled_xyz = sampled_xyz.requires_grad_(True)
-        inputs = {'pos': sampled_xyz}
+        sampled_xyz = sampled_xyz.requires_grad_(True)   
+        inputs = {'pos': sampled_xyz, 'ray': sampled_dir}
+        
         if values is not None:
             # resample point features
-            point_xyz = point_xyz.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), 3))
-            point_feats = point_feats.gather(0, sampled_idx.unsqueeze(1).expand(sampled_idx.size(0), point_feats.size(-1)))
-            point_feats = F.embedding(point_feats, values).view(point_feats.size(0), -1)
+            point_xyz = F.embedding(sampled_idx, point_xyz)
+            point_feats = F.embedding(F.embedding(sampled_idx, point_feats), values).view(point_xyz.size(0), -1)
 
             # tri-linear interpolation
             p = ((sampled_xyz - point_xyz) / self.voxel_size + .5).unsqueeze(1)
@@ -492,8 +492,8 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
         self.register_buffer("step_size", torch.scalar_tensor(step_size))
         self.register_buffer("max_hits", torch.scalar_tensor(args.max_hits))
 
-        self.register_buffer("vertices", vertices)
-        self.register_buffer("faces", faces)
+        self.vertices = nn.Parameter(vertices, requires_grad=True)
+        self.faces = nn.Parameter(faces, requires_grad=False)
 
         # set-up other hyperparameters
         self.embed_dim = getattr(args, "voxel_embed_dim", None)
@@ -552,7 +552,26 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
                 sampled_idx[:,1:].ne(sampled_idx[:,:-1]).cumsum(-1)], -1
                 ).unsqueeze(-1).expand(*sampled_idx.size(), 2)
             )
-        from fairseq import pdb; pdb.set_trace()
+        sampled_u, sampled_v = sampled_uv[:,:,0], sampled_uv[:,:,1]
+        return sampled_depth, sampled_idx, sampled_dists, sampled_u, sampled_v
+
+    @torch.enable_grad()
+    def forward(self, samples, encoder_states):
+        point_feats, point_xyz, values = encoder_states
+        _, sampled_idx, _, sampled_u, sampled_v, sampled_xyz, sampled_dir = samples
+        assert values is None, "for now did not support embeddings"
+        
+        sampled_idx = sampled_idx.long()
+        sampled_triangle_xyz = F.embedding(F.embedding(sampled_idx, point_feats), point_xyz)
+        sampled_intersection = sampled_triangle_xyz[:, 0, :] * (1 - sampled_u - sampled_v)[:, None] + \
+                               sampled_triangle_xyz[:, 1, :] * sampled_u[:, None] + \
+                               sampled_triangle_xyz[:, 2, :] * sampled_v[:, None]
+        sampled_xyz = (sampled_xyz - sampled_intersection).detach() + sampled_intersection
+        if not sampled_xyz.requires_grad:
+            sampled_xyz.requires_grad_()
+
+        inputs = {'pos': sampled_xyz, 'ray': sampled_dir}
+        return inputs
 
     @staticmethod
     def add_args(parser):

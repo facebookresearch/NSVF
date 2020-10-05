@@ -78,27 +78,22 @@ class VolumeRenderer(Renderer):
         """
         chunks: set > 1 if out-of-memory. it can save some memory by time.
         """
-        sampled_depth, sampled_idx, sampled_dists = samples
+        sampled_depth, sampled_idx, sampled_dists = samples[:3]
         sampled_idx = sampled_idx.long()
-        sampled_size = sampled_depth.size(0)
         
         # only compute when the ray hits
         sample_mask = sampled_idx.ne(-1)
         if early_stop is not None:
             sample_mask = sample_mask & (~early_stop.unsqueeze(-1))
-        
         if sample_mask.sum() == 0:  # miss everything skip
             return None, 0
-        
-        queries = ray(ray_start.unsqueeze(1), ray_dir.unsqueeze(1), sampled_depth.unsqueeze(2))
-        queries = queries[sample_mask]
-        querie_dirs = ray_dir.unsqueeze(1).expand(*sampled_depth.size(), ray_dir.size()[-1])[sample_mask]
-        sampled_idx = sampled_idx[sample_mask]
-        sampled_dists = sampled_dists[sample_mask]
+
+        sampled_xyz = ray(ray_start.unsqueeze(1), ray_dir.unsqueeze(1), sampled_depth.unsqueeze(2))
+        sampled_dir = ray_dir.unsqueeze(1).expand(*sampled_depth.size(), ray_dir.size()[-1])
+        samples = [s[sample_mask] for s in samples + [sampled_xyz, sampled_dir]]
        
         # get encoder features as inputs
-        field_inputs = input_fn((queries, sampled_idx), encoder_states)
-        field_inputs['ray'] = querie_dirs
+        field_inputs = input_fn(samples, encoder_states)
         
         # forward implicit fields
         field_outputs = field_fn(field_inputs, outputs=output_types)
@@ -113,8 +108,8 @@ class VolumeRenderer(Renderer):
         
         # post processing
         if 'sigma' in field_outputs:
-            sigma = field_outputs['sigma']
-            noise = 0 if not self.discrete_reg and (not self.training)  else torch.zeros_like(sigma).normal_()  
+            sigma, sampled_dists= field_outputs['sigma'], samples[2]
+            noise = 0 if not self.discrete_reg and (not self.training) else torch.zeros_like(sigma).normal_()  
             free_energy = torch.relu(noise + sigma) * sampled_dists    
             # (optional) free_energy = (F.elu(sigma - 3, alpha=1) + 1) * dists
             outputs['free_energy'] = masked_scatter(sample_mask, free_energy)
@@ -128,7 +123,7 @@ class VolumeRenderer(Renderer):
         self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states,
         gt_depths=None, output_types=['sigma', 'texture'], global_weights=None,
         ):
-        sampled_depth, sampled_idx, sampled_dists = samples
+        sampled_depth, sampled_idx = samples[:2]  # do not change
         tolerance = self.raymarching_tolerance
         chunk_size = self.chunk_size if self.training else self.valid_chunk_size
         early_stop = None
@@ -144,10 +139,8 @@ class VolumeRenderer(Renderer):
             if ((i == hits.size(1)) or (size_so_far + hits[:, i].sum() > chunk_size)) and (i > start_step):
                 _outputs, _evals = self.forward_once(
                         input_fn, field_fn, 
-                        ray_start, ray_dir, (
-                        sampled_depth[:, start_step: i], 
-                        sampled_idx[:, start_step: i], 
-                        sampled_dists[:, start_step: i]), 
+                        ray_start, ray_dir, 
+                        [s[:, start_step: i] for s in samples],
                         encoder_states, 
                         early_stop=early_stop,
                         output_types=output_types)
