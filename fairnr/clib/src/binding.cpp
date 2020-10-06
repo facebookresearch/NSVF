@@ -4,6 +4,8 @@
 // LICENSE file in the root directory of this source tree.
 
 #include "intersect.h"
+#include "octree.h"
+
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("ball_intersect", &ball_intersect);
@@ -11,4 +13,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("svo_intersect", &svo_intersect);
   m.def("triangle_intersect", &triangle_intersect);
   m.def("uniform_ray_sampling", &uniform_ray_sampling);
+
+  m.def("build_octree", &build_octree);
 }

@@ -39,7 +39,7 @@ class NSVFModel(BaseModel):
         assert S == 1, "naive NeRF only supports single object."
 
         # voxel encoder (precompute for each voxel if needed)
-        feats, xyz, values = self.encoder.precompute(**kwargs)  # feats: (S, B, 8), xyz: (S, B, 3),  values: (S, B', D)
+        feats, xyz, values = self.encoder.precompute(**kwargs)  
 
         # ray-voxel intersection
         with GPUTimer() as timer0:
@@ -184,6 +184,7 @@ def base_architecture(args):
     args.discrete_regularization = getattr(args, "discrete_regularization", False)
     args.deterministic_step = getattr(args, "deterministic_step", False)
     args.raymarching_tolerance = getattr(args, "raymarching_tolerance", 0)
+    args.use_octree = getattr(args, "use_octree", False)
 
     # reader
     args.pixel_per_view = getattr(args, "pixel_per_view", 2048)

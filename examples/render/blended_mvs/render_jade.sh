@@ -7,7 +7,7 @@ SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
 MODEL_PATH=$SAVE/$ARCH/checkpoint_last.pt
 
 # additional rendering args
-MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f}'
+MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f,"use_octree":True}'
 MODELARGS=$(printf "$MODELTEMP" 256 0.0)
 
 # CUDA_VISIBLE_DEVICES=0 \

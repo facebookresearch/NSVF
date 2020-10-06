@@ -105,9 +105,9 @@ class SparseVoxelEncoder(Encoder):
         fine_keys, fine_feats  = torch.unique(fine_keys0, dim=0, sorted=True, return_inverse=True)
         fine_feats = fine_feats.reshape(-1, 8)
         num_keys = torch.scalar_tensor(fine_keys.size(0)).long()
-        
-        self.flatten_centers = None
-        self.flatten_children = None
+
+        self.use_octree = getattr(args, "use_octree", False)        
+        self.flatten_centers, self.flatten_children = None, None
 
         # assign values
         points = fine_points
@@ -174,26 +174,17 @@ class SparseVoxelEncoder(Encoder):
                             help='ray marching step size for sparse voxels')
         parser.add_argument('--raymarching-stepsize-ratio', type=float, metavar='D',
                             help='if the concrete step size is not given (=0), we use the ratio to the voxel size as step size.')
+        parser.add_argument('--use-octree', action='store_true', help='if set, instead of looping over the voxels, we build an octree.')
 
     @staticmethod
     def build_easy_octree(points, half_voxel):
-        # pure python implementation... extremely slow
-        # but it only need to compute once.
-        # TODO: implement Octree in C++
-
-        import time
-        t0 = time.time()
+        from fairnr.clib._ext import build_octree
         coords = (points / half_voxel).floor_().long()     # works easier in int space
         residual = (points - coords.float() * half_voxel).mean(0, keepdim=True)
         ranges = coords.max(0)[0] - coords.min(0)[0]
         depths = torch.log2(ranges.max().float()).ceil_().long() - 1
         center = (coords.max(0)[0] + coords.min(0)[0]) / 2
-        
-        tree = EasyOctTree(center, depths)
-        for i in range(coords.size(0)):
-            tree.insert(coords[i], index=i)
-        logger.info(tree.finalize() + "..took {:.4f}s".format(time.time() - t0))
-        centers, children = tree.flatten()
+        centers, children = build_octree(center, coords, int(depths))
         centers = centers.float() * half_voxel + residual   # transform back to float
         return centers, children
         
@@ -201,7 +192,8 @@ class SparseVoxelEncoder(Encoder):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
         values = self.values.weight[: self.num_keys] if self.values is not None else None
-        if self.flatten_centers is None or self.flatten_children is None:
+        if (self.flatten_centers is None or self.flatten_children is None) and self.use_octree:
+            # octree is not built. rebuild
             centers, children = SparseVoxelEncoder.build_easy_octree(points, self.voxel_size / 2.0)
             self.flatten_centers, self.flatten_children = centers, children
 
@@ -215,7 +207,14 @@ class SparseVoxelEncoder(Encoder):
             if id.size(0) > 1:
                 feats = feats + self.num_keys * torch.arange(id.size(0), 
                     device=feats.device, dtype=feats.dtype)[:, None, None]
+            
+        if self.use_octree:
+            flatten_centers, flatten_children = self.flatten_centers.clone(), self.flatten_children.clone()
+            if id is not None:
+                flatten_centers = flatten_centers.unsqueeze(0).expand(id.size(0), *flatten_centers.size()).contiguous()
+                flatten_children = flatten_children.unsqueeze(0).expand(id.size(0), *flatten_children.size()).contiguous()
 
+            return (feats, flatten_children), (points, flatten_centers), values
         return feats, points, values
 
     def extract_voxels(self):
@@ -233,17 +232,24 @@ class SparseVoxelEncoder(Encoder):
         return outs
 
     def ray_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
+        if self.use_octree:
+            point_feats, flatten_children = point_feats
+            point_xyz, flatten_centers = point_xyz
+
         S, V, P, _ = ray_dir.size()
         _, H, D = point_feats.size()
         
         # ray-voxel intersection
         ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
         ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
-        pts_idx, min_depth, max_depth = svo_ray_intersect(
-            self.voxel_size, self.max_hits, self.flatten_centers[None, :, :], self.flatten_children[None, :, :],
-            ray_start, ray_dir)
-        # pts_idx, min_depth, max_depth = aabb_ray_intersect(
-        #     self.voxel_size, self.max_hits, point_xyz, ray_start, ray_dir)
+
+        if self.use_octree:
+            pts_idx, min_depth, max_depth = svo_ray_intersect(
+                self.voxel_size, self.max_hits, flatten_centers, flatten_children,
+                ray_start, ray_dir)
+        else:
+            pts_idx, min_depth, max_depth = aabb_ray_intersect(
+                self.voxel_size, self.max_hits, point_xyz, ray_start, ray_dir)
 
         # sort the depths
         min_depth.masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
