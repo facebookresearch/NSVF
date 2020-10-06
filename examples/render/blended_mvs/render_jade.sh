@@ -8,8 +8,9 @@ MODEL_PATH=$SAVE/$ARCH/checkpoint_last.pt
 
 # additional rendering args
 MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f}'
-MODELARGS=$(printf "$MODELTEMP" 128 0.0)
+MODELARGS=$(printf "$MODELTEMP" 256 0.0)
 
+# CUDA_VISIBLE_DEVICES=0 \
 python render.py ${DATASET} \
     --user-dir fairnr \
     --task single_object_rendering \

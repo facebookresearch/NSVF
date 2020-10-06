@@ -327,3 +327,19 @@ class Timer(StopwatchMeter):
     def __exit__(self, *exc_info):
         """Stop the context manager timer"""
         self.stop()
+
+
+class GPUTimer(object):
+    def __enter__(self):
+        """Start a new timer as a context manager"""
+        self.start = torch.cuda.Event(enable_timing=True)
+        self.end = torch.cuda.Event(enable_timing=True)
+        self.start.record()
+        self.sum = 0
+        return self
+
+    def __exit__(self, *exc_info):
+        """Stop the context manager timer"""
+        self.end.record()
+        torch.cuda.synchronize()
+        self.sum = self.start.elapsed_time(self.end) / 1000.

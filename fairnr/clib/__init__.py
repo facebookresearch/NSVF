@@ -128,6 +128,66 @@ class AABBRayIntersect(Function):
 aabb_ray_intersect = AABBRayIntersect.apply
 
 
+class SparseVoxelOctreeRayIntersect(Function):
+    @staticmethod
+    def forward(ctx, voxelsize, n_max, points, children, ray_start, ray_dir):
+        r"""
+
+        Parameters
+        ----------
+        radius : float
+            radius of the balls
+        n_max: int
+            maximum number of points to intersect.
+        xyz : torch.Tensor
+            (B, N, 3) xyz coordinates of the features
+        new_xyz : torch.Tensor
+            (B, npoint, 3) centers of the ball query
+
+        Returns
+        -------
+        torch.Tensor
+            (B, npoint) tensor with the nearest indicies of the features that form the query balls
+        """
+        # HACK: speed-up ray-voxel intersection by batching...
+        G = 2048
+        S, N = ray_start.shape[:2]
+        K = int(np.ceil(N / G))
+        H = K * G
+        if H > N:
+            ray_start = torch.cat([ray_start, ray_start[:, :H-N]], 1)
+            ray_dir = torch.cat([ray_dir, ray_dir[:, :H-N]], 1)
+        ray_start = ray_start.reshape(S * G, K, 3)
+        ray_dir = ray_dir.reshape(S * G, K, 3)
+        points = points.expand(S * G, *points.size()[1:]).contiguous()
+        children = children.expand(S * G, *children.size()[1:]).contiguous()
+        inds, min_depth, max_depth = _ext.svo_intersect(
+            ray_start.float(), ray_dir.float(), points.float(), children.int(), voxelsize, n_max)
+        # from fairseq import pdb; pdb.set_trace()
+        
+        min_depth = min_depth.type_as(ray_start)
+        max_depth = max_depth.type_as(ray_start)
+        
+        inds = inds.reshape(S, H, -1)
+        min_depth = min_depth.reshape(S, H, -1)
+        max_depth = max_depth.reshape(S, H, -1)
+        if H > N:
+            inds = inds[:, :N]
+            min_depth = min_depth[:, :N]
+            max_depth = max_depth[:, :N]
+        
+        ctx.mark_non_differentiable(inds)
+        ctx.mark_non_differentiable(min_depth)
+        ctx.mark_non_differentiable(max_depth)
+        return inds, min_depth, max_depth
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None
+
+svo_ray_intersect = SparseVoxelOctreeRayIntersect.apply
+
+
 class TriangleRayIntersect(Function):
     @staticmethod
     def forward(ctx, cagesize, blur_ratio, n_max, points, faces, ray_start, ray_dir):

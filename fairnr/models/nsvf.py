@@ -19,7 +19,7 @@ from fairseq.models import (
     register_model_architecture
 )
 
-from fairnr.data.data_utils import Timer
+from fairnr.data.data_utils import Timer, GPUTimer
 from fairnr.data.geometry import compute_normal_map, fill_in
 from fairnr.models.fairnr_model import BaseModel
 
@@ -42,7 +42,7 @@ class NSVFModel(BaseModel):
         feats, xyz, values = self.encoder.precompute(**kwargs)  # feats: (S, B, 8), xyz: (S, B, 3),  values: (S, B', D)
 
         # ray-voxel intersection
-        with Timer() as timer0:
+        with GPUTimer() as timer0:
             ray_start, ray_dir, intersection_outputs, hits = \
                 self.encoder.ray_intersect(ray_start, ray_dir, xyz, feats)
             
@@ -75,18 +75,16 @@ class NSVFModel(BaseModel):
             ray_start, ray_dir = ray_start[hits], ray_dir[hits]
             
             # sample evalution points along the ray
-            with Timer() as timer1:
-                samples = self.encoder.ray_sample(*intersection_outputs)
+            samples = self.encoder.ray_sample(*intersection_outputs)
             
             # volume rendering
-            with Timer() as timer2:
-                encoder_states = (feats.reshape(-1, feats.size(-1)), xyz.reshape(-1, 3), 
-                    values.reshape(-1, values.size(-1)) if values is not None else None)
-                all_results = self.raymarcher(
-                    self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
-                all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
-                all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, xyz)
-                all_results['voxel_depth'] = samples[0][:, 0]
+            encoder_states = (feats.reshape(-1, feats.size(-1)), xyz.reshape(-1, 3), 
+                values.reshape(-1, values.size(-1)) if values is not None else None)
+            all_results = self.raymarcher(
+                self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
+            all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
+            all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, xyz)
+            all_results['voxel_depth'] = samples[0][:, 0]
 
         # fill out the full size
         hits = hits.reshape(fullsize)
@@ -99,15 +97,12 @@ class NSVFModel(BaseModel):
         all_results['colors'] += all_results['missed'].unsqueeze(-1) * all_results['bg_color']
         if 'normal' in all_results:
             all_results['normal'] = fill_in((fullsize, 3), hits, all_results['normal'], 0.0).view(S, V, P, 3)
-        timer0.stop()
 
         # other logs
         all_results['other_logs'] = {
                 'voxs_log': self.encoder.voxel_size.item(),
                 'stps_log': self.encoder.step_size.item(),
-                't0_log': timer0.sum,
-                't1_log': timer1.sum,
-                't2_log': timer2.sum,
+                'tvox_log': timer0.sum,
                 'asf_log': (all_results['ae'].float() / fullsize).item(),
                 'ash_log': (all_results['ae'].float() / hits.sum()).item(),
                 'nvox_log': xyz.size(1)

@@ -173,9 +173,9 @@ class NeuralRenderer(object):
                     'size': torch.cat([sample['size'][shape:shape+1] for _ in range(step, next_step)], 1),
                     'step': step
                 }
-
-                outs = model(**_sample)
-                logger.info("rendering frames: {} {:.4f} {:.4f}".format(step, outs['other_logs']['t0_log'], outs['other_logs']['t1_log']))
+                with data_utils.GPUTimer() as timer:
+                    outs = model(**_sample)
+                logger.info("rendering frame={}\ttotal time={:.4f}\tvoxel={:.4f}".format(step, timer.sum, outs['other_logs']['tvox_log']))
 
                 for k in range(step, next_step):
                     images = model.visualize(_sample, None, 0, k-step)

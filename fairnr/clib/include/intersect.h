@@ -11,6 +11,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> ball_intersect(at::Tensor ray_sta
                const float radius, const int n_max);
 std::tuple<at::Tensor, at::Tensor, at::Tensor> aabb_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor points, 
                const float voxelsize, const int n_max);
+std::tuple<at::Tensor, at::Tensor, at::Tensor> svo_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor points, at::Tensor children,
+               const float voxelsize, const int n_max);
 std::tuple< at::Tensor, at::Tensor, at::Tensor > triangle_intersect(at::Tensor ray_start, at::Tensor ray_dir, at::Tensor face_points, 
                const float cagesize, const float blur, const int n_max);              
 std::tuple<at::Tensor, at::Tensor, at::Tensor> uniform_ray_sampling(at::Tensor pts_idx, at::Tensor min_depth, at::Tensor max_depth, at::Tensor uniform_noise,

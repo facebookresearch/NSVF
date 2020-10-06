@@ -41,10 +41,7 @@ class RenderingCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        import time
-        t0 = time.time()
         net_output = model(**sample)
-        t1 = time.time()
         loss, loss_output = self.compute_loss(model, net_output, sample, reduce=reduce)
         sample_size = 1
         
@@ -54,7 +51,6 @@ class RenderingCriterion(FairseqCriterion):
             'ntokens':  sample['alpha'].size(1),
             'npixels': sample['alpha'].size(2),
             'sample_size': sample_size,
-            'time': t1 - t0
         }
         for w in loss_output:
             logging_output[w] = loss_output[w]
