@@ -189,7 +189,6 @@ class SRNLossCriterion(RenderingCriterion):
 
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
        
-        # from fairseq import pdb; pdb.set_trace()
         # add a dummy loss
         loss = loss + model.dummy_loss + self.dummy_loss * 0.
         logging_outputs = {key: item(losses[key][0]) for key in losses}
