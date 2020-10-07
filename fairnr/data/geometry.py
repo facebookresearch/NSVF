@@ -297,80 +297,13 @@ def fill_in(shape, hits, input, initial=1.0):
     return output
 
 
-class EasyOctTree(object):
-
-    def __init__(self, center, depth=0, index=None):
-        self.center = center
-        self.c = [None for _ in range(8)]
-        self.depth = depth
-        self.index = index
-        self.total = None
-        self.terminal = None
-
-    def insert(self, node, index):
-        which_children = (node > self.center).long()
-        idx = which_children[0] + 2 * which_children[1] + 4 * which_children[2]
-        if self.depth == 0:
-            self.c[idx] = EasyOctTree(node, self.depth - 1, index=index)
-        else:
-            if self.c[idx] is None:
-                self.c[idx] = EasyOctTree(
-                    self.center + (which_children * 2 - 1) * (2 ** (self.depth - 1)),
-                    self.depth - 1)
-            self.c[idx].insert(node, index)
-
-    def __str__(self):
-        return "Id={} ({},{},{})".format(self.index, self.center[0], self.center[1], self.center[2]) + "-->" + \
-            " ".join(["Id={} ({})".format(s.index, i) for i, s in enumerate(self.c) if s is not None])
-
-    def __getitem__(self, i):
-        assert i >= 0 and i < 8, "Octree only has 8 children"
-        return self.c[i]
-
-    def finalize(self):
-        self.compute_leaf_index()
-        total, terminal = self.count
-        return 'build EasyOctree done. total #nodes = {}, terminal #nodes = {}'.format(total, terminal)
-
-    @property
-    def count(self):
-        if self.total is not None and self.terminal is not None:
-            return self.total, self.terminal
-
-        total, terminal = 0, 0
-        for s in self.c:
-            if s is not None:
-                _total, _terminal = s.count
-                total += _total
-                terminal += _terminal
-        if self.depth == -1:
-            terminal += 1
-        total += 1
-        return total, terminal
-
-    def compute_leaf_index(self):
-        total_nodes, terminal_nodes = self.count
-        all_leaves = [self]
-        while len(all_leaves) > 0:
-            total_nodes -= 1
-            node = all_leaves.pop(0)
-            node.index = total_nodes
-            for s in node.c:
-                if (s is not None) and (s.depth > -1):
-                    all_leaves.append(s) 
-        assert total_nodes == terminal_nodes, "number must match"
-    
-    def flatten(self):
-        total_nodes, terminal_nodes = self.count
-        centers = self.center.new_zeros(total_nodes, 3)
-        children = -centers.new_ones(total_nodes, 9).long()
-        all_leaves = [self]
-        while len(all_leaves) > 0:
-            node = all_leaves.pop(0)
-            centers[node.index] = node.center
-            for j, s in enumerate(node.c):
-                if (s is not None):
-                    children[node.index, j] = s.index
-                    all_leaves.append(s)
-            children[node.index, 8] = 2 ** (node.depth + 1); 
-        return centers, children
+def build_easy_octree(points, half_voxel):
+    from fairnr.clib._ext import build_octree
+    coords = (points / half_voxel).floor_().long()     # works easier in int space
+    residual = (points - coords.float() * half_voxel).mean(0, keepdim=True)
+    ranges = coords.max(0)[0] - coords.min(0)[0]
+    depths = torch.log2(ranges.max().float()).ceil_().long() - 1
+    center = (coords.max(0)[0] + coords.min(0)[0]) / 2
+    centers, children = build_octree(center, coords, int(depths))
+    centers = centers.float() * half_voxel + residual   # transform back to float
+    return centers, children

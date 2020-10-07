@@ -39,13 +39,13 @@ class NSVFModel(BaseModel):
         assert S == 1, "naive NeRF only supports single object."
 
         # voxel encoder (precompute for each voxel if needed)
-        feats, xyz, values = self.encoder.precompute(**kwargs)  
+        encoder_states = self.encoder.precompute(**kwargs)  
 
         # ray-voxel intersection
         with GPUTimer() as timer0:
             ray_start, ray_dir, intersection_outputs, hits = \
-                self.encoder.ray_intersect(ray_start, ray_dir, xyz, feats)
-            
+                self.encoder.ray_intersect(ray_start, ray_dir, encoder_states)
+
             if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
                 uv, size = kwargs['uv'], kwargs['size']
                 mask = hits.reshape(*uv.size()[:2], uv.size(-1))
@@ -55,8 +55,8 @@ class NSVFModel(BaseModel):
                     uv, size, mask=mask, return_mask=True)
                 sampled_masks = sampled_masks.reshape(uv.size(0), -1).bool()
                 hits, sampled_masks = hits[sampled_masks].reshape(S, -1), sampled_masks.unsqueeze(-1)
-                intersection_outputs = tuple([outs[sampled_masks.expand_as(outs)].reshape(S, -1, outs.size(-1)) 
-                    for outs in intersection_outputs])
+                intersection_outputs = {name: outs[sampled_masks.expand_as(outs)].reshape(S, -1, outs.size(-1)) 
+                    for name, outs in intersection_outputs.items()}
                 ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, 3)
                 ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, 3)
                 P = hits.size(-1) // V   # the number of pixels per image
@@ -71,20 +71,20 @@ class NSVFModel(BaseModel):
         
         all_results = defaultdict(lambda: None)
         if hits.sum() > 0:  # check if ray missed everything
-            intersection_outputs = tuple([outs[hits] for outs in intersection_outputs])
+            intersection_outputs = {name: outs[hits] for name, outs in intersection_outputs.items()}
             ray_start, ray_dir = ray_start[hits], ray_dir[hits]
             
             # sample evalution points along the ray
-            samples = self.encoder.ray_sample(*intersection_outputs)
+            samples = self.encoder.ray_sample(intersection_outputs)
+            encoder_states = {name: s.reshape(-1, s.size(-1)) if s is not None else None
+                for name, s in encoder_states.items()}
             
-            # volume rendering
-            encoder_states = (feats.reshape(-1, feats.size(-1)), xyz.reshape(-1, 3), 
-                values.reshape(-1, values.size(-1)) if values is not None else None)
+            # rendering
             all_results = self.raymarcher(
                 self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
             all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
-            all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, xyz)
-            all_results['voxel_depth'] = samples[0][:, 0]
+            all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, encoder_states)
+            all_results['voxel_depth'] = samples['sampled_point_depth'][:, 0]
 
         # fill out the full size
         hits = hits.reshape(fullsize)
@@ -105,7 +105,7 @@ class NSVFModel(BaseModel):
                 'tvox_log': timer0.sum,
                 'asf_log': (all_results['ae'].float() / fullsize).item(),
                 'ash_log': (all_results['ae'].float() / hits.sum()).item(),
-                'nvox_log': xyz.size(1)
+                'nvox_log': self.encoder.num_voxels,
                 }
         all_results['sampled_uv'] = sampled_uv
         return all_results

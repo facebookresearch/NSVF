@@ -15,7 +15,7 @@ SLURM_ARGS="""
     'output': '$SAVE/$ARCH/train.out',
     'error': '$SAVE/$ARCH/train.stderr.%j',
     'constraint': 'volta32gb',
-    'local': False}
+    'local': True}
 """
 
 python train.py ${DATASET} \
@@ -25,7 +25,7 @@ python train.py ${DATASET} \
     --train-views "0..79" \
     --view-resolution $RES \
     --max-sentences 1 \
-    --view-per-batch 4 \
+    --view-per-batch 2 \
     --pixel-per-view 2048 \
     --no-preload \
     --sampling-on-mask 1.0 --no-sampling-at-reader \

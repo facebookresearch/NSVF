@@ -18,7 +18,7 @@ from pathlib import Path
 from fairnr.data.data_utils import load_matrix
 from fairnr.data.geometry import (
     trilinear_interp, splitting_points, offset_points,
-    get_edge, EasyOctTree
+    get_edge, build_easy_octree
 )
 from fairnr.clib import (
     aabb_ray_intersect, triangle_ray_intersect,
@@ -175,18 +175,6 @@ class SparseVoxelEncoder(Encoder):
         parser.add_argument('--raymarching-stepsize-ratio', type=float, metavar='D',
                             help='if the concrete step size is not given (=0), we use the ratio to the voxel size as step size.')
         parser.add_argument('--use-octree', action='store_true', help='if set, instead of looping over the voxels, we build an octree.')
-
-    @staticmethod
-    def build_easy_octree(points, half_voxel):
-        from fairnr.clib._ext import build_octree
-        coords = (points / half_voxel).floor_().long()     # works easier in int space
-        residual = (points - coords.float() * half_voxel).mean(0, keepdim=True)
-        ranges = coords.max(0)[0] - coords.min(0)[0]
-        depths = torch.log2(ranges.max().float()).ceil_().long() - 1
-        center = (coords.max(0)[0] + coords.min(0)[0]) / 2
-        centers, children = build_octree(center, coords, int(depths))
-        centers = centers.float() * half_voxel + residual   # transform back to float
-        return centers, children
         
     def precompute(self, id=None, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
@@ -194,7 +182,7 @@ class SparseVoxelEncoder(Encoder):
         values = self.values.weight[: self.num_keys] if self.values is not None else None
         if (self.flatten_centers is None or self.flatten_children is None) and self.use_octree:
             # octree is not built. rebuild
-            centers, children = SparseVoxelEncoder.build_easy_octree(points, self.voxel_size / 2.0)
+            centers, children = build_easy_octree(points, self.voxel_size / 2.0)
             self.flatten_centers, self.flatten_children = centers, children
 
         if id is not None:
@@ -207,15 +195,20 @@ class SparseVoxelEncoder(Encoder):
             if id.size(0) > 1:
                 feats = feats + self.num_keys * torch.arange(id.size(0), 
                     device=feats.device, dtype=feats.dtype)[:, None, None]
-            
+        encoder_states = {
+            'voxel_vertex_idx': feats,
+            'voxel_center_xyz': points,
+            'voxel_vertex_emb': values
+        }
+
         if self.use_octree:
             flatten_centers, flatten_children = self.flatten_centers.clone(), self.flatten_children.clone()
             if id is not None:
                 flatten_centers = flatten_centers.unsqueeze(0).expand(id.size(0), *flatten_centers.size()).contiguous()
                 flatten_children = flatten_children.unsqueeze(0).expand(id.size(0), *flatten_children.size()).contiguous()
-
-            return (feats, flatten_children), (points, flatten_centers), values
-        return feats, points, values
+            encoder_states['voxel_octree_center_xyz'] = flatten_centers
+            encoder_states['voxel_octree_children_idx'] = flatten_children
+        return encoder_states
 
     def extract_voxels(self):
         voxel_index = torch.arange(self.keep.size(0), device=self.keep.device)
@@ -223,31 +216,31 @@ class SparseVoxelEncoder(Encoder):
         voxel_point = self.points[self.keep.bool()]
         return voxel_index, voxel_point
 
-    def get_edge(self, ray_start, ray_dir, samples, xyz, *args, **kwargs):
+    def get_edge(self, ray_start, ray_dir, samples, encoder_states):
         outs = get_edge(
-            ray_start + ray_dir * samples[0][:, :1], 
-            xyz.reshape(-1, 3)[samples[1][:, 0].long()], 
+            ray_start + ray_dir * samples['sampled_point_depth'][:, :1], 
+            encoder_states['voxel_center_xyz'].reshape(-1, 3)[samples['sampled_point_voxel_idx'][:, 0].long()], 
             self.voxel_size).type_as(ray_dir)   # get voxel edges/depth (for visualization)
         outs = (1 - outs[:, None].expand(outs.size(0), 3)) * 0.7
         return outs
 
-    def ray_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
-        if self.use_octree:
-            point_feats, flatten_children = point_feats
-            point_xyz, flatten_centers = point_xyz
-
+    def ray_intersect(self, ray_start, ray_dir, encoder_states):
+        point_feats = encoder_states['voxel_vertex_idx'] 
+        point_xyz = encoder_states['voxel_center_xyz']
         S, V, P, _ = ray_dir.size()
         _, H, D = point_feats.size()
-        
+
         # ray-voxel intersection
         ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
         ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
 
-        if self.use_octree:
+        if self.use_octree:  # ray-voxel intersection with SVO
+            flatten_centers = encoder_states['voxel_octree_center_xyz']
+            flatten_children = encoder_states['voxel_octree_children_idx']
             pts_idx, min_depth, max_depth = svo_ray_intersect(
                 self.voxel_size, self.max_hits, flatten_centers, flatten_children,
                 ray_start, ray_dir)
-        else:
+        else:   # ray-voxel intersection with all voxels
             pts_idx, min_depth, max_depth = aabb_ray_intersect(
                 self.voxel_size, self.max_hits, point_xyz, ray_start, ray_dir)
 
@@ -263,9 +256,19 @@ class SparseVoxelEncoder(Encoder):
             pts_idx = (pts_idx + H * torch.arange(S, 
                 device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
                 ).masked_fill_(pts_idx.eq(-1), -1)
-        return ray_start, ray_dir, (min_depth, max_depth, pts_idx), hits
 
-    def ray_sample(self, min_depth, max_depth, pts_idx):
+        intersection_outputs = {
+            "min_depth": min_depth,
+            "max_depth": max_depth,
+            "intersected_voxel_idx": pts_idx
+        }
+        return ray_start, ray_dir, intersection_outputs, hits
+
+    def ray_sample(self, intersection_outputs):
+        min_depth = intersection_outputs['min_depth']
+        max_depth = intersection_outputs['max_depth']
+        pts_idx = intersection_outputs['intersected_voxel_idx']
+
         max_ray_length = (max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(-1)[0] - min_depth.min(-1)[0]).max()
         sampled_idx, sampled_depth, sampled_dists = uniform_ray_sampling(
             pts_idx, min_depth, max_depth, self.step_size, max_ray_length, 
@@ -273,16 +276,28 @@ class SparseVoxelEncoder(Encoder):
         sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
         sampled_dists.masked_fill_(sampled_idx.eq(-1), 0.0)
-        return sampled_depth, sampled_idx, sampled_dists
+
+        samples = {
+            'sampled_point_depth': sampled_depth,
+            'sampled_point_distance': sampled_dists,
+            'sampled_point_voxel_idx': sampled_idx,
+        }
+        return samples
 
     @torch.enable_grad()
     def forward(self, samples, encoder_states):
-        point_feats, point_xyz, values = encoder_states
-        _, sampled_idx, _, sampled_xyz, sampled_dir = samples
-        sampled_idx = sampled_idx.long()
-        sampled_xyz = sampled_xyz.requires_grad_(True)   
+        # encoder states
+        point_feats = encoder_states['voxel_vertex_idx'] 
+        point_xyz = encoder_states['voxel_center_xyz']
+        values = encoder_states['voxel_vertex_emb']
+
+        # ray point samples
+        sampled_idx = samples['sampled_point_voxel_idx'].long()
+        sampled_xyz = samples['sampled_point_xyz'].requires_grad_(True)
+        sampled_dir = samples['sampled_point_ray_direction']
+
+        # prepare inputs for implicit field
         inputs = {'pos': sampled_xyz, 'ray': sampled_dir}
-        
         if values is not None:
             # resample point features
             point_xyz = F.embedding(sampled_idx, point_xyz)
@@ -298,23 +313,34 @@ class SparseVoxelEncoder(Encoder):
     @torch.no_grad()
     def pruning(self, field_fn, th=0.5, encoder_states=None):
         logger.info("pruning...")
-        if encoder_states is not None:
-            feats, points, values = encoder_states
-        else:
-            feats, points, values = self.precompute(id=None)
+        if encoder_states is None:
+            encoder_states = self.precompute(id=None)
         
+        feats = encoder_states['voxel_vertex_idx'] 
+        points = encoder_states['voxel_center_xyz']
+        values = encoder_states['voxel_vertex_emb']
         chunk_size, bits = 64, 16
+
+        if self.use_octree:  # clean the octree, need to be rebuilt
+            self.flatten_centers, self.flatten_children = None, None
 
         def prune_once(feats, points, values):
             # sample points inside voxels
             sampled_xyz = offset_points(points, self.voxel_size / 2.0, bits=bits)
             sampled_idx = torch.arange(points.size(0), device=points.device)[:, None].expand(*sampled_xyz.size()[:2])
             sampled_xyz, sampled_idx = sampled_xyz.reshape(-1, 3), sampled_idx.reshape(-1)
-            sampled_feats = self.forward((sampled_xyz, sampled_idx), (feats, points, values))  # get field inputs
+            
+            field_inputs = self.forward(
+                {'sampled_point_xyz': sampled_xyz, 
+                 'sampled_point_voxel_idx': sampled_idx,
+                 'sampled_point_ray_direction': None}, 
+                {'voxel_vertex_idx': feats,
+                 'voxel_center_xyz': points,
+                 'voxel_vertex_emb': values})  # get field inputs
      
             # evaluation with density
-            sampled_outputs = field_fn(sampled_feats, outputs=['sigma'])
-            free_energy = -torch.relu(sampled_outputs['sigma']).reshape(-1, bits ** 3).max(-1)[0]
+            field_outputs = field_fn(field_inputs, outputs=['sigma'])
+            free_energy = -torch.relu(field_outputs['sigma']).reshape(-1, bits ** 3).max(-1)[0]
             
             # prune voxels if needed
             return (1 - torch.exp(free_energy)) > th
@@ -327,7 +353,8 @@ class SparseVoxelEncoder(Encoder):
     @torch.no_grad()
     def splitting(self):
         logger.info("splitting...")
-        feats, points, values = self.precompute(id=None)
+        encoder_states = self.precompute(id=None)
+        feats, points, values = encoder_states['voxel_vertex_idx'], encoder_states['voxel_center_xyz'], encoder_states['voxel_vertex_emb']
         new_points, new_feats, new_values, new_keys = splitting_points(points, feats, values, self.voxel_size / 2.0)
         new_num_keys = new_keys.size(0)
         new_point_length = new_points.size(0)
@@ -354,6 +381,10 @@ class SparseVoxelEncoder(Encoder):
         if self.values is not None:
             return self.values.weight[0,0] * 0.0
         return 0.0
+    
+    @property
+    def num_voxels(self):
+        return self.keep.long().sum()
 
 
 @register_encoder('multi_sparsevoxel_encoder')
@@ -411,6 +442,10 @@ class MultiSparseVoxelEncoder(Encoder):
     def step_size(self):
         return self.all_voxels[0].step_size
 
+    @property
+    def num_voxels(self):
+        return self.all_voxels[self.cid].num_voxels
+
 
 @register_encoder('shared_sparsevoxel_encoder')
 class SharedSparseVoxelEncoder(Encoder):
@@ -453,7 +488,8 @@ class SharedSparseVoxelEncoder(Encoder):
     def pruning(self, field_fn, th=0.5):
         for cid in range(len(self.all_voxels)):
            id = torch.tensor([cid], device=self.contexts.weight.device)
-           self.all_voxels[cid].pruning(field_fn, th, encoder_states=[v[0] for v in self.precompute(id)])
+           self.all_voxels[cid].pruning(field_fn, th, 
+                encoder_states={name: v[0] for name, v in self.precompute(id).items()})
 
     @torch.no_grad()
     def splitting(self):
@@ -504,6 +540,10 @@ class SharedSparseVoxelEncoder(Encoder):
     def step_size(self):
         return self.all_voxels[0].step_size
 
+    @property
+    def num_voxels(self):
+        return self.all_voxels[self.cid].num_voxels
+
     @staticmethod
     def add_args(parser):
         SparseVoxelEncoder.add_args(parser)
@@ -543,19 +583,39 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
 
     def upgrade_state_dict_named(self, state_dict, name):
         pass
+    
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument('--mesh-path', type=str, help='path for initial mesh file')
+        parser.add_argument('--voxel-embed-dim', type=int, metavar='N', help="embedding size")
+        parser.add_argument('--deterministic-step', action='store_true',
+                            help='if set, the model runs fixed stepsize, instead of sampling one')
+        parser.add_argument('--max-hits', type=int, metavar='N', help='due to restrictions we set a maximum number of hits')
+        parser.add_argument('--raymarching-stepsize', type=float, metavar='D', 
+                            help='ray marching step size for sparse voxels')
+        parser.add_argument('--blur-ratio', type=float, default=0,
+                            help="it is possible to shoot outside the triangle. default=0")
+        parser.add_argument('--trainable-vertices', action='store_true',
+                            help='if set, making the triangle trainable. experimental code. not ideal.')
 
     def precompute(self, id=None, *args, **kwargs):
-        feats, points, values = self.faces, self.vertices, None
+        feats, points, values = self.faces, self.vertices, self.values
         if id is not None:
             # extend size to support multi-objects
             feats  = feats.unsqueeze(0).expand(id.size(0), *feats.size()).contiguous()
             points = points.unsqueeze(0).expand(id.size(0), *points.size()).contiguous()
             values = values.unsqueeze(0).expand(id.size(0), *values.size()).contiguous() if values is not None else None
+            
             # moving to multiple objects
             if id.size(0) > 1:
                 feats = feats + points.size(1) * torch.arange(id.size(0), 
                     device=feats.device, dtype=feats.dtype)[:, None, None]
-        return feats, points, values
+
+        encoder_states = {
+            'mesh_face_vertex_idx': feats,
+            'mesh_vertex_xyz': points,
+        }
+        return encoder_states
 
     def get_edge(self, ray_start, ray_dir, *args, **kwargs):
         return torch.ones_like(ray_dir) * 0.7
@@ -564,7 +624,10 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
     def voxel_size(self):
         return self.cage_size
 
-    def ray_intersect(self, ray_start, ray_dir, point_xyz, point_feats):
+    def ray_intersect(self, ray_start, ray_dir, encoder_states):
+        point_xyz = encoder_states['mesh_vertex_xyz']
+        point_feats =encoder_states['mesh_face_vertex_idx']
+        
         S, V, P, _ = ray_dir.size()
         F, G = point_feats.size(1), point_xyz.size(1)
   
@@ -581,22 +644,28 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
             pts_idx = (pts_idx + G * torch.arange(S, 
                 device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
                 ).masked_fill_(pts_idx.eq(-1), -1)
-        return ray_start, ray_dir, (min_depth, max_depth, pts_idx), hits
 
-    @staticmethod
-    def add_args(parser):
-        parser.add_argument('--mesh-path', type=str, help='path for initial mesh file')
-        parser.add_argument('--voxel-embed-dim', type=int, metavar='N', help="embedding size")
-        parser.add_argument('--deterministic-step', action='store_true',
-                            help='if set, the model runs fixed stepsize, instead of sampling one')
-        parser.add_argument('--max-hits', type=int, metavar='N', help='due to restrictions we set a maximum number of hits')
-        parser.add_argument('--raymarching-stepsize', type=float, metavar='D', 
-                            help='ray marching step size for sparse voxels')
-        parser.add_argument('--blur-ratio', type=float, default=0,
-                            help="it is possible to shoot outside the triangle. default=0")
-        parser.add_argument('--trainable-vertices', action='store_true',
-                            help='if set, making the triangle trainable. experimental code. not ideal.')
+        intersection_outputs = {
+            "min_depth": min_depth,
+            "max_depth": max_depth,
+            "intersected_voxel_idx": pts_idx
+        }
+        return ray_start, ray_dir, intersection_outputs, hits
 
+    @torch.enable_grad()
+    def forward(self, samples, encoder_states):
+        # TODO: enable mesh embedding learning
+
+        sampled_xyz = samples['sampled_point_xyz'].requires_grad_(True)
+        sampled_dir = samples['sampled_point_ray_direction']
+
+        # prepare inputs for implicit field
+        inputs = {'pos': sampled_xyz, 'ray': sampled_dir}
+        return inputs
+
+    @property
+    def num_voxels(self):
+        return self.vertices.size(0)
 
 def bbox2voxels(bbox, voxel_size):
     vox_min, vox_max = bbox[:3], bbox[3:]
