@@ -1,27 +1,25 @@
 # Neural Sparse Voxel Fields (NSVF)
 
-Photo-realistic free-viewpoint rendering of real-world scenes using classical computer graphics techniques is challenging, because it requires the difficult step of
-capturing detailed appearance and geometry models.
-[Neural rendering](https://arxiv.org/abs/2004.03805), a new field that employs deep
-neural networks to implicitly learn scene representations encapsulating both geometry and appearance
-from 2D observations with or without a coarse geometry, has been greatly progressed in the recent years.
+Photo-realistic free-viewpoint rendering of real-world scenes using classical computer graphics techniques is a challenging problem because it requires the difficult step of capturing detailed appearance and geometry models.
+Neural rendering is an emerging field that employs deep neural networks to implicitly learn scene representations encapsulating both geometry and appearance from 2D observations with or without a coarse geometry. 
+However, existing approaches in this field often show blurry renderings or suffer from slow rendering process. We propose [Neural Sparse Voxel Fields (NSVF)](https://arxiv.org/abs/2007.11571), a new neural scene representation for fast and high-quality free-viewpoint rendering.
 
-This is the official repo including instructions for the following paper:
+Here is the official repo for the paper:
 * [Neural Sparse Voxel Fields (Liu et al., 2020)](https://arxiv.org/abs/2007.11571).
 
 <img src='docs/figs/framework.png'/>
 
 ## Requirements and Installation
-This code is largely following the structure of [fairseq-py](https://github.com/pytorch/fairseq) where we implemented custom modules for supporting neural rendering. 
+This code is implemented in PyTorch using [fairseq framework](https://github.com/pytorch/fairseq). 
 
-We have tested the following system:
+The code has been tested on the following system:
 * Python >= 3.6
 * PyTorch 1.4.0
 * Nvidia GPU (Tesla V100 32GB) CUDA 10.1
 
-We only support GPU learning and rendering.
+Only learning and rendering on GPUs are supported.
 
-To install, first clone this repo and install all dependencies by
+To install, first clone this repo and install all dependencies:
 ```bash
 pip install -r requirements.txt
 ```
@@ -29,7 +27,7 @@ Then,  run
 ```bash
 pip install --editable ./
 ```
-or if you want to install the code locally:
+Or if you want to install the code locally, run:
 ```
 python setup.py build_ext --inplace
 ```
@@ -38,8 +36,7 @@ python setup.py build_ext --inplace
 You can download the synthetic and real data used in the paper [here](https://www.dropbox.com/sh/arwxt2sye1u68ov/AACW8NJKU5oQqYVILdjTXt4ia?dl=0).
 
 ### Prepare your own dataset
-Here we also show steps to prepare new datasets for training and rendering on single objects. 
-Please follow the data structure:
+To prepare a new dataset of a single scene for training and testing, please follow the data structure:
 ```
 <dataset_name>
 |-- bbox.txt         # bounding-box file
@@ -58,20 +55,25 @@ where the ``bbox.txt`` file contains a line describing the initial bounding box 
 x_min y_min z_min x_max y_max z_max initial_voxel_size
 ```
 
-The names of target images and camera poses do not have to be the same, however, the order of names (sorted by string)
-must be matched to represent views. Typically, we use views to split the datasets.
-For example, we assume the dataset views have already split into ``train (0..100)``, ``valid (100..200)`` and ``test (200..400)``.
+Note that the file names of target images and those of the corresponding camera pose files are not required to be exactly the same. However, the orders of these two kinds of files (sorted by string) must match.  The datasets are split with view indices.
+For example, "``train (0..100)``, ``valid (100..200)`` and ``test (200..400)``" mean the first 100 views for training, 100-199th views for validation, and 200-399th views for testing. 
 
 
 ## Train a new model
-Given the single object dataset as ``{DATASET}``, the following command trains a new NSVF model in a resolution of ``800x800``, with a batch size of ``4`` images per GPU and ``2048`` rays per image. In default, the code will automatically detect all available GPUs.
+Given the dataset of a single scene (``{DATASET}``), we use the following command for training an NSVF model to synthesize novel views at ``800x800`` pixels, with a batch size of ``4`` images per GPU and ``2048`` rays per image. By default, the code will automatically detect all available GPUs.
 
-In this example, we use a pre-defined architecture ``nsvf_base``. 
-By setting ``--no-sampling-at-reader``, the model will use the visibility of sparse voxels to sample pixels for training. In default, we set the ray-marching step size as a ratio ``1/8`` of the voxel size.
-During training, the model will automatically prune the voxels every ``2500`` steps, and progressively increase capacity at ``5k``, ``25k`` and ``75k``, respectively. All other parameters are set default.
-Please check other or modify your own architectures in the model file ``fairnr/models/nsvf.py``.
+In the following example, we use a pre-defined architecture ``nsvf_base`` with specific arguments:
+- By setting ``--no-sampling-at-reader``, the model only samples pixels in the projected image region of sparse voxels for training. 
+- By default, we set the ray-marching step size to be the ratio ``1/8 (0.125)`` of the voxel size which is typically described in the ``bbox.txt`` file.
+- It is optional to turn on ``--use-octree``. It will build a sparse voxel octree to speed-up the ray-voxel intersection especially when the number of voxels is greater than ``10000``.
+- By setting `` --pruning-every-steps`` as ``2500``, the model performs self-pruning at every ``2500`` steps. 
+- By setting ``--half-voxel-size-at`` and ``--reduce-step-size-at`` as ``5000,25000,75000``,  the voxel size and step size are halved at ``5k``, ``25k`` and ``75k``, respectively. 
 
-```bash
+Note that, although above parameter settings are used for most of the experiments in the paper, it is possible to tune these parameters to achieve better quality. Besides the above parameters, other parameters can also use default settings. 
+
+Besides the architecture ``nsvf_base``, you may check other architectures or define your own architectures in the file ``fairnr/models/nsvf.py``.
+
+```bash 
 python -u train.py ${DATASET} \
     --user-dir fairnr \
     --task single_object_rendering \
@@ -84,6 +86,7 @@ python -u train.py ${DATASET} \
     --transparent-background "1.0,1.0,1.0" --background-stop-gradient \
     --arch nsvf_base \
     --initial-boundingbox ${DATASET}/bbox.txt \
+    --use-octree \
     --raymarching-stepsize-ratio 0.125 \
     --discrete-regularization \
     --color-weight 128.0 --alpha-weight 1.0 \
@@ -103,16 +106,16 @@ python -u train.py ${DATASET} \
     --tensorboard-logdir ${SAVE}/tensorboard \
     | tee -a $SAVE/train.log
 ```
-The output checkpoitns are saved in ``{SAVE}``. To check the training progress, we can use tensorboard by
+The checkpoints are saved in ``{SAVE}``. You can launch tensorboard to check training progress:
 ```
 tensorboard --logdir=${SAVE}/tensorboard --port=10000
 ```
 
-You can find detailed examples to produce the results of our paper under [examples](./examples/train/).
+There are more examples of training scripts to reproduce the results of our paper under [examples](./examples/train/).
 
 
 ## Evaluation
-Once the model is trained, we run the following command to evaluate the rendering quality on the test views given the ``{MODEL_PATH}``. 
+Once the model is trained, the following command is used to evaluate rendering quality on the test views given the ``{MODEL_PATH}``. 
 ```bash
 python validate.py ${DATASET} \
     --user-dir fairnr \
@@ -125,10 +128,12 @@ python validate.py ${DATASET} \
     --path ${MODEL_PATH} \
     --model-overrides '{"chunk_size":1024,"raymarching_tolerance":0.01,"tensorboard_logdir":"","eval_lpips":True}' \
 ```
-Note that we override the ``raymarching_tolerance`` to ``0.01`` to enable early termination to speed-up rendering.
+
+Note that we override the ``raymarching_tolerance`` to ``0.01`` to enable early termination for rendering speed-up.
 
 ## Free Viewpoint Rendering
-We also support free-viewpoint rendering given a trained model as well as a rendering trajectory. For example, the following command render the trained model with a circle trajectory (angular speed 3 degree/frame, 15 frames per GPU). In default, the code finds all available GPUs.
+Free-viewpoint rendering can be achieved once a model is trained and a rendering trajectory is specified. For example, the following command is for rendering with a circle trajectory (angular speed 3 degree/frame, 15 frames per GPU). This outputs per-view rendered images and merge the images into a ``.mp4`` video in ``${SAVE}/output`` as follows:
+<img src='docs/figs/results.gif'/>. By default, the code can detect all available GPUs.
 ```bash
 python render.py ${DATASET} \
     --user-dir fairnr \
@@ -144,11 +149,10 @@ python render.py ${DATASET} \
     --render-output-types "color" "depth" "voxel" "normal" --render-combine-output \
     --log-format "simple"
 ```
-It will output per frame rendered images as well as a merged ``.mp4`` video in ``${SAVE}/output`` as follows:
-<img src='docs/figs/results.gif'/>
 
-Our code also support rendering given existing camera poses.
-For instance, we can render the same model on the poses from the testing views (``200..400``) by:
+
+Our code also supports rendering for given camera poses.
+For instance, the following command is for rendering with the camera poses defined in the 200-399th files under folder ``${DATASET}/pose``:
 ```bash
 python render.py ${DATASET} \
     --user-dir fairnr \
@@ -163,7 +167,7 @@ python render.py ${DATASET} \
     --render-output-types "color" "depth" "voxel" "normal" --render-combine-output \
     --log-format "simple"
 ```
-We also support rendering with a trajectory file where the camera poses are written in a ``.txt`` file. Please refer to this [example](./examples/render/blended_mvs/render_jade.sh).
+The code also supports rendering with camera poses defined in a ``.txt`` file. Please refer to this [example](./examples/render/blended_mvs/render_jade.sh).
 
 
 ## Citation
