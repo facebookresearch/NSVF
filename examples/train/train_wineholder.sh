@@ -1,33 +1,21 @@
-# just for debugging
-DATA="wineholder"
+# just for debugging  (Synthetic Data)
+DATA="Wineholder"
 RES="800x800"
-ARCH="nsvf_xyz"
-DATASET=/private/home/jgu/data/shapenet/${DATA}/scaled2
-SAVE=/checkpoint/jgu/space/neuralrendering/new_test/test_$DATA
+ARCH="nsvf_base"
+SUFFIX="v1"
+DATASET=/private/home/jgu/data/shapenet/release/Synthetic_NSVF/${DATA}
+SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
+MODEL=$ARCH$SUFFIX
+mkdir -p $SAVE/$MODEL
 
-mkdir -p $SAVE
-
-SLURM_ARGS="""
-{   'job-name': 'nsvf',
-    'partition': 'priority',
-    'comment': 'ICLR2021',
-    'nodes': 1,
-    'gpus': 8,
-    'output': '$SAVE/$ARCH/train.out',
-    'error': '$SAVE/$ARCH/train.%j.err',
-    'constraint': 'volta32gb',
-    'local': True}
-"""
-
-# CUDA_VISIBLE_DEVICES=0 \
+# start training locally
 python train.py ${DATASET} \
-    --slurm-args ${SLURM_ARGS//[[:space:]]/} \
     --user-dir fairnr \
     --task single_object_rendering \
     --train-views "0..100" \
     --view-resolution $RES \
     --max-sentences 1 \
-    --view-per-batch 4 \
+    --view-per-batch 2 \
     --pixel-per-view 2048 \
     --no-preload \
     --sampling-on-mask 1.0 --no-sampling-at-reader \
@@ -39,6 +27,7 @@ python train.py ${DATASET} \
     --arch $ARCH \
     --initial-boundingbox ${DATASET}/bbox.txt \
     --raymarching-stepsize-ratio 0.125 \
+    --use-octree \
     --discrete-regularization \
     --color-weight 128.0 \
     --alpha-weight 1.0 \
@@ -58,5 +47,5 @@ python train.py ${DATASET} \
     --pruning-every-steps 2500 \
     --keep-interval-updates 5 \
     --log-format simple --log-interval 1 \
-    --tensorboard-logdir ${SAVE}/tensorboard/${ARCH} \
-    --save-dir ${SAVE}/${ARCH}
+    --tensorboard-logdir ${SAVE}/tensorboard/${MODEL} \
+    --save-dir ${SAVE}/${MODEL}

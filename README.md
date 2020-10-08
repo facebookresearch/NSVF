@@ -50,7 +50,7 @@ Dataset | Download Link | Notes on Dataset Split
 Synthetic-NSVF | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/Synthetic_NSVF.zip) | 0_\* (training) 1_\* (validation) 2_\* (testing)
 [Synthetic-NeRF](https://github.com/bmild/nerf) | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/Synthetic_NeRF.zip) | 0_\* (training) 1_\* (validation) 2_\* (testing)
 [BlendedMVS](https://github.com/YoYo000/BlendedMVS)  | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/BlendedMVS.zip) | 0_\* (training) 1_\* (testing)
-[Tanks&Temples](https://www.tanksandtemples.org/) | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/TanksAndTemples.zip) | 0_\* (training) 1_\* (testing)
+[Tanks&Temples](https://www.tanksandtemples.org/) | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/TanksAndTemple.zip) | 0_\* (training) 1_\* (testing)
 
 ### Prepare your own dataset
 
@@ -200,7 +200,7 @@ python render.py ${DATASET} \
     --log-format "simple"
 ```
 
-The code also supports rendering with camera poses defined in a ``.txt`` file. Please refer to this [example](./examples/render/blended_mvs/render_jade.sh).
+The code also supports rendering with camera poses defined in a ``.txt`` file. Please refer to this [example](./examples/render/render_jade.sh).
 
 ## Citation
 

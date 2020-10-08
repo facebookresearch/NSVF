@@ -1,43 +1,48 @@
 # just for debugging
-DATA="Caterpillar"
-RES="1080x1920"
+DATA="Wineholder"
+RES="800x800"
 ARCH="nsvf_base"
-DATASET=/private/home/jgu/data/shapenet/release/TanksAndTemple/${DATA}
+SUFFIX="v1"
+DATASET=/private/home/jgu/data/shapenet/release/Synthetic_NSVF/${DATA}
 SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
-mkdir -p $SAVE/$ARCH
+MODEL=$ARCH$SUFFIX
+mkdir -p $SAVE/$MODEL
 
-SLURM_ARGS="""
-{   'job-name': '${DATA}-${ARCH}',
+# By defining the following environment variables
+# The code will automatically detect it and trying to submit the code in slurm-based clusters
+# We don't need to change the main body of the training code.
+export SLURM_ARGS="""{
+    'job-name': '${DATA}-${MODEL}',
     'partition': 'priority',
-    'comment': 'NeurIPS open-source',
+    'comment': 'NeurIPS2020 open-source',
     'nodes': 1,
     'gpus': 8,
-    'output': '$SAVE/$ARCH/train.out',
-    'error': '$SAVE/$ARCH/train.stderr.%j',
+    'output': '$SAVE/$MODEL/train.out',
+    'error': '$SAVE/$MODEL/train.stderr.%j',
     'constraint': 'volta32gb',
-    'local': True}
+    'local': False}
 """
 
+# start training based on SLURM_ARGS
 python train.py ${DATASET} \
-    --slurm-args ${SLURM_ARGS//[[:space:]]/} \
     --user-dir fairnr \
     --task single_object_rendering \
-    --train-views "0..322" \
+    --train-views "0..100" \
     --view-resolution $RES \
     --max-sentences 1 \
     --view-per-batch 2 \
     --pixel-per-view 2048 \
-    --valid-chunk-size 512 \
-    --no-load-binary \
+    --no-preload \
     --sampling-on-mask 1.0 --no-sampling-at-reader \
     --valid-view-resolution $RES \
-    --valid-views "322..368" \
+    --valid-views "100..200" \
     --valid-view-per-batch 1 \
     --transparent-background "1.0,1.0,1.0" \
     --background-stop-gradient \
     --arch $ARCH \
     --initial-boundingbox ${DATASET}/bbox.txt \
     --raymarching-stepsize-ratio 0.125 \
+    --use-octree \
     --discrete-regularization \
     --color-weight 128.0 \
     --alpha-weight 1.0 \
@@ -57,5 +62,5 @@ python train.py ${DATASET} \
     --pruning-every-steps 2500 \
     --keep-interval-updates 5 \
     --log-format simple --log-interval 1 \
-    --tensorboard-logdir ${SAVE}/tensorboard/${ARCH} \
-    --save-dir ${SAVE}/${ARCH}
+    --tensorboard-logdir ${SAVE}/tensorboard/${MODEL} \
+    --save-dir ${SAVE}/${MODEL}

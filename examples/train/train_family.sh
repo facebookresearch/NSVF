@@ -1,36 +1,30 @@
-# just for debugging
-DATA="Statues"
-RES="576x768"
+# just for debugging  (Tanks&Temple Data)
+DATA="Family"
+RES="1080x1920"
+VALIDRES="540x960"  # the original size maybe too slow for evaluation
+                    # we can optionally half the image size only for validation
 ARCH="nsvf_base"
-DATASET=/private/home/jgu/data/shapenet/release/BlendedMVS/${DATA}
+SUFFIX="v1"
+DATASET=/private/home/jgu/data/shapenet/release/TanksAndTemple/${DATA}
 SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
-mkdir -p $SAVE/$ARCH
+MODEL=$ARCH$SUFFIX
+mkdir -p $SAVE/$MODEL
 
-SLURM_ARGS="""
-{   'job-name': '${DATA}-${ARCH}',
-    'partition': 'priority',
-    'comment': 'NeurIPS open-source',
-    'nodes': 1,
-    'gpus': 8,
-    'output': '$SAVE/$ARCH/train.out',
-    'error': '$SAVE/$ARCH/train.stderr.%j',
-    'constraint': 'volta32gb',
-    'local': False}
-"""
-
+# start training locally
 python train.py ${DATASET} \
     --slurm-args ${SLURM_ARGS//[[:space:]]/} \
     --user-dir fairnr \
     --task single_object_rendering \
-    --train-views "0..51" \
+    --train-views "0..133" \
     --view-resolution $RES \
     --max-sentences 1 \
-    --view-per-batch 4 \
+    --view-per-batch 2 \
     --pixel-per-view 2048 \
-    --no-preload \
+    --valid-chunk-size 128 \
+    --no-preload\
     --sampling-on-mask 1.0 --no-sampling-at-reader \
-    --valid-view-resolution $RES \
-    --valid-views "51..59" \
+    --valid-view-resolution $VALIDRES \
+    --valid-views "133..152" \
     --valid-view-per-batch 1 \
     --transparent-background "1.0,1.0,1.0" \
     --background-stop-gradient \
@@ -56,5 +50,5 @@ python train.py ${DATASET} \
     --pruning-every-steps 2500 \
     --keep-interval-updates 5 \
     --log-format simple --log-interval 1 \
-    --tensorboard-logdir ${SAVE}/tensorboard/${ARCH} \
-    --save-dir ${SAVE}/${ARCH}
+    --tensorboard-logdir ${SAVE}/tensorboard/${MODEL} \
+    --save-dir ${SAVE}/${MODEL}

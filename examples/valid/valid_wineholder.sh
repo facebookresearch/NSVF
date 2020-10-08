@@ -1,11 +1,14 @@
 # just for debugging
-DATA="wineholder"
+DATA="Wineholder"
 RES="800x800"
 ARCH="nsvf_base"
-DATASET=/private/home/jgu/data/shapenet/${DATA}/scaled2
-SAVE=/checkpoint/jgu/space/neuralrendering/new_test/test_$DATA
-MODEL_PATH=$SAVE/checkpoint_last.pt
+SUFFIX="v1"
+DATASET=/private/home/jgu/data/shapenet/release/Synthetic_NSVF/${DATA}
+SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
+MODEL=$ARCH$SUFFIX
+MODEL_PATH=$SAVE/$MODEL/checkpoint_last.pt
 
+# start validating a trained model with target images.
 python validate.py ${DATASET} \
     --user-dir fairnr \
     --valid-views "200..400" \
@@ -15,4 +18,4 @@ python validate.py ${DATASET} \
     --max-sentences 1 \
     --valid-view-per-batch 1 \
     --path ${MODEL_PATH} \
-    --model-overrides '{"chunk_size":1024,"raymarching_tolerance":0.01,"tensorboard_logdir":"","eval_lpips":True}' \
+    --model-overrides '{"chunk_size":1024,"raymarching_tolerance":0.01,"tensorboard_logdir":"","eval_lpips":False}' \

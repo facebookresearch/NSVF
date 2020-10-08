@@ -1,14 +1,12 @@
 # just for debugging
-DATA="wineholder"
+DATA="Wineholder"
 RES="800x800"
 ARCH="nsvf_base"
-DATASET=/private/home/jgu/data/shapenet/${DATA}/scaled2
-SAVE=/checkpoint/jgu/space/neuralrendering/new_test/test_$DATA
-MODEL_PATH=$SAVE/checkpoint_last.pt
-
-# additional rendering args
-MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f}'
-MODELARGS=$(printf "$MODELTEMP" 1024 0.01)
+SUFFIX="v1"
+DATASET=/private/home/jgu/data/shapenet/release/Synthetic_NSVF/${DATA}
+SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
+MODEL=$ARCH$SUFFIX
+MODEL_PATH=$SAVE/$MODEL/checkpoint_last.pt
 
 # CUDA_VISIBLE_DEVICES=0 \
 python render.py ${DATASET} \
@@ -19,7 +17,7 @@ python render.py ${DATASET} \
     --render-save-fps 24 \
     --render-camera-poses ${DATASET}/pose \
     --render-views "200..400" \
-    --model-overrides $MODELARGS \
+    --model-overrides '{"chunk_size":256,"raymarching_tolerance":0.01}' \
     --render-resolution $RES \
     --render-output ${SAVE}/output \
     --render-output-types "color" "depth" "voxel" "normal" \

@@ -1,39 +1,28 @@
-# just for debugging
-DATA="Ignatius"
-RES="1080x1920"
+# just for debugging (BlendedMVS data)
+DATA="Jade"
+RES="576x768"
 ARCH="nsvf_base"
 SUFFIX="v1"
-DATASET=/private/home/jgu/data/shapenet/release/TanksAndTemple/${DATA}
+DATASET=/private/home/jgu/data/shapenet/release/BlendedMVS/${DATA}
 SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
 MODEL=$ARCH$SUFFIX
 mkdir -p $SAVE/$MODEL
 
-export SLURM_ARGS="""{
-    'job-name': '${DATA}-${MODEL}',
-    'partition': 'priority',
-    'comment': 'NeurIPS open-source',
-    'nodes': 1,
-    'gpus': 8,
-    'output': '$SAVE/$MODEL/train.out',
-    'error': '$SAVE/$MODEL/train.stderr.%j',
-    'constraint': 'volta32gb',
-    'local': False}
-"""
-
+# start training locally
 python train.py ${DATASET} \
     --user-dir fairnr \
     --task single_object_rendering \
-    --train-views "0..230" \
+    --train-views "0..50" \
     --view-resolution $RES \
     --max-sentences 1 \
-    --view-per-batch 2 \
+    --view-per-batch 4 \
     --pixel-per-view 2048 \
     --no-preload \
     --sampling-on-mask 1.0 --no-sampling-at-reader \
     --valid-view-resolution $RES \
-    --valid-views "230..263" \
+    --valid-views "50..58" \
     --valid-view-per-batch 1 \
-    --transparent-background "1.0,1.0,1.0" \
+    --transparent-background "0.0,0.0,0.0" \
     --background-stop-gradient \
     --arch $ARCH \
     --initial-boundingbox ${DATASET}/bbox.txt \

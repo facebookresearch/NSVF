@@ -256,7 +256,6 @@ def get_training_stats(stats):
 
 def validate(args, trainer, task, epoch_itr, subsets):
     """Evaluate the model on the validation set(s) and return the losses."""
-
     if args.fixed_validation_seed is not None:
         # set fixed seed for every validation
         utils.set_torch_seed(args.fixed_validation_seed)
@@ -297,8 +296,10 @@ def validate(args, trainer, task, epoch_itr, subsets):
         # create a new root metrics aggregator so validation metrics
         # don't pollute other aggregators (e.g., train meters)
         with metrics.aggregate(new_root=True) as agg:
-            for sample in progress:
+            for step, sample in enumerate(progress):
                 trainer.valid_step(sample)
+                stats = get_training_stats(agg.get_smoothed_values())
+                progress.log(stats, tag='validate', step=step)
 
         # log validation stats
         stats = get_valid_stats(args, trainer, agg.get_smoothed_values())

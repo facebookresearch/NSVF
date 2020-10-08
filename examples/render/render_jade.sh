@@ -2,15 +2,17 @@
 DATA="Jade"
 RES="576x768"
 ARCH="nsvf_base"
+SUFFIX="v1"
 DATASET=/private/home/jgu/data/shapenet/release/BlendedMVS/${DATA}
 SAVE=/checkpoint/jgu/space/neuralrendering/new_release/$DATA
-MODEL_PATH=$SAVE/$ARCH/checkpoint_last.pt
+MODEL=$ARCH$SUFFIX
+MODEL_PATH=$SAVE/$MODEL/checkpoint_last.pt
 
 # additional rendering args
 MODELTEMP='{"chunk_size":%d,"raymarching_tolerance":%.3f,"use_octree":True}'
 MODELARGS=$(printf "$MODELTEMP" 256 0.0)
 
-# CUDA_VISIBLE_DEVICES=0 \
+# rendering with pre-defined testing trajectory
 python render.py ${DATASET} \
     --user-dir fairnr \
     --task single_object_rendering \
