@@ -196,6 +196,7 @@ def base_architecture(args):
 
     # others
     args.chunk_size = getattr(args, "chunk_size", 64)
+    args.valid_chunk_size = getattr(args, "valid_chunk_size", 256)
 
 
 @register_model_architecture("nsvf", "nsvf_xyz")

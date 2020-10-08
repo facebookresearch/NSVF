@@ -42,15 +42,15 @@ python setup.py build_ext --inplace
 
 ## Dataset
 
-You can download our pre-processed synthetic and real datasets used in the paper.
-Please cite the original papers if you use one of them in your system.
+You can download the pre-processed synthetic and real datasets used in our paper.
+Please also cite the original papers if you use any of them in your work.
 
-Dataset | Download Link
----|---
-Synthetic-NSVF | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/Synthetic_NSVF.zip)
-[Synthetic-NeRF](https://github.com/bmild/nerf) | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/Synthetic_NeRF.zip)
-[BlendedMVS](https://github.com/YoYo000/BlendedMVS)  | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/BlendedMVS.zip)
-[Tanks&Temples](https://www.tanksandtemples.org/) | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/TanksAndTemples.zip)
+Dataset | Download Link | Notes on Dataset Split
+---|---|---
+Synthetic-NSVF | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/Synthetic_NSVF.zip) | 0_\* (training) 1_\* (validation) 2_\* (testing)
+[Synthetic-NeRF](https://github.com/bmild/nerf) | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/Synthetic_NeRF.zip) | 0_\* (training) 1_\* (validation) 2_\* (testing)
+[BlendedMVS](https://github.com/YoYo000/BlendedMVS)  | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/BlendedMVS.zip) | 0_\* (training) 1_\* (testing)
+[Tanks&Temples](https://www.tanksandtemples.org/) | [download (.zip)](https://dl.fbaipublicfiles.com/nsvf/dataset/TanksAndTemples.zip) | 0_\* (training) 1_\* (testing)
 
 ### Prepare your own dataset
 
@@ -60,14 +60,16 @@ To prepare a new dataset of a single scene for training and testing, please foll
 <dataset_name>
 |-- bbox.txt         # bounding-box file
 |-- intrinsics.txt   # 4x4 camera intrinsics
-|-- rgb              # folder of target images
-    |-- 0.png
+|-- rgb
+    |-- 0.png        # target image for each view
     |-- 1.png
     ...
-|-- pose             # folder of camera poses (4x4 matrices)
-    |-- 0.txt
+|-- pose
+    |-- 0.txt        # camera pose for each view (4x4 matrices)
     |-- 1.txt
     ...
+[optional]
+|-- test_traj.txt    # camera pose for free-view rendering demonstration (4N x 4)
 ```
 
 where the ``bbox.txt`` file contains a line describing the initial bounding box and voxel size:

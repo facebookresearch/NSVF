@@ -4,7 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import random, shlex
-import os, subprocess
+import os, sys, subprocess
 
 
 def launch_cluster(slurm_args, model_args):
@@ -62,6 +62,9 @@ def launch_cluster(slurm_args, model_args):
     # start training
     env = os.environ.copy()
     env['OMP_NUM_THREADS'] = '2'
+    if env.get('SLURM_ARGS', None) is not None:
+        del env['SLURM_ARGS']
+
     if nodes > 1:
         env['NCCL_SOCKET_IFNAME'] = '^docker0,lo'
         env['NCCL_DEBUG'] = 'INFO'
@@ -75,7 +78,14 @@ def launch_cluster(slurm_args, model_args):
             env['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, range(gpus)))
         env['NCCL_DEBUG'] = 'INFO'
         
-        train_proc = subprocess.Popen(train_cmd, env=env)
+        train_proc = subprocess.Popen(train_cmd, env=env, 
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1)
+        
+        with open(train_log, 'ab') as train_log_h:
+            for line in train_proc.stdout:
+                print(line.decode('utf-8').strip()) 
+                train_log_h.write(line)
+                train_log_h.flush()
         train_proc.wait()
 
     else:

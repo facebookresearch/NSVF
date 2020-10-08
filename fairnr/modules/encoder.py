@@ -363,6 +363,9 @@ class SparseVoxelEncoder(Encoder):
         if new_values is not None:
             self.values.weight = nn.Parameter(new_values)
             self.values.num_embeddings = self.values.weight.size(0)
+
+        if self.use_octree:  # clean the octree, need to be rebuilt
+            self.flatten_centers, self.flatten_children = None, None
         
         self.total_size = new_num_keys
         self.num_keys = self.num_keys * 0 + self.total_size
