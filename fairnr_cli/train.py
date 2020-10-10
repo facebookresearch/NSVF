@@ -299,7 +299,10 @@ def validate(args, trainer, task, epoch_itr, subsets):
             for step, sample in enumerate(progress):
                 trainer.valid_step(sample)
                 stats = get_training_stats(agg.get_smoothed_values())
-                progress.log(stats, tag='valid', step=step)
+                plog = progress.log
+                if hasattr(progress, "wrapped_bar"):
+                    plog = progress.wrapped_bar.log
+                plog(stats, tag='valid', step=step)
 
         # log validation stats
         stats = get_valid_stats(args, trainer, agg.get_smoothed_values())

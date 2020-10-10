@@ -1,12 +1,14 @@
 # Neural Sparse Voxel Fields (NSVF)
 
+### [Project Page](https://lingjie0206.github.io/papers/NSVF/) | [Video](https://www.youtube.com/watch?v=RFqPwH7QFEI) | [Paper](https://arxiv.org/abs/2007.11571) | [Data](#dataset)
+
 Photo-realistic free-viewpoint rendering of real-world scenes using classical computer graphics techniques is a challenging problem because it requires the difficult step of capturing detailed appearance and geometry models.
 Neural rendering is an emerging field that employs deep neural networks to implicitly learn scene representations encapsulating both geometry and appearance from 2D observations with or without a coarse geometry.
 However, existing approaches in this field often show blurry renderings or suffer from slow rendering process. We propose [Neural Sparse Voxel Fields (NSVF)](https://arxiv.org/abs/2007.11571), a new neural scene representation for fast and high-quality free-viewpoint rendering.
 
 Here is the official repo for the paper:
 
-* [Neural Sparse Voxel Fields (Liu et al., 2020)](https://arxiv.org/abs/2007.11571).
+* [Neural Sparse Voxel Fields (Liu et al., 2020, <span style="color:red">NeurIPS 2020 Spotlight</span>)](https://arxiv.org/abs/2007.11571).
 
 <img src='docs/figs/framework.png'/>
 
@@ -90,7 +92,7 @@ In the following example, we use a pre-defined architecture ``nsvf_base`` with s
 
 * By setting ``--no-sampling-at-reader``, the model only samples pixels in the projected image region of sparse voxels for training.
 * By default, we set the ray-marching step size to be the ratio ``1/8 (0.125)`` of the voxel size which is typically described in the ``bbox.txt`` file.
-* It is optional to turn on ``--use-octree``. It will build a sparse voxel octree to speed-up the ray-voxel intersection especially when the number of voxels is greater than ``10000``.
+* It is optional to turn on ``--use-octree``. It will build a sparse voxel octree to speed-up the ray-voxel intersection especially when the number of voxels is larger than ``10000``.
 * By setting ``--pruning-every-steps`` as ``2500``, the model performs self-pruning at every ``2500`` steps.
 * By setting ``--half-voxel-size-at`` and ``--reduce-step-size-at`` as ``5000,25000,75000``,  the voxel size and step size are halved at ``5k``, ``25k`` and ``75k``, respectively.
 
