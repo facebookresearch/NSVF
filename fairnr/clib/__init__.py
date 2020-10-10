@@ -32,27 +32,11 @@ except ImportError:
         "Please see the setup instructions in the README"
     )
 
+MAX_DEPTH = 10000.0
+
 class BallRayIntersect(Function):
     @staticmethod
     def forward(ctx, radius, n_max, points, ray_start, ray_dir):
-        r"""
-
-        Parameters
-        ----------
-        radius : float
-            radius of the balls
-        n_max: int
-            maximum number of points to intersect.
-        xyz : torch.Tensor
-            (B, N, 3) xyz coordinates of the features
-        new_xyz : torch.Tensor
-            (B, npoint, 3) centers of the ball query
-
-        Returns
-        -------
-        torch.Tensor
-            (B, npoint) tensor with the nearest indicies of the features that form the query balls
-        """
         inds, min_depth, max_depth = _ext.ball_intersect(
             ray_start.float(), ray_dir.float(), points.float(), radius, n_max)
         min_depth = min_depth.type_as(ray_start)
@@ -73,26 +57,8 @@ ball_ray_intersect = BallRayIntersect.apply
 class AABBRayIntersect(Function):
     @staticmethod
     def forward(ctx, voxelsize, n_max, points, ray_start, ray_dir):
-        r"""
-
-        Parameters
-        ----------
-        radius : float
-            radius of the balls
-        n_max: int
-            maximum number of points to intersect.
-        xyz : torch.Tensor
-            (B, N, 3) xyz coordinates of the features
-        new_xyz : torch.Tensor
-            (B, npoint, 3) centers of the ball query
-
-        Returns
-        -------
-        torch.Tensor
-            (B, npoint) tensor with the nearest indicies of the features that form the query balls
-        """
         # HACK: speed-up ray-voxel intersection by batching...
-        G = 2048
+        G = min(2048, int(2 * 10 ** 9 / points.numel()))   # HACK: avoid out-of-memory
         S, N = ray_start.shape[:2]
         K = int(np.ceil(N / G))
         H = K * G
@@ -131,26 +97,7 @@ aabb_ray_intersect = AABBRayIntersect.apply
 class SparseVoxelOctreeRayIntersect(Function):
     @staticmethod
     def forward(ctx, voxelsize, n_max, points, children, ray_start, ray_dir):
-        r"""
-
-        Parameters
-        ----------
-        radius : float
-            radius of the balls
-        n_max: int
-            maximum number of points to intersect.
-        xyz : torch.Tensor
-            (B, N, 3) xyz coordinates of the features
-        new_xyz : torch.Tensor
-            (B, npoint, 3) centers of the ball query
-
-        Returns
-        -------
-        torch.Tensor
-            (B, npoint) tensor with the nearest indicies of the features that form the query balls
-        """
-        # HACK: speed-up ray-voxel intersection by batching...
-        G = 2048
+        G = min(2048, int(2 * 10 ** 9 / (points.numel() + children.numel())))   # HACK: avoid out-of-memory
         S, N = ray_start.shape[:2]
         K = int(np.ceil(N / G))
         H = K * G
@@ -163,7 +110,6 @@ class SparseVoxelOctreeRayIntersect(Function):
         children = children.expand(S * G, *children.size()[1:]).contiguous()
         inds, min_depth, max_depth = _ext.svo_intersect(
             ray_start.float(), ray_dir.float(), points.float(), children.int(), voxelsize, n_max)
-        # from fairseq import pdb; pdb.set_trace()
         
         min_depth = min_depth.type_as(ray_start)
         max_depth = max_depth.type_as(ray_start)
@@ -192,7 +138,7 @@ class TriangleRayIntersect(Function):
     @staticmethod
     def forward(ctx, cagesize, blur_ratio, n_max, points, faces, ray_start, ray_dir):
         # HACK: speed-up ray-voxel intersection by batching...
-        G = 2048
+        G = min(2048, int(2 * 10 ** 9 / (3 * faces.numel())))   # HACK: avoid out-of-memory
         S, N = ray_start.shape[:2]
         K = int(np.ceil(N / G))
         H = K * G

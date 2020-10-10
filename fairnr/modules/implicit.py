@@ -148,7 +148,6 @@ class TextureField(ImplicitField):
         super().__init__(in_dim, out_dim, hidden_dim, num_layers, outmost_linear=True)
 
 
-# bash scripts/generate/generate_lego.sh $MODEL bulldozer6 2 &
 class OccupancyField(ImplicitField):
     """
     Occupancy Network which predicts 0~1 at every space
