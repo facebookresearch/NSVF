@@ -18,7 +18,7 @@ This code is implemented in PyTorch using [fairseq framework](https://github.com
 
 The code has been tested on the following system:
 
-* Python >= 3.6
+* Python 3.7
 * PyTorch 1.4.0
 * [Nvidia apex library](https://github.com/NVIDIA/apex) (optional)
 * Nvidia GPU (Tesla V100 32GB) CUDA 10.1
