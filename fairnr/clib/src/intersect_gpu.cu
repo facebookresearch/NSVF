@@ -432,13 +432,15 @@ __global__ void uniform_ray_sampling_kernel(
     
     // sort all depths
     while (true) {
-      if (pts_idx[H + umax] == -1 || umax == max_hits || ucur == max_steps) {
+      if (umax == max_hits || ucur == max_steps || pts_idx[H + umax] == -1) {
         break;  // reach the maximum
       }
-      if (umin < max_hits) {
+      if (umin < max_hits && pts_idx[H + umin] > -1) {
         last_min_depth = min_depth[H + umin];
+      } else {
+        last_min_depth = last_max_depth + 0.1;
       }
-      if (umax < max_hits) {
+      if (umax < max_hits && pts_idx[H + umin] > -1) {
         last_max_depth = max_depth[H + umax];
       }
       if (ucur < max_steps) {
@@ -465,12 +467,13 @@ __global__ void uniform_ray_sampling_kernel(
     float l_depth, r_depth;
     int step = 0;
     for (ucur = 0, umin = 0, umax = 0; ucur < max_steps - 1; ucur++) {
+      if (sampled_idx[K + ucur + 1] == -1) break;
       l_depth = sampled_depth[K + ucur];
       r_depth = sampled_depth[K + ucur + 1];  
       sampled_depth[K + ucur] = (l_depth + r_depth) * .5;
       sampled_dists[K + ucur] = (r_depth - l_depth);
-      if (sampled_depth[K + ucur] >= min_depth[H + umin] && umin < max_hits) umin++;
-      if (sampled_depth[K + ucur] >= max_depth[H + umax] && umax < max_hits) umax++;
+      if (umin < max_hits && sampled_depth[K + ucur] >= min_depth[H + umin] && pts_idx[H + umin] > -1) umin++;
+      if (umax < max_hits && sampled_depth[K + ucur] >= max_depth[H + umax] && pts_idx[H + umax] > -1) umax++;
       if (umax == max_hits || pts_idx[H + umax] == -1) break;
       if (umin - 1 == umax && sampled_dists[K + ucur] > 0) {
         sampled_depth[K + step] = sampled_depth[K + ucur];
@@ -479,12 +482,11 @@ __global__ void uniform_ray_sampling_kernel(
         step++;
       }
     }
+    
     for (int s = step; s < max_steps; s++) {
       sampled_idx[K + s] = -1;
     }
   }
-
-
 }
 
 
