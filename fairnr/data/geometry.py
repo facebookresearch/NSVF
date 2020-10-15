@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from fairnr.data import data_utils as D
+from fairnr.clib._ext import build_octree
 
 INF = 1000.0
 
@@ -234,11 +235,20 @@ def offset_points(point_xyz, quarter_voxel=1, offset_only=False, bits=2):
     return offset.type_as(point_xyz) * quarter_voxel
 
 
+def discretize_points(voxel_points, voxel_size):
+    # this function turns voxel centers/corners into integer indeices
+    # we assume all points are alreay put as voxels (real numbers)
+    minimal_voxel_point = voxel_points.min(dim=0, keepdim=True)[0]
+    voxel_indices = ((voxel_points - minimal_voxel_point) / voxel_size).round_().long()  # float
+    residual = (voxel_points - voxel_indices.type_as(voxel_points) * voxel_size).mean(0, keepdim=True)
+    return voxel_indices, residual
+
+
 def splitting_points(point_xyz, point_feats, values, half_voxel):        
     # generate new centers
     quarter_voxel = half_voxel * .5
     new_points = offset_points(point_xyz, quarter_voxel).reshape(-1, 3)
-    old_coords = (point_xyz / quarter_voxel).floor_().long()
+    old_coords = discretize_points(point_xyz, quarter_voxel)[0]
     new_coords = offset_points(old_coords).reshape(-1, 3)
     new_keys0  = offset_points(new_coords).reshape(-1, 3)
     
@@ -300,9 +310,7 @@ def fill_in(shape, hits, input, initial=1.0):
 
 
 def build_easy_octree(points, half_voxel):
-    from fairnr.clib._ext import build_octree
-    coords = (points / half_voxel).floor_().long()     # works easier in int space
-    residual = (points - coords.float() * half_voxel).mean(0, keepdim=True)
+    coords, residual = discretize_points(points, half_voxel)
     ranges = coords.max(0)[0] - coords.min(0)[0]
     depths = torch.log2(ranges.max().float()).ceil_().long() - 1
     center = (coords.max(0)[0] + coords.min(0)[0]) / 2
