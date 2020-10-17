@@ -2,6 +2,8 @@
 
 ### [Project Page](https://lingjie0206.github.io/papers/NSVF/) | [Video](https://www.youtube.com/watch?v=RFqPwH7QFEI) | [Paper](https://arxiv.org/abs/2007.11571) | [Data](#dataset)
 
+<img src='docs/figs/framework.png'/>
+
 Photo-realistic free-viewpoint rendering of real-world scenes using classical computer graphics techniques is a challenging problem because it requires the difficult step of capturing detailed appearance and geometry models.
 Neural rendering is an emerging field that employs deep neural networks to implicitly learn scene representations encapsulating both geometry and appearance from 2D observations with or without a coarse geometry.
 However, existing approaches in this field often show blurry renderings or suffer from slow rendering process. We propose [Neural Sparse Voxel Fields (NSVF)](https://arxiv.org/abs/2007.11571), a new neural scene representation for fast and high-quality free-viewpoint rendering.
@@ -10,7 +12,19 @@ Here is the official repo for the paper:
 
 * [Neural Sparse Voxel Fields (Liu et al., 2020, <span style="color:red">NeurIPS 2020 Spotlight</span>)](https://arxiv.org/abs/2007.11571).
 
-<img src='docs/figs/framework.png'/>
+
+## Table of contents
+-----
+  * [Installation](#requirements-and-installation)
+  * [Dataset](#dataset)
+  * [Usage](#train-a-new-model)
+    + [Training](#train-a-new-model)
+    + [Evaluation](#evaluation)
+    + [Free-view Rendering](#free-viewpoint-rendering)
+    + [Extracting Geometry](#extract-the-geometry)
+  * [License](#license)
+  * [Citation](#citation)
+------
 
 ## Requirements and Installation
 
@@ -204,6 +218,24 @@ python render.py ${DATASET} \
 ```
 
 The code also supports rendering with camera poses defined in a ``.txt`` file. Please refer to this [example](./examples/render/render_jade.sh).
+
+## Extract the Geometry
+
+We also support running marching cubes to extract the iso-surfaces as triangle meshes from a trained NSVF model and saved as ``{SAVE}/{NAME}.ply``. 
+```bash
+python extract.py \
+    --user-dir fairnr \
+    --path ${MODEL_PATH} \
+    --output ${SAVE} \
+    --name ${NAME} \
+    --format 'mc_mesh' \
+    --mc-threshold 0.5 \
+    --mc-num-samples-per-halfvoxel 5
+```
+It is also possible to export the learned sparse voxels by setting ``--format 'voxel_mesh'``.
+The output ``.ply`` file can be opened with any 3D viewers such as [MeshLab](https://www.meshlab.net/). 
+
+<img src='docs/figs/snapshot_meshlab.png'/>
 
 ## License
 

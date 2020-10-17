@@ -15,10 +15,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 from pathlib import Path
+from plyfile import PlyData, PlyElement
+
 from fairnr.data.data_utils import load_matrix
 from fairnr.data.geometry import (
     trilinear_interp, splitting_points, offset_points,
-    get_edge, build_easy_octree
+    get_edge, build_easy_octree, discretize_points
 )
 from fairnr.clib import (
     aabb_ray_intersect, triangle_ray_intersect,
@@ -99,8 +101,7 @@ class SparseVoxelEncoder(Encoder):
         fine_length = fine_points.size(0)
  
         # transform from voxel centers to voxel corners (key/values)
-        fine_coords = (fine_points / half_voxel).floor_().long()
-        fine_res = (fine_points - (fine_points / half_voxel).floor_() * half_voxel).mean(0, keepdim=True)
+        fine_coords, fine_res = discretize_points(fine_points, half_voxel)
         fine_keys0 = offset_points(fine_coords, 1.0).reshape(-1, 3)
         fine_keys, fine_feats  = torch.unique(fine_keys0, dim=0, sorted=True, return_inverse=True)
         fine_feats = fine_feats.reshape(-1, 8)
@@ -210,11 +211,83 @@ class SparseVoxelEncoder(Encoder):
             encoder_states['voxel_octree_children_idx'] = flatten_children
         return encoder_states
 
-    def extract_voxels(self):
-        voxel_index = torch.arange(self.keep.size(0), device=self.keep.device)
-        voxel_index = voxel_index[self.keep.bool()]
-        voxel_point = self.points[self.keep.bool()]
-        return voxel_index, voxel_point
+    @torch.no_grad()
+    def export_voxels(self, return_mesh=False):
+        logger.info("exporting learned sparse voxels...")
+        voxel_idx = torch.arange(self.keep.size(0), device=self.keep.device)
+        voxel_idx = voxel_idx[self.keep.bool()]
+        voxel_pts = self.points[self.keep.bool()]
+        if not return_mesh:
+            # HACK: we export the original voxel indices as "quality" in case for editing
+            points = [
+                (voxel_pts[k, 0], voxel_pts[k, 1], voxel_pts[k, 2], voxel_idx[k])
+                for k in range(voxel_idx.size(0))
+            ]
+            vertex = np.array(points, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('quality', 'f4')])
+            return PlyData([PlyElement.describe(vertex, 'vertex')])
+        
+        else:
+            # generate polygon for voxels
+            center_coords, residual = discretize_points(voxel_pts, self.voxel_size / 2)
+            offsets = torch.tensor([[-1,-1,-1],[-1,-1,1],[-1,1,-1],[1,-1,-1],[1,1,-1],[1,-1,1],[-1,1,1],[1,1,1]], device=center_coords.device)
+            vertex_coords = center_coords[:, None, :] + offsets[None, :, :]
+            vertex_points = vertex_coords.type_as(residual) * self.voxel_size / 2 + residual
+            
+            faceidxs = [[1,6,7,5],[7,6,2,4],[5,7,4,3],[1,0,2,6],[1,5,3,0],[0,3,4,2]]
+            all_vertex_keys, all_vertex_idxs  = {}, []
+            for i in range(vertex_coords.shape[0]):
+                for j in range(8):
+                    key = " ".join(["{}".format(int(p)) for p in vertex_coords[i,j]])
+                    if key not in all_vertex_keys:
+                        all_vertex_keys[key] = vertex_points[i,j]
+                        all_vertex_idxs += [key]
+            all_vertex_dicts = {key: u for u, key in enumerate(all_vertex_idxs)}
+            all_faces = torch.stack([torch.stack([vertex_coords[:, k] for k in f]) for f in faceidxs]).permute(2,0,1,3).reshape(-1,4,3)
+    
+            all_faces_keys = {}
+            for l in range(all_faces.size(0)):
+                key = " ".join(["{}".format(int(p)) for p in all_faces[l].sum(0) // 4])
+                if key not in all_faces_keys:
+                    all_faces_keys[key] = all_faces[l]
+
+            vertex = np.array([tuple(all_vertex_keys[key].cpu().tolist()) for key in all_vertex_idxs], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+            face = np.array([([all_vertex_dicts["{} {} {}".format(*b)] for b in a.cpu().tolist()],) for a in all_faces_keys.values()],
+                dtype=[('vertex_indices', 'i4', (4,))])
+            return PlyData([PlyElement.describe(vertex, 'vertex'), PlyElement.describe(face, 'face')])
+
+    @torch.no_grad()
+    def export_surfaces(self, field_fn, th, bits):
+        """
+        extract triangle-meshes from the implicit field using marching cube algorithm
+            Lewiner, Thomas, et al. "Efficient implementation of marching cubes' cases with topological guarantees." 
+            Journal of graphics tools 8.2 (2003): 1-15.
+        """
+        logger.info("marching cube...")
+        encoder_states = self.precompute(id=None)
+        points = encoder_states['voxel_center_xyz']
+
+        scores = self.get_scores(field_fn, th=th, bits=bits, encoder_states=encoder_states)
+        coords, residual = discretize_points(points, self.voxel_size)
+        A, B, C = [s + 1 for s in coords.max(0).values.cpu().tolist()]
+    
+        # prepare grids
+        full_grids = points.new_ones(A * B * C, bits ** 3)
+        full_grids[coords[:, 0] * B * C + coords[:, 1] * C + coords[:, 2]] = scores
+        full_grids = full_grids.reshape(A, B, C, bits, bits, bits)
+        full_grids = full_grids.permute(0, 3, 1, 4, 2, 5).reshape(A * bits, B * bits, C * bits)
+        full_grids = 1 - full_grids
+
+        # marching cube
+        from skimage import measure
+        space_step = self.voxel_size.item() / bits
+        verts, faces, normals, _ = measure.marching_cubes_lewiner(
+            volume=full_grids.cpu().numpy(), level=0.5,
+            spacing=(space_step, space_step, space_step)
+        )
+        verts += (residual - (self.voxel_size / 2)).cpu().numpy()
+        verts = np.array([tuple(a) for a in verts.tolist()], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+        faces = np.array([(a, ) for a in faces.tolist()], dtype=[('vertex_indices', 'i4', (3,))])
+        return PlyData([PlyElement.describe(verts, 'vertex'), PlyElement.describe(faces, 'face')])
 
     def get_edge(self, ray_start, ray_dir, samples, encoder_states):
         outs = get_edge(
@@ -313,18 +386,25 @@ class SparseVoxelEncoder(Encoder):
     @torch.no_grad()
     def pruning(self, field_fn, th=0.5, encoder_states=None):
         logger.info("pruning...")
+        
+        if self.use_octree:  # clean the octree, need to be rebuilt
+            self.flatten_centers, self.flatten_children = None, None
+
+        scores = self.get_scores(field_fn, th=th, bits=16, encoder_states=encoder_states)
+        keep = (1 - scores.max(-1)[0]) > th
+        self.keep.masked_scatter_(self.keep.bool(), keep.long())
+        logger.info("pruning done. # of voxels before: {}, after: {} voxels".format(scores.size(0), keep.sum()))
+    
+    def get_scores(self, field_fn, th=0.5, bits=16, encoder_states=None):
         if encoder_states is None:
             encoder_states = self.precompute(id=None)
         
         feats = encoder_states['voxel_vertex_idx'] 
         points = encoder_states['voxel_center_xyz']
         values = encoder_states['voxel_vertex_emb']
-        chunk_size, bits = 64, 16
+        chunk_size = 64
 
-        if self.use_octree:  # clean the octree, need to be rebuilt
-            self.flatten_centers, self.flatten_children = None, None
-
-        def prune_once(feats, points, values):
+        def get_scores_once(feats, points, values):
             # sample points inside voxels
             sampled_xyz = offset_points(points, self.voxel_size / 2.0, bits=bits)
             sampled_idx = torch.arange(points.size(0), device=points.device)[:, None].expand(*sampled_xyz.size()[:2])
@@ -340,15 +420,13 @@ class SparseVoxelEncoder(Encoder):
      
             # evaluation with density
             field_outputs = field_fn(field_inputs, outputs=['sigma'])
-            free_energy = -torch.relu(field_outputs['sigma']).reshape(-1, bits ** 3).max(-1)[0]
+            free_energy = -torch.relu(field_outputs['sigma']).reshape(-1, bits ** 3)
             
-            # prune voxels if needed
-            return (1 - torch.exp(free_energy)) > th
+            # return scores
+            return torch.exp(free_energy)
 
-        keep = torch.cat([prune_once(feats[i: i + chunk_size], points[i: i + chunk_size], values) 
+        return torch.cat([get_scores_once(feats[i: i + chunk_size], points[i: i + chunk_size], values) 
             for i in range(0, points.size(0), chunk_size)], 0)
-        self.keep.masked_scatter_(self.keep.bool(), keep.long())
-        logger.info("pruning done. # of voxels before: {}, after: {} voxels".format(points.size(0), keep.sum()))
 
     @torch.no_grad()
     def splitting(self):
