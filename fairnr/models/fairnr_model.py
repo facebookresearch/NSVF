@@ -69,6 +69,9 @@ class BaseModel(BaseFairseqModel):
     # def forward(self, ray_start, ray_dir, ray_split=1, **kwargs):
     def forward(self, ray_split=1, **kwargs):
         ray_start, ray_dir, uv = self.reader(**kwargs)
+        kwargs.update({
+            'field_fn': self.field.forward,
+            'input_fn': self.encoder.forward})
 
         if ray_split == 1:
             results = self._forward(ray_start, ray_dir, **kwargs)

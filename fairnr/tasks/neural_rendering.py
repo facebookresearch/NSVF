@@ -3,7 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-import os
+import os, copy
 import json
 import torch
 import imageio
@@ -14,6 +14,7 @@ from argparse import Namespace
 
 from fairseq.tasks import FairseqTask, register_task
 from fairseq.optim.fp16_optimizer import FP16Optimizer
+from fairseq.logging import progress_bar
 
 from fairnr.data import (
     ShapeViewDataset, SampledPixelDataset, ShapeViewStreamDataset,
@@ -75,11 +76,17 @@ class SingleObjRenderingTask(FairseqTask):
         parser.add_argument("--rendering-args", type=str, metavar='JSON')
         parser.add_argument("--pruning-th", type=float, default=0.5,
                             help="if larger than this, we choose keep the voxel.")
+        parser.add_argument("--pruning-with-train-stats", action='store_true',
+                            help="if set, model will run over the training set statstics to prune voxels.")
+        parser.add_argument("--pruning-rerun-train-set", action='store_true',
+                            help="only works when --pruning-with-train-stats is also set.")
         parser.add_argument("--output-valid", type=str, default=None)
 
     def __init__(self, args):
         super().__init__(args)
         
+        self._trainer, self._dummy_batch = None, None
+
         # check dataset
         self.train_data = self.val_data = self.test_data = args.data
         self.object_ids = None if args.object_id_path is None else \
@@ -151,8 +158,7 @@ class SingleObjRenderingTask(FairseqTask):
         """
         Load a given dataset split (train, valid, test)
         """
-        DataLoader = ShapeViewStreamDataset if split == 'valid' else ShapeViewDataset
-        self.datasets[split] = DataLoader(
+        self.datasets[split] = ShapeViewDataset(
             self.train_data if split == 'train' else \
                 self.val_data if split == 'valid' else self.test_data,
             views=self.train_views if split == 'train' else \
@@ -180,9 +186,18 @@ class SingleObjRenderingTask(FairseqTask):
                 total_num_models = max_step * self.args.distributed_world_size * self.args.max_sentences
             else:
                 total_num_models = 10000000
+
+            if getattr(self.args, "pruning_rerun_train_set", False):
+                self._unique_trainset = ShapeViewStreamDataset(copy.deepcopy(self.datasets[split]))  # backup
+                self._unique_trainitr = self.get_batch_iterator(
+                    self._unique_trainset, max_sentences=self.args.max_sentences_valid, seed=self.args.seed,
+                    num_shards=self.args.distributed_world_size, shard_id=self.args.distributed_rank, 
+                    num_workers=self.args.num_workers)
             self.datasets[split] = InfiniteDataset(self.datasets[split], total_num_models)
 
-      
+        if split == 'valid':
+            self.datasets[split] = ShapeViewStreamDataset(self.datasets[split])
+
     def build_generator(self, args):
         """
         build a neural renderer for visualization
@@ -206,6 +221,10 @@ class SingleObjRenderingTask(FairseqTask):
             test_camera_intrinsics=getattr(args, "render_camera_intrinsics", None),
             test_camera_views=getattr(args, "render_views", None)
         )
+
+    def setup_trainer(self, trainer):
+        # give the task ability to access the global trainer functions
+        self._trainer = trainer
 
     @property
     def source_dictionary(self):
@@ -234,8 +253,20 @@ class SingleObjRenderingTask(FairseqTask):
             (update_num > 0) and \
             (update_num > self._num_updates['pv']) and \
             hasattr(model, 'prune_voxels'):
-          
-            model.prune_voxels(self.pruning_th)
+            model.eval()
+            
+            if getattr(self.args, "pruning_rerun_train_set", False):
+                with torch.no_grad():
+                    model.clean_caches()
+                    progress = progress_bar.progress_bar(
+                        self._unique_trainitr.next_epoch_itr(shuffle=False),
+                        prefix=f"pruning based statiscs over training set",
+                        tensorboard_logdir=None, default_log_format='tqdm')
+                    for step, inner_sample in enumerate(progress):
+                        outs = model(**self._trainer._prepare_sample(self.filter_dummy(inner_sample)))
+                        progress.log(stats=outs['other_logs'], tag='track', step=step)
+
+            model.prune_voxels(self.pruning_th, train_stats=getattr(self.args, "pruning_with_train_stats", False))
             self.update_step(update_num, 'pv')
 
         if self.steps_to_half_voxels is not None and \
@@ -291,3 +322,9 @@ class SingleObjRenderingTask(FairseqTask):
             '{:04d}.png'.format(view)), 
             (img * 255).astype(np.uint8))
 
+    def filter_dummy(self, sample):
+        if self._dummy_batch is None:
+            self._dummy_batch = sample
+        if sample is None:
+            sample = self._dummy_batch
+        return sample

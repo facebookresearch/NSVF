@@ -213,9 +213,13 @@ class VolumeRenderer(Renderer):
                 {name: s[i: i+chunk_size] for name, s in samples.items()}, *args, **kwargs)
             for i in range(0, ray_start.size(0), chunk_size)
         ]
-        return {name: torch.cat([r[name] for r in results], 0) 
+        results = {name: torch.cat([r[name] for r in results], 0) 
                     if results[0][name].dim() > 0 else sum([r[name] for r in results])
                 for name in results[0]}
+
+        if getattr(input_fn, "track_max_probs", False):
+            input_fn.track_voxel_probs(samples['sampled_point_voxel_idx'].long(), results['probs'])
+        return results
         
 
 @register_renderer("resampled_volume_rendering")

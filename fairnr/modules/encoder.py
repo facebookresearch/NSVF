@@ -6,6 +6,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
+
 import numpy as np
 import math
 import sys
@@ -68,11 +70,11 @@ class SparseVoxelEncoder(Encoder):
 
     def __init__(self, args, voxel_path=None, bbox_path=None, shared_values=None):
         super().__init__(args)
+        # read initial voxels or learned sparse voxels
         self.voxel_path = voxel_path if voxel_path is not None else args.voxel_path
         self.bbox_path = bbox_path if bbox_path is not None else getattr(args, "initial_boundingbox", None)
         assert (self.bbox_path is not None) or (self.voxel_path is not None), \
             "at least initial bounding box or pretrained voxel files are required."
-        
         self.voxel_index = None
         if self.voxel_path is not None:
             assert os.path.exists(self.voxel_path), "voxel file must exist"
@@ -96,25 +98,14 @@ class SparseVoxelEncoder(Encoder):
             bbox = np.loadtxt(self.bbox_path)
             voxel_size = bbox[-1]
             fine_points = torch.from_numpy(bbox2voxels(bbox[:6], voxel_size))
-            
         half_voxel = voxel_size * .5
-        fine_length = fine_points.size(0)
- 
+
         # transform from voxel centers to voxel corners (key/values)
-        fine_coords, fine_res = discretize_points(fine_points, half_voxel)
+        fine_coords, _ = discretize_points(fine_points, half_voxel)
         fine_keys0 = offset_points(fine_coords, 1.0).reshape(-1, 3)
-        fine_keys, fine_feats  = torch.unique(fine_keys0, dim=0, sorted=True, return_inverse=True)
+        fine_keys, fine_feats = torch.unique(fine_keys0, dim=0, sorted=True, return_inverse=True)
         fine_feats = fine_feats.reshape(-1, 8)
         num_keys = torch.scalar_tensor(fine_keys.size(0)).long()
-
-        self.use_octree = getattr(args, "use_octree", False)        
-        self.flatten_centers, self.flatten_children = None, None
-
-        # assign values
-        points = fine_points
-        feats = fine_feats.long()
-        keep = fine_feats.new_ones(fine_feats.size(0)).long()
-        keys = fine_keys.long()
 
         # ray-marching step size
         if getattr(args, "raymarching_stepsize_ratio", 0) > 0:
@@ -122,21 +113,29 @@ class SparseVoxelEncoder(Encoder):
         else:
             step_size = args.raymarching_stepsize
 
-        # register parameters
-        self.register_buffer("points", points)   # voxel centers
-        self.register_buffer("feats", feats)     # for each voxel, 8 vertexs
-        self.register_buffer("keys", keys)
-        self.register_buffer("keep", keep)
+        # register parameters (will be saved to checkpoints)
+        self.register_buffer("points", fine_points)          # voxel centers
+        self.register_buffer("keys", fine_keys.long())       # id used to find voxel corners/embeddings
+        self.register_buffer("feats", fine_feats.long())     # for each voxel, 8 voxel corner ids
         self.register_buffer("num_keys", num_keys)
+        self.register_buffer("keep", fine_feats.new_ones(fine_feats.size(0)).long())  # whether the voxel will be pruned
 
         self.register_buffer("voxel_size", torch.scalar_tensor(voxel_size))
         self.register_buffer("step_size", torch.scalar_tensor(step_size))
         self.register_buffer("max_hits", torch.scalar_tensor(args.max_hits))
 
-        # set-up other hyperparameters
+        # set-up other hyperparameters and initialize running time caches
         self.embed_dim = getattr(args, "voxel_embed_dim", None)
         self.deterministic_step = getattr(args, "deterministic_step", False)
-        
+        self.use_octree = getattr(args, "use_octree", False)
+        self.track_max_probs = getattr(args, "track_max_probs", False)    
+        self._runtime_caches = {
+            "flatten_centers": None,
+            "flatten_children": None,
+            "max_voxel_probs": None
+        }
+
+        # sparse voxel embeddings     
         if shared_values is None and self.embed_dim > 0:
             self.values = Embedding(num_keys, self.embed_dim, None)
         else:
@@ -176,16 +175,24 @@ class SparseVoxelEncoder(Encoder):
         parser.add_argument('--raymarching-stepsize-ratio', type=float, metavar='D',
                             help='if the concrete step size is not given (=0), we use the ratio to the voxel size as step size.')
         parser.add_argument('--use-octree', action='store_true', help='if set, instead of looping over the voxels, we build an octree.')
-        
+        parser.add_argument('--track-max-probs', action='store_true', help='if set, tracking the maximum probability in ray-marching.')
+
+    def reset_runtime_caches(self):
+        if self.use_octree:
+            centers, children = build_easy_octree(self.points[self.keep.bool()], self.voxel_size / 2.0)
+            self._runtime_caches['flatten_centers'] = centers
+            self._runtime_caches['flatten_children'] = children
+        self._runtime_caches['max_voxel_probs'] = self.points.new_zeros(self.points.size(0))
+
+    def clean_runtime_caches(self):
+        for name in self._runtime_caches:
+            self._runtime_caches[name] = None
+
     def precompute(self, id=None, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
         values = self.values.weight[: self.num_keys] if self.values is not None else None
-        if (self.flatten_centers is None or self.flatten_children is None) and self.use_octree:
-            # octree is not built. rebuild
-            centers, children = build_easy_octree(points, self.voxel_size / 2.0)
-            self.flatten_centers, self.flatten_children = centers, children
-
+        
         if id is not None:
             # extend size to support multi-objects
             feats  = feats.unsqueeze(0).expand(id.size(0), *feats.size()).contiguous()
@@ -196,6 +203,7 @@ class SparseVoxelEncoder(Encoder):
             if id.size(0) > 1:
                 feats = feats + self.num_keys * torch.arange(id.size(0), 
                     device=feats.device, dtype=feats.dtype)[:, None, None]
+        
         encoder_states = {
             'voxel_vertex_idx': feats,
             'voxel_center_xyz': points,
@@ -383,17 +391,25 @@ class SparseVoxelEncoder(Encoder):
 
         return inputs
 
-    @torch.no_grad()
-    def pruning(self, field_fn, th=0.5, encoder_states=None):
-        logger.info("pruning...")
-        
-        if self.use_octree:  # clean the octree, need to be rebuilt
-            self.flatten_centers, self.flatten_children = None, None
+    def track_voxel_probs(self, voxel_idxs, voxel_probs):
+        voxel_idxs = voxel_idxs.masked_fill(voxel_idxs.eq(-1), self.max_voxel_probs.size(0))
+        max_voxel_probs = self.max_voxel_probs.new_zeros(voxel_idxs.size(0), self.max_voxel_probs.size(0) + 1).scatter_add_(
+            dim=-1, index=voxel_idxs, src=voxel_probs).max(0)[0][:-1].data
+        self.max_voxel_probs = torch.max(self.max_voxel_probs, max_voxel_probs)
 
-        scores = self.get_scores(field_fn, th=th, bits=16, encoder_states=encoder_states)
-        keep = (1 - scores.max(-1)[0]) > th
+    @torch.no_grad()
+    def pruning(self, field_fn, th=0.5, encoder_states=None, train_stats=False):
+        if not train_stats:
+            logger.info("pruning...")
+            scores = self.get_scores(field_fn, th=th, bits=16, encoder_states=encoder_states)
+            keep = (1 - scores.min(-1)[0]) > th
+        else:
+            logger.info("pruning based on training set statics (e.g. probs)...")
+            if dist.get_world_size() > 1:  # sync on multi-gpus
+                dist.all_reduce(self.max_voxel_probs, op=dist.ReduceOp.MAX)
+            keep = self.max_voxel_probs > th
         self.keep.masked_scatter_(self.keep.bool(), keep.long())
-        logger.info("pruning done. # of voxels before: {}, after: {} voxels".format(scores.size(0), keep.sum()))
+        logger.info("pruning done. # of voxels before: {}, after: {} voxels".format(keep.size(0), keep.sum()))
     
     def get_scores(self, field_fn, th=0.5, bits=16, encoder_states=None):
         if encoder_states is None:
@@ -441,9 +457,6 @@ class SparseVoxelEncoder(Encoder):
         if new_values is not None:
             self.values.weight = nn.Parameter(new_values)
             self.values.num_embeddings = self.values.weight.size(0)
-
-        if self.use_octree:  # clean the octree, need to be rebuilt
-            self.flatten_centers, self.flatten_children = None, None
         
         self.total_size = new_num_keys
         self.num_keys = self.num_keys * 0 + self.total_size
@@ -453,6 +466,28 @@ class SparseVoxelEncoder(Encoder):
         self.keep = self.keep.new_ones(new_point_length)
         logger.info("splitting done. # of voxels before: {}, after: {} voxels".format(points.size(0), self.keep.sum()))
         
+    @property
+    def flatten_centers(self):
+        if self._runtime_caches['flatten_centers'] is None:
+            self.reset_runtime_caches()
+        return self._runtime_caches['flatten_centers']
+    
+    @property
+    def flatten_children(self):
+        if self._runtime_caches['flatten_children'] is None:
+            self.reset_runtime_caches()
+        return self._runtime_caches['flatten_children']
+
+    @property
+    def max_voxel_probs(self):
+        if self._runtime_caches['max_voxel_probs'] is None:
+            self.reset_runtime_caches()
+        return self._runtime_caches['max_voxel_probs']
+
+    @max_voxel_probs.setter
+    def max_voxel_probs(self, x):
+        self._runtime_caches['max_voxel_probs'] = x
+
     @property
     def feature_dim(self):
         return self.embed_dim
@@ -498,9 +533,9 @@ class MultiSparseVoxelEncoder(Encoder):
         return self.all_voxels[self.cid].forward(samples, encoder_states)
 
     @torch.no_grad()
-    def pruning(self, field_fn, th=0.5):
+    def pruning(self, field_fn, th=0.5, train_stats=False):
         for id in range(len(self.all_voxels)):
-           self.all_voxels[id].pruning(field_fn, th)
+           self.all_voxels[id].pruning(field_fn, th, train_stats=train_stats)
     
     @torch.no_grad()
     def splitting(self):
@@ -566,11 +601,12 @@ class SharedSparseVoxelEncoder(Encoder):
         return inputs
 
     @torch.no_grad()
-    def pruning(self, field_fn, th=0.5):
+    def pruning(self, field_fn, th=0.5, train_stats=False):
         for cid in range(len(self.all_voxels)):
            id = torch.tensor([cid], device=self.contexts.weight.device)
            self.all_voxels[cid].pruning(field_fn, th, 
-                encoder_states={name: v[0] for name, v in self.precompute(id).items()})
+                encoder_states={name: v[0] for name, v in self.precompute(id).items()},
+                train_stats=train_stats)
 
     @torch.no_grad()
     def splitting(self):

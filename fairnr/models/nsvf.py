@@ -133,9 +133,10 @@ class NSVFModel(BaseModel):
         return images
     
     @torch.no_grad()
-    def prune_voxels(self, th=0.5):
-        self.encoder.pruning(self.field, th)
-    
+    def prune_voxels(self, th=0.5, train_stats=False):
+        self.encoder.pruning(self.field, th, train_stats=train_stats)
+        self.clean_caches()
+
     @torch.no_grad()
     def split_voxels(self):
         logger.info("half the global voxel size {:.4f} -> {:.4f}".format(
@@ -143,13 +144,18 @@ class NSVFModel(BaseModel):
         self.encoder.splitting()
         self.encoder.voxel_size *= .5
         self.encoder.max_hits *= 1.5
-        
+        self.clean_caches()
+
     @torch.no_grad()
     def reduce_stepsize(self):
         logger.info("reduce the raymarching step size {:.4f} -> {:.4f}".format(
             self.encoder.step_size.item(), self.encoder.step_size.item() * .5))
         self.encoder.step_size *= .5
 
+    def clean_caches(self, reset=False):
+        self.encoder.clean_runtime_caches()
+        if reset:
+            self.encoder.reset_runtime_caches()
 
 @register_model_architecture("nsvf", "nsvf_base")
 def base_architecture(args):
