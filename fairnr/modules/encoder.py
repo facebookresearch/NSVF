@@ -391,7 +391,7 @@ class SparseVoxelEncoder(Encoder):
             self.flatten_centers, self.flatten_children = None, None
 
         scores = self.get_scores(field_fn, th=th, bits=16, encoder_states=encoder_states)
-        keep = (1 - scores.max(-1)[0]) > th
+        keep = (1 - scores.min(-1)[0]) > th
         self.keep.masked_scatter_(self.keep.bool(), keep.long())
         logger.info("pruning done. # of voxels before: {}, after: {} voxels".format(scores.size(0), keep.sum()))
     
