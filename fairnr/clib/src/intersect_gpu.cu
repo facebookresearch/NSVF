@@ -435,12 +435,10 @@ __global__ void uniform_ray_sampling_kernel(
       if (umax == max_hits || ucur == max_steps || pts_idx[H + umax] == -1) {
         break;  // reach the maximum
       }
-      if (umin < max_hits && pts_idx[H + umin] > -1) {
+      if (umin < max_hits) {
         last_min_depth = min_depth[H + umin];
-      } else {
-        last_min_depth = last_max_depth + 0.1;
       }
-      if (umax < max_hits && pts_idx[H + umin] > -1) {
+      if (umax < max_hits) {
         last_max_depth = max_depth[H + umax];
       }
       if (ucur < max_steps) {
