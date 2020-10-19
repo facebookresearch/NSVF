@@ -408,6 +408,7 @@ class SparseVoxelEncoder(Encoder):
             if dist.get_world_size() > 1:  # sync on multi-gpus
                 dist.all_reduce(self.max_voxel_probs, op=dist.ReduceOp.MAX)
             keep = self.max_voxel_probs > th
+
         self.keep.masked_scatter_(self.keep.bool(), keep.long())
         logger.info("pruning done. # of voxels before: {}, after: {} voxels".format(keep.size(0), keep.sum()))
     
