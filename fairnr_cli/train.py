@@ -77,6 +77,8 @@ def main(args, init_distributed=False):
         trainer = Trainer(args, task, model, criterion)
     else:
         trainer = MegatronTrainer(args, task, model, criterion)
+        
+    task.setup_trainer(trainer)
 
     logger.info('training on {} GPUs'.format(args.distributed_world_size))
     logger.info('max tokens per GPU = {} and max sentences per GPU = {}'.format(

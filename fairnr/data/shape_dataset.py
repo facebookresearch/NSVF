@@ -357,33 +357,44 @@ class ShapeViewDataset(ShapeDataset):
         return results
 
 
-class ShapeViewStreamDataset(ShapeViewDataset):
+class ShapeViewStreamDataset(BaseWrapperDataset):
     """
     Different from ShapeViewDataset.
     We merge all the views together into one dataset regardless of the shapes.
 
     ** HACK **: an alternative of the ShapeViewDataset
     """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, dataset):
+        super().__init__(dataset)
 
-        assert self.repeat == 1, "Comboned dataset does not support repeating"
-        assert self.num_view == 1, "StreamDataset only supports one view per shape at a time."
+        self.dataset.repeat == 1
+        self.dataset.num_view == 1
 
         # reset the data_index
-        self.data_index = []
+        self.dataset.data_index = []
         for i, d in enumerate(self.data):
             for j, _ in enumerate(d['rgb']):
-                self.data_index.append((i, j))   # shape i, view j
-        
+                self.dataset.data_index.append((i, j))   # shape i, view j
+
     def __len__(self):
-        return len(self.data_index)
+        return len(self.dataset.data_index)
+
+    def ordered_indices(self):
+        return np.arange(len(self))
+
+    @property
+    def cache(self):
+        return self.dataset.cache
+    
+    @property
+    def data(self):
+        return self.dataset.data
 
     def _load_batch(self, data, shape_id, view_ids):
-        return shape_id, self._load_shape(data[shape_id]), [self._load_view(data[shape_id], view_id) for view_id in view_ids]
+        return shape_id, self.dataset._load_shape(data[shape_id]), [self.dataset._load_view(data[shape_id], view_id) for view_id in view_ids]
 
     def __getitem__(self, index):
-        shape_id, view_id = self.data_index[index]
+        shape_id, view_id = self.dataset.data_index[index]
         if self.cache is not None:
             return copy.deepcopy(self.cache[shape_id % self.total_num_shape][0]), \
                    copy.deepcopy(self.cache[shape_id % self.total_num_shape][1]), \
