@@ -517,12 +517,29 @@ class MultiSparseVoxelEncoder(Encoder):
     def add_args(parser):
         SparseVoxelEncoder.add_args(parser)
 
+    def reset_runtime_caches(self):
+        for id in range(len(self.all_voxels)):
+            self.all_voxels[id].reset_runtime_caches()
+    
+    def clean_runtime_caches(self):
+        for id in range(len(self.all_voxels)):
+            self.all_voxels[id].clean_runtime_caches()
+
     def precompute(self, id, *args, **kwargs):
         # TODO: this is a HACK for simplicity
         assert id.size(0) == 1, "for now, only works for one object"
         self.cid = id[0]
         return self.all_voxels[id[0]].precompute(id, *args, **kwargs)
     
+    def export_surfaces(self, field_fn, th, bits):
+        raise NotImplementedError("does not support for now.")
+
+    def export_voxels(self, return_mesh=False):
+        raise NotImplementedError("does not support for now.")
+    
+    def get_edge(self, *args, **kwargs):
+        return self.all_voxels[self.cid].get_edge(*args, **kwargs)
+
     def ray_intersect(self, *args, **kwargs):
         return self.all_voxels[self.cid].ray_intersect(*args, **kwargs)
 
@@ -531,6 +548,9 @@ class MultiSparseVoxelEncoder(Encoder):
 
     def forward(self, samples, encoder_states):
         return self.all_voxels[self.cid].forward(samples, encoder_states)
+
+    def track_voxel_probs(self, voxel_idxs, voxel_probs):
+        return self.all_voxels[self.cid].track_voxel_probs(voxel_idxs, voxel_probs)
 
     @torch.no_grad()
     def pruning(self, field_fn, th=0.5, train_stats=False):
@@ -564,13 +584,13 @@ class MultiSparseVoxelEncoder(Encoder):
 
 
 @register_encoder('shared_sparsevoxel_encoder')
-class SharedSparseVoxelEncoder(Encoder):
+class SharedSparseVoxelEncoder(MultiSparseVoxelEncoder):
     """
     Different from MultiSparseVoxelEncoder, we assume a shared list 
     of voxels across all models. Usually useful to learn a video sequence.  
     """
     def __init__(self, args):
-        super().__init__(args)
+        super(MultiSparseVoxelEncoder, self).__init__(args)
 
         # using a shared voxel
         self.voxel_path = args.voxel_path
@@ -582,18 +602,12 @@ class SharedSparseVoxelEncoder(Encoder):
         self.context_embed_dim = args.context_embed_dim
         self.contexts = nn.Embedding(self.num_frames, self.context_embed_dim, None)
         self.cid = None
-    
-    def precompute(self, id, *args, **kwargs):
-        # TODO: this is a HACK for simplicity
-        assert id.size(0) == 1, "for now, only works for one object"
-        self.cid = id[0]
-        return self.all_voxels[id[0]].precompute(id, *args, **kwargs)
 
-    def ray_intersect(self, *args, **kwargs):
-        return self.all_voxels[self.cid].ray_intersect(*args, **kwargs)
-
-    def ray_sample(self, *args, **kwargs):
-        return self.all_voxels[self.cid].ray_sample(*args, **kwargs)
+    @staticmethod
+    def add_args(parser):
+        SparseVoxelEncoder.add_args(parser)
+        parser.add_argument('--num-frames', type=int, help='the total number of frames')
+        parser.add_argument('--context-embed-dim', type=int, help='context embedding for each view')
 
     def forward(self, samples, encoder_states):
         inputs = self.all_voxels[self.cid].forward(samples, encoder_states)
@@ -644,28 +658,6 @@ class SharedSparseVoxelEncoder(Encoder):
     @property
     def feature_dim(self):
         return self.all_voxels[0].embed_dim + self.context_embed_dim
-
-    @property
-    def dummy_loss(self):
-        return sum([d.dummy_loss for d in self.all_voxels])
-
-    @property
-    def voxel_size(self):
-        return self.all_voxels[0].voxel_size
-
-    @property
-    def step_size(self):
-        return self.all_voxels[0].step_size
-
-    @property
-    def num_voxels(self):
-        return self.all_voxels[self.cid].num_voxels
-
-    @staticmethod
-    def add_args(parser):
-        SparseVoxelEncoder.add_args(parser)
-        parser.add_argument('--num-frames', type=int, help='the total number of frames')
-        parser.add_argument('--context-embed-dim', type=int, help='context embedding for each view')
 
 
 @register_encoder('triangle_mesh_encoder')
