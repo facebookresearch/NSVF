@@ -345,14 +345,15 @@ class SparseVoxelEncoder(Encoder):
         }
         return ray_start, ray_dir, intersection_outputs, hits
 
-    def ray_sample(self, intersection_outputs):
+    def ray_sample(self, intersection_outputs, step_size=None):
         min_depth = intersection_outputs['min_depth']
         max_depth = intersection_outputs['max_depth']
         pts_idx = intersection_outputs['intersected_voxel_idx']
+        step_size = step_size if step_size is not None else self.step_size
 
         max_ray_length = (max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(-1)[0] - min_depth.min(-1)[0]).max()
         sampled_idx, sampled_depth, sampled_dists = uniform_ray_sampling(
-            pts_idx, min_depth, max_depth, self.step_size, max_ray_length, 
+            pts_idx, min_depth, max_depth, step_size, max_ray_length, 
             self.deterministic_step or (not self.training))
         sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)

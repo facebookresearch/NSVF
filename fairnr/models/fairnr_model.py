@@ -66,7 +66,6 @@ class BaseModel(BaseFairseqModel):
     def dummy_loss(self):
         return sum([p.sum() for p in self.parameters()]) * 0.0
 
-    # def forward(self, ray_start, ray_dir, ray_split=1, **kwargs):
     def forward(self, ray_split=1, **kwargs):
         ray_start, ray_dir, uv = self.reader(**kwargs)
         kwargs.update({
@@ -136,11 +135,10 @@ class BaseModel(BaseFairseqModel):
                 'img': output['colors'][shape, view]}
         
         if 'depths' in output and output['depths'] is not None:
-            min_depth, max_depth = output['depths'].min(), output['depths'].max()
             images['{}_depth/{}:HWC'.format(name, img_id)] = {
                 'img': output['depths'][shape, view], 
-                'min_val': min_depth, 
-                'max_val': max_depth}
+                'min_val': output['depths'][shape, view].min(), 
+                'max_val': output['depths'][shape, view].max()}
             normals = compute_normal_map(
                 output['ray_start'][shape, view].float(),
                 output['ray_dir'][shape, view].float(),
@@ -204,5 +202,4 @@ class BaseModel(BaseFairseqModel):
     @property
     def text(self):
         return "fairnr BaseModel"
-
 

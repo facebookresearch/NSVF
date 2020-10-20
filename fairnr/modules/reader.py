@@ -90,7 +90,10 @@ class ImageReader(Reader):
         parser.add_argument("--trainable-extrinsics", action='store_true',
                             help="if set, we assume extrinsics are trainable. We use 6D representations for rotation")
 
-    def forward(self, uv, intrinsics, extrinsics, size, path=None, **kwargs):
+    def forward(self, uv, intrinsics, extrinsics, size, path=None, ray_start=None, ray_dir=None, **kwargs):
+        if (ray_start is not None) and (ray_dir is not None):
+            return ray_start, ray_dir, uv
+
         S, V = uv.size()[:2]
         if (not self.training) or self.no_sampling:
             uv = uv.reshape(S, V, 2, -1, 1, 1)

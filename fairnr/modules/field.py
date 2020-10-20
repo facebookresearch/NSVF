@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from copy import deepcopy
 from torch.autograd import grad
 from collections import OrderedDict
 from fairnr.modules.implicit import (
@@ -52,7 +53,7 @@ class Field(nn.Module):
 @register_field('radiance_field')
 class RaidanceField(Field):
     
-    def __init__(self, args):
+    def __init__(self, args, no_bg=False):
         super().__init__(args)
 
         # additional arguments
@@ -60,10 +61,21 @@ class RaidanceField(Field):
         self.deterministic_step = getattr(args, "deterministic_step", False)       
         
         # background field
-        self.min_color = getattr(args, "min_color", -1)
-        self.trans_bg = getattr(args, "transparent_background", "1.0,1.0,1.0")
-        self.sgbg = getattr(args, "background_stop_gradient", False)
-        self.bg_color = BackgroundField(bg_color=self.trans_bg, min_color=self.min_color, stop_grad=self.sgbg)       
+        if not no_bg:
+            self.min_color = getattr(args, "min_color", -1)
+            self.trans_bg = getattr(args, "transparent_background", "1.0,1.0,1.0")
+            self.sgbg = getattr(args, "background_stop_gradient", True)
+            self.bg_color = BackgroundField(
+                bg_color=self.trans_bg, 
+                min_color=self.min_color, stop_grad=self.sgbg)       
+            
+            if getattr(args, "background_network", False):
+                new_args = deepcopy(args)
+                new_args.__dict__.update({'inputs_to_density': 'pos:10:4', 'inputs_to_texture': 'feat:0:256, ray:4'})
+                self.bg_field = RaidanceField(new_args, no_bg=True)
+            else:
+                self.bg_field = None
+
         self.den_filters, self.den_ori_dims, self.den_input_dims = self.parse_inputs(args.inputs_to_density)
         self.tex_filters, self.tex_ori_dims, self.tex_input_dims = self.parse_inputs(args.inputs_to_texture)
         self.den_filters, self.tex_filters = nn.ModuleDict(self.den_filters), nn.ModuleDict(self.tex_filters)
@@ -166,6 +178,7 @@ class RaidanceField(Field):
                             help='the depth of background. used for depth visualization')
         parser.add_argument('--background-stop-gradient', action='store_true',
                             help='do not optimize the background color')
+        parser.add_argument('--background-network', action='store_true')
 
     @torch.enable_grad()  # tracking the gradient in case we need to have normal at testing time.
     def forward(self, inputs, outputs=['sigma', 'texture']):

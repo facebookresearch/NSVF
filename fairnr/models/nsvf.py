@@ -71,30 +71,42 @@ class NSVFModel(BaseModel):
         
         all_results = defaultdict(lambda: None)
         if hits.sum() > 0:  # check if ray missed everything
-            intersection_outputs = {name: outs[hits] for name, outs in intersection_outputs.items()}
-            ray_start, ray_dir = ray_start[hits], ray_dir[hits]
+            _intersection_outputs = {name: outs[hits] for name, outs in intersection_outputs.items()}
+            _ray_start, _ray_dir = ray_start[hits], ray_dir[hits]
             
             # sample evalution points along the ray
-            samples = self.encoder.ray_sample(intersection_outputs)
+            samples = self.encoder.ray_sample(_intersection_outputs)
             encoder_states = {name: s.reshape(-1, s.size(-1)) if s is not None else None
                 for name, s in encoder_states.items()}
             
             # rendering
             all_results = self.raymarcher(
-                self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
-            all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
-            all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, encoder_states)
+                self.encoder, self.field, _ray_start, _ray_dir, samples, encoder_states)
+            all_results['voxel_edges'] = self.encoder.get_edge(_ray_start, _ray_dir, samples, encoder_states)
             all_results['voxel_depth'] = samples['sampled_point_depth'][:, 0]
 
         # fill out the full size
         hits = hits.reshape(fullsize)
         all_results['missed'] = fill_in((fullsize, ), hits, all_results['missed'], 1.0).view(S, V, P)
-        all_results['depths'] = fill_in((fullsize, ), hits, all_results['depths'], BG_DEPTH).view(S, V, P)
+        all_results['depths'] = fill_in((fullsize, ), hits, all_results['depths'], 0.0).view(S, V, P)
         all_results['voxel_depth'] = fill_in((fullsize, ), hits, all_results['voxel_depth'], BG_DEPTH).view(S, V, P)
         all_results['voxel_edges'] = fill_in((fullsize, 3), hits, all_results['voxel_edges'], 1.0).view(S, V, P, 3)
         all_results['colors'] = fill_in((fullsize, 3), hits, all_results['colors'], 0.0).view(S, V, P, 3)
-        all_results['bg_color'] = bg_color.reshape(fullsize, 3).view(S, V, P, 3)
+        
+        # background network?
+        if self.field.bg_field is not None:
+            samples = self.sample_background_points(intersection_outputs, hits)
+            bg_results = self.raymarcher(self.background_input_fn, 
+                self.field.bg_field, ray_start[0], ray_dir[0], samples, encoder_states)
+            bg_color, bg_depth = bg_results['colors'], bg_results['depths']
+        else:
+            bg_color, bg_depth = bg_color.reshape(fullsize, 3), all_results['depths'].new_ones(fullsize) * BG_DEPTH
+
+        all_results['bg_color'] = bg_color.view(S, V, P, 3)
+        all_results['bg_depth'] = bg_depth.view(S, V, P)
         all_results['colors'] += all_results['missed'].unsqueeze(-1) * all_results['bg_color']
+        all_results['depths'] += all_results['missed'] * all_results['bg_depth']
+
         if 'normal' in all_results:
             all_results['normal'] = fill_in((fullsize, 3), hits, all_results['normal'], 0.0).view(S, V, P, 3)
 
@@ -132,6 +144,47 @@ class NSVFModel(BaseModel):
                 'img': output['normal'][shape, view], 'min_val': -1, 'max_val': 1}
         return images
     
+    @torch.no_grad()
+    def sample_background_points(self, intersection_outputs, hits):
+        depth_start = 1.6
+        d_min = intersection_outputs['min_depth'].min(-1)[0].squeeze(0)
+        d_max = intersection_outputs['max_depth'].masked_fill(
+            intersection_outputs['intersected_voxel_idx'].eq(-1), 0.0).max(-1)[0].squeeze(0)
+        d_max[~hits] = depth_start 
+        d_min[~hits] = depth_start
+
+        # we assume nothing is in front of voxels.
+        background_intersections = {
+            'max_depth': torch.zeros_like(d_max)[:, None],
+            'min_depth': -1 / d_max[:, None],
+            'intersected_voxel_idx': torch.zeros_like(d_max)[:, None].int()
+        }
+        background_samples = self.encoder.ray_sample(background_intersections, step_size=0.01)
+        
+        # transform back to non-inversed space
+        mid, dst = background_samples['sampled_point_depth'], background_samples['sampled_point_distance']
+        inv_far, inv_near = -(mid + dst / 2), -(mid - dst / 2)
+        far, near = 1. / inv_far.clamp(min=1e-5),  1. / inv_near.clamp(min=1e-5)
+        mid, dst = (far + near) / 2, (far - near)
+        samples = {
+            'sampled_point_depth': mid,
+            'sampled_point_distance': dst,
+            'sampled_point_voxel_idx': background_samples['sampled_point_voxel_idx'],
+        }
+        return samples
+    
+    def background_input_fn(self, samples, *args, **kwargs):
+        # ray point samples
+        sampled_xyz = samples['sampled_point_xyz'].requires_grad_(True)
+        sampled_dir = samples['sampled_point_ray_direction']
+
+        # project to unit sphere
+        sampled_norm = sampled_xyz.norm(p=2, dim=-1, keepdim=True)
+        normalized_xyz = sampled_xyz / sampled_norm
+        exp_neg_radius = torch.exp(-sampled_norm / 5)   # very hacky.. not sure if it is ok
+        return {'pos': torch.cat([normalized_xyz, exp_neg_radius], -1), 'ray': sampled_dir}
+
+
     @torch.no_grad()
     def prune_voxels(self, th=0.5, train_stats=False):
         self.encoder.pruning(self.field, th, train_stats=train_stats)
@@ -209,6 +262,12 @@ def nerf2_architecture(args):
     args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:10, ray:4")
     base_architecture(args)
 
+@register_model_architecture("nsvf", "nsvf_xyz0")
+def nerf2_architecture(args):
+    args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 0)
+    args.inputs_to_density = getattr(args, "inputs_to_density", "pos:10")
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, ray:4")
+    base_architecture(args)
 
 @register_model_architecture("nsvf", "nsvf_xyzn")
 def nerf3_architecture(args):

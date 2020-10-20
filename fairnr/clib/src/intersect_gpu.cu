@@ -437,10 +437,15 @@ __global__ void uniform_ray_sampling_kernel(
       }
       if (umin < max_hits) {
         last_min_depth = min_depth[H + umin];
+      } else {
+        last_min_depth = 10000.0;
       }
       if (umax < max_hits) {
         last_max_depth = max_depth[H + umax];
+      } else {
+        last_max_depth = 10000.0;
       }
+      
       if (ucur < max_steps) {
         curr_depth = min_depth[H] + (float(ucur) + uniform_noise[K + ucur]) * step_size;
       }
