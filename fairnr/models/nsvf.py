@@ -95,7 +95,7 @@ class NSVFModel(BaseModel):
         
         # background network?
         if self.field.bg_field is not None:
-            samples = self.sample_background_points(intersection_outputs, hits)
+            samples = self.sample_background_points(ray_start, ray_dir, intersection_outputs, hits)
             bg_results = self.raymarcher(self.background_input_fn, 
                 self.field.bg_field, ray_start[0], ray_dir[0], samples, encoder_states)
             bg_color, bg_depth = bg_results['colors'], bg_results['depths']
@@ -145,8 +145,14 @@ class NSVFModel(BaseModel):
         return images
     
     @torch.no_grad()
-    def sample_background_points(self, intersection_outputs, hits):
-        depth_start = 1.6
+    def sample_background_points(self, ray_start, ray_dir, intersection_outputs, hits):
+        # ## --- option2 ---- #
+        # N = 80
+        # radius = 1 / torch.linspace(1e-5, 1., N)
+
+        # from fairseq import pdb; pdb.set_trace()
+        ## --- option1 ---- #
+        depth_start = 1.75
         d_min = intersection_outputs['min_depth'].min(-1)[0].squeeze(0)
         d_max = intersection_outputs['max_depth'].masked_fill(
             intersection_outputs['intersected_voxel_idx'].eq(-1), 0.0).max(-1)[0].squeeze(0)
@@ -180,9 +186,16 @@ class NSVFModel(BaseModel):
 
         # project to unit sphere
         sampled_norm = sampled_xyz.norm(p=2, dim=-1, keepdim=True)
-        normalized_xyz = sampled_xyz / sampled_norm
-        exp_neg_radius = torch.exp(-sampled_norm / 5)   # very hacky.. not sure if it is ok
-        return {'pos': torch.cat([normalized_xyz, exp_neg_radius], -1), 'ray': sampled_dir}
+        
+        # HACK: OPTION1
+        # xyz = sampled_xyz / sampled_norm
+        # radius = torch.exp(-sampled_norm / 5)   # very hacky.. not sure if it is ok
+        # return {'pos': torch.cat([xyz, radius], -1), 'ray': sampled_dir}
+
+        # HACK: OPTION2
+        xyz = sampled_xyz / sampled_norm.clamp(min=1.0)
+        radius = 1.0 / sampled_norm.clamp(min=1.0)   # very hacky.. not sure if it is ok
+        return {'pos': torch.cat([xyz, radius], -1), 'ray': sampled_dir}
 
 
     @torch.no_grad()
@@ -263,7 +276,7 @@ def nerf2_architecture(args):
     base_architecture(args)
 
 @register_model_architecture("nsvf", "nsvf_xyz0")
-def nerf2_architecture(args):
+def nerf20_architecture(args):
     args.voxel_embed_dim = getattr(args, "voxel_embed_dim", 0)
     args.inputs_to_density = getattr(args, "inputs_to_density", "pos:10")
     args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, ray:4")
@@ -302,7 +315,7 @@ def rnsvf_architecture(args):
 
 
 @register_model('disco_nsvf')
-class ResampledNSVFModel(NSVFModel):
+class DiscoNSVFModel(NSVFModel):
 
     FIELD = "disentangled_radiance_field"
 
@@ -310,4 +323,16 @@ class ResampledNSVFModel(NSVFModel):
 @register_model_architecture("disco_nsvf", "disco_nsvf")
 def disco_nsvf_architecture(args):
     args.compressed_light_dim = getattr(args, "compressed_light_dim", 64)
+    nerf3_architecture(args)
+
+
+@register_model('disco2_nsvf')
+class Disco2NSVFModel(NSVFModel):
+
+    FIELD = "disentangled_radiance_field2"
+
+
+@register_model_architecture("disco2_nsvf", "disco2_nsvf")
+def disco2_nsvf_architecture(args):
+    args.compressed_light_dim = getattr(args, "compressed_light_dim", 16)
     nerf3_architecture(args)

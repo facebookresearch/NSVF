@@ -158,6 +158,15 @@ def ray(ray_start, ray_dir, depths):
     return ray_start + ray_dir * depths
 
 
+def sample_on_sphere(noise_phi, noise_theta):
+    phi = np.pi * noise_phi
+    theta = np.pi * 2 * noise_theta
+    x = torch.sin(phi) * torch.cos(theta)
+    y = torch.sin(phi) * torch.sin(theta)
+    z = torch.cos(phi)
+    return torch.stack([x, y, z], -1)
+
+
 def compute_normal_map(ray_start, ray_dir, depths, RT, width=512, proj=False):
     # TODO:
     # this function is pytorch-only (for not)

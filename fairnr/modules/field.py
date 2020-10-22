@@ -15,6 +15,7 @@ from fairnr.modules.implicit import (
     TextureField, HyperImplicitField, BackgroundField
 )
 from fairnr.modules.linear import NeRFPosEmbLinear
+from fairnr.data.geometry import sample_on_sphere
 
 FIELD_REGISTRY = {}
 
@@ -256,18 +257,14 @@ class DisentangledRaidanceField(RaidanceField):
                     num_layers=args.texture_layers,
                     outmost_linear=True
                 ), nn.Sigmoid()),  # f(v, n, w)
-                "visibility": nn.Sequential(
+                "lighting": nn.Sequential(
                     ImplicitField(
                     in_dim=sum([self.tex_input_dims[t] for t in [0, 1]]),
-                    out_dim=self.D,
+                    out_dim=self.D * 3,
                     hidden_dim=args.texture_embed_dim,
                     num_layers=args.texture_layers,
                     outmost_linear=True
-                ), nn.Sigmoid()), # v(x, w)
-                "lighting": nn.Sequential(
-                    BackgroundField(
-                    out_dim=self.D * 3, min_color=0
-                ), nn.ReLU())   # L(w)
+                ), nn.ReLU()), # v(x, z, w)
             }
         )
        
@@ -284,11 +281,90 @@ class DisentangledRaidanceField(RaidanceField):
             lt = self.renderer['light-transport'](
                 torch.cat([self.tex_filters['normal'](inputs['normal']),
                            self.tex_filters['ray'](inputs['ray'])], -1)).reshape(-1, self.D, 3)
-            vs = self.renderer['visibility'](
+            li = self.renderer['lighting'](
                 torch.cat([self.tex_filters['feat'](inputs['feat']),
-                           self.tex_filters['pos'](inputs['pos'])], -1)).reshape(-1, self.D, 1)
-            light = self.renderer['lighting'](inputs['ray']).reshape(-1, self.D, 3)
-            texture = (lt * vs * light).mean(1)
+                           self.tex_filters['pos'](inputs['pos'])], -1)).reshape(-1, self.D, 3)
+            texture = (lt * li).mean(1)
+            if self.min_color == -1:
+                texture = 2 * texture - 1
+            inputs['texture'] = texture
+        return inputs
+
+
+@register_field('disentangled_radiance_field2')
+class DisentangledRaidanceField2(RaidanceField):
+
+    def __init__(self, args):
+        super().__init__(args)
+        
+        # for now we fix the input types
+        assert [name for name in self.tex_filters] == ['feat', 'pos', 'normal', 'ray']
+
+        # rebuild the renderer
+        self.D = getattr(args, "compressed_light_dim", 16)  # D
+        self.renderer = nn.ModuleDict(
+            {
+                "light-transport": ImplicitField(
+                    in_dim=sum([self.tex_input_dims[t] for t in [2, 3]]),
+                    out_dim=args.texture_embed_dim,
+                    hidden_dim=args.texture_embed_dim,
+                    num_layers=args.texture_layers,
+                    outmost_linear=False
+                ),  # f(v, n)
+                "lighting": ImplicitField(
+                    in_dim=sum([self.tex_input_dims[t] for t in [0, 1]]),
+                    out_dim=args.texture_embed_dim,
+                    hidden_dim=args.texture_embed_dim,
+                    num_layers=args.texture_layers,
+                    outmost_linear=False
+                ), # t(x, z)
+                "lt_out": nn.Sequential(TextureField(
+                    in_dim=args.texture_embed_dim + self.tex_input_dims[-1],
+                    hidden_dim=128,
+                    num_layers=0), nn.Sigmoid()
+                ),  # f(v, n, wi)
+                "li_out": nn.Sequential(TextureField(
+                    in_dim=args.texture_embed_dim + self.tex_input_dims[-1],
+                    hidden_dim=128,
+                    num_layers=0), nn.ReLU()
+                ),  # t(x, n, wi)
+            }
+        )
+       
+    @staticmethod
+    def add_args(parser):
+        RaidanceField.add_args(parser)
+        parser.add_argument('--compressed-light-dim', type=int,
+                            help='instead of sampling light directions physically, we compressed the light directions')
+
+    @torch.enable_grad()  # tracking the gradient in case we need to have normal at testing time.
+    def forward(self, inputs, outputs=['sigma', 'texture']):
+        inputs = super().forward(inputs, outputs=['sigma', 'normal'])
+        if 'texture' in outputs:
+            lt = self.renderer['light-transport'](
+                torch.cat([self.tex_filters['normal'](inputs['normal']),
+                           self.tex_filters['ray'](inputs['ray'])], -1))
+            li = self.renderer['lighting'](
+                torch.cat([self.tex_filters['feat'](inputs['feat']),
+                           self.tex_filters['pos'](inputs['pos'])], -1))
+
+            def get_chunk_color(D):
+                sampled_light_dirs = sample_on_sphere(
+                    lt.new_zeros(D, lt.size(0)).uniform_(),
+                    li.new_zeros(D, lt.size(0)).uniform_())
+                sampled_light_dirs = self.tex_filters['ray'](sampled_light_dirs)
+                ct = self.renderer['lt_out'](
+                    torch.cat([lt.unsqueeze(0).repeat(D, 1, 1), sampled_light_dirs], -1))
+                ci = self.renderer['li_out'](
+                    torch.cat([li.unsqueeze(0).repeat(D, 1, 1), sampled_light_dirs], -1))
+                return (ct * ci).sum(0)
+                
+            num_lights = self.D if self.training else 64
+            texture, step = 0, 4
+            for start in range(0, num_lights, step):
+                end = min(start + step, num_lights)
+                texture = texture + get_chunk_color(end - start) / num_lights         
+            
             if self.min_color == -1:
                 texture = 2 * texture - 1
             inputs['texture'] = texture

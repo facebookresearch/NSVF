@@ -88,7 +88,7 @@ class BaseModel(BaseFairseqModel):
             results['sampled_uv'] = uv
         results['ray_start'] = ray_start
         results['ray_dir'] = ray_dir
-
+        
         # caching the prediction
         self.cache = {
             w: results[w].detach() 

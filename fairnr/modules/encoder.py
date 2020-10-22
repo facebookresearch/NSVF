@@ -96,6 +96,7 @@ class SparseVoxelEncoder(Encoder):
                 fine_points = torch.from_numpy(np.loadtxt(self.voxel_path)[:, 3:].astype('float32'))
         else:
             bbox = np.loadtxt(self.bbox_path)
+            assert len(bbox) == 7, "bbox format: x_min, y_min, z_min, x_max, y_max, z_max, voxel_size"
             voxel_size = bbox[-1]
             fine_points = torch.from_numpy(bbox2voxels(bbox[:6], voxel_size))
         half_voxel = voxel_size * .5
