@@ -25,8 +25,8 @@ from fairnr.data.geometry import (
     get_edge, build_easy_octree, discretize_points
 )
 from fairnr.clib import (
-    aabb_ray_intersect, triangle_ray_intersect,
-    uniform_ray_sampling, svo_ray_intersect
+    aabb_ray_intersect, triangle_ray_intersect, svo_ray_intersect,
+    uniform_ray_sampling, inverse_cdf_sampling
 )
 from fairnr.modules.linear import FCBlock, Linear, Embedding
 
@@ -349,11 +349,14 @@ class SparseVoxelEncoder(Encoder):
         min_depth = intersection_outputs['min_depth']
         max_depth = intersection_outputs['max_depth']
         pts_idx = intersection_outputs['intersected_voxel_idx']
-
-        max_ray_length = (max_depth.masked_fill(max_depth.eq(MAX_DEPTH), 0).max(-1)[0] - min_depth.min(-1)[0]).max()
-        sampled_idx, sampled_depth, sampled_dists = uniform_ray_sampling(
-            pts_idx, min_depth, max_depth, self.step_size, max_ray_length, 
+        dists = (max_depth - min_depth).masked_fill(pts_idx.eq(-1), 0)
+        probs = intersection_outputs.get('probs', dists / dists.sum(dim=-1, keepdim=True))
+        steps = intersection_outputs.get('steps', dists.sum(-1) / self.step_size)
+        sampled_idx, sampled_depth, sampled_dists = inverse_cdf_sampling(
+            pts_idx, min_depth, max_depth, probs, steps, -1,
             self.deterministic_step or (not self.training))
+        
+        # from fairseq import pdb; pdb.set_trace()
         sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
         sampled_dists.masked_fill_(sampled_idx.eq(-1), 0.0)

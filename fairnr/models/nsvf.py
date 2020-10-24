@@ -85,6 +85,7 @@ class NSVFModel(BaseModel):
             all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
             all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, encoder_states)
             all_results['voxel_depth'] = samples['sampled_point_depth'][:, 0]
+            # all_results['voxel_depth'] = intersection_outputs['min_depth'][:, 0]
 
         # fill out the full size
         hits = hits.reshape(fullsize)

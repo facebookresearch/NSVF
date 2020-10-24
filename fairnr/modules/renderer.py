@@ -204,18 +204,18 @@ class VolumeRenderer(Renderer):
     def forward(self, input_fn, field_fn, ray_start, ray_dir, samples, *args, **kwargs):
         chunk_size = self.chunk_size if self.training else self.valid_chunk_size
         if ray_start.size(0) <= chunk_size:
-            return self.forward_chunk(input_fn, field_fn, ray_start, ray_dir, samples, *args, **kwargs)
-
-        # the number of rays is larger than maximum forward passes. pre-chuncking..
-        results = [
-            self.forward_chunk(input_fn, field_fn, 
-                ray_start[i: i+chunk_size], ray_dir[i: i+chunk_size],
-                {name: s[i: i+chunk_size] for name, s in samples.items()}, *args, **kwargs)
-            for i in range(0, ray_start.size(0), chunk_size)
-        ]
-        results = {name: torch.cat([r[name] for r in results], 0) 
-                    if results[0][name].dim() > 0 else sum([r[name] for r in results])
-                for name in results[0]}
+            results = self.forward_chunk(input_fn, field_fn, ray_start, ray_dir, samples, *args, **kwargs)
+        else:
+            # the number of rays is larger than maximum forward passes. pre-chuncking..
+            results = [
+                self.forward_chunk(input_fn, field_fn, 
+                    ray_start[i: i+chunk_size], ray_dir[i: i+chunk_size],
+                    {name: s[i: i+chunk_size] for name, s in samples.items()}, *args, **kwargs)
+                for i in range(0, ray_start.size(0), chunk_size)
+            ]
+            results = {name: torch.cat([r[name] for r in results], 0) 
+                        if results[0][name].dim() > 0 else sum([r[name] for r in results])
+                    for name in results[0]}
 
         if getattr(input_fn, "track_max_probs", False):
             input_fn.track_voxel_probs(samples['sampled_point_voxel_idx'].long(), results['probs'])

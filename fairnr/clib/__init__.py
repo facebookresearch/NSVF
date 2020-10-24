@@ -227,6 +227,64 @@ class UniformRaySampling(Function):
 uniform_ray_sampling = UniformRaySampling.apply
 
 
+class InverseCDFRaySampling(Function):
+    @staticmethod
+    def forward(ctx, pts_idx, min_depth, max_depth, probs, steps, fixed_step_size=-1, deterministic=False):
+        G, N, P = 256, pts_idx.size(0), pts_idx.size(1)
+        H = int(np.ceil(N / G)) * G
+
+        if H > N:
+            pts_idx = torch.cat([pts_idx, pts_idx[:H-N]], 0)
+            min_depth = torch.cat([min_depth, min_depth[:H-N]], 0)
+            max_depth = torch.cat([max_depth, max_depth[:H-N]], 0)
+            probs = torch.cat([probs, probs[:H-N]], 0)
+            steps = torch.cat([steps, steps[:H-N]], 0)
+        pts_idx = pts_idx.reshape(G, -1, P)
+        min_depth = min_depth.reshape(G, -1, P)
+        max_depth = max_depth.reshape(G, -1, P)
+        probs = probs.reshape(G, -1, P)
+        steps = steps.reshape(G, -1)
+
+        # pre-generate noise
+        max_steps = steps.ceil().long().max() + P
+        noise = min_depth.new_zeros(*min_depth.size()[:-1], max_steps)
+        if deterministic:
+            noise += 0.5
+        else:
+            noise = noise.uniform_()
+        
+        # call cuda function
+        # call cuda function
+        sampled_idx, sampled_depth, sampled_dists = _ext.inverse_cdf_sampling(
+            pts_idx, min_depth.float(), max_depth.float(), noise.float(), probs.float(), steps.float(), fixed_step_size)
+        sampled_depth = sampled_depth.type_as(min_depth)
+        sampled_dists = sampled_dists.type_as(min_depth)
+        
+        sampled_idx = sampled_idx.reshape(H, -1)
+        sampled_depth = sampled_depth.reshape(H, -1)
+        sampled_dists = sampled_dists.reshape(H, -1)
+        if H > N:
+            sampled_idx = sampled_idx[: N]
+            sampled_depth = sampled_depth[: N]
+            sampled_dists = sampled_dists[: N]
+        
+        max_len = sampled_idx.ne(-1).sum(-1).max()
+        sampled_idx = sampled_idx[:, :max_len]
+        sampled_depth = sampled_depth[:, :max_len]
+        sampled_dists = sampled_dists[:, :max_len]
+
+        ctx.mark_non_differentiable(sampled_idx)
+        ctx.mark_non_differentiable(sampled_depth)
+        ctx.mark_non_differentiable(sampled_dists)
+        return sampled_idx, sampled_depth, sampled_dists
+
+    @staticmethod
+    def backward(ctx, a, b, c):
+        return None, None, None, None, None, None, None
+
+inverse_cdf_sampling = InverseCDFRaySampling.apply
+
+
 # back-up for ray point sampling
 @torch.no_grad()
 def _parallel_ray_sampling(MARCH_SIZE, pts_idx, min_depth, max_depth, deterministic=False):
