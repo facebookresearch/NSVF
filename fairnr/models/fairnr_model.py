@@ -17,6 +17,7 @@ import torch.nn as nn
 import skimage.metrics
 import imageio, os
 import numpy as np
+import copy
 
 from fairseq.models import BaseFairseqModel
 from fairnr.modules.encoder import get_encoder
@@ -40,11 +41,17 @@ class BaseModel(BaseFairseqModel):
     def __init__(self, args, reader, encoder, field, raymarcher):
         super().__init__()
         self.args = args
+        self.hierarchical = getattr(self.args, "hierarchical_sampling", False)
         self.reader = reader
         self.encoder = encoder
         self.field = field
         self.raymarcher = raymarcher
         self.cache = None
+
+        if getattr(self.args, "use_fine_model"):
+            self.field_fine = copy.deepcopy(field)
+        else:
+            self.field_fine = None
 
     @classmethod
     def build_model(cls, args, task):
@@ -61,6 +68,16 @@ class BaseModel(BaseFairseqModel):
         get_renderer(cls.RAYMARCHER).add_args(parser)
         get_encoder(cls.ENCODER).add_args(parser)
         get_field(cls.FIELD).add_args(parser)
+
+        # model-level args
+        parser.add_argument('--hierarchical-sampling', action='store_true',
+            help='if set, a second ray marching pass will be performed based on the first time probs.')
+        parser.add_argument('--use-fine-model', action='store_true', 
+            help='if set, we will simultaneously optimize two networks, a coarse field and a fine field.')
+        parser.add_argument('--fine-num-sample-ratio', type=float, 
+            help='raito of samples compared to the first pass')
+        parser.add_argument('--fine-fixed-num-samples', type=int, default=0,
+            help='instead of using ratio, sample a fixed number of points for each ray, e.g. 64, 128.')
 
     @property
     def dummy_loss(self):
@@ -85,10 +102,11 @@ class BaseModel(BaseFairseqModel):
             ]
             results = self.merge_outputs(results)
 
-        if results.get('sampled_uv', None) is None:
-            results['sampled_uv'] = uv
-        results['ray_start'] = ray_start
-        results['ray_dir'] = ray_dir
+        results['samples'] = {
+            'sampled_uv': results.get('sampled_uv', uv),
+            'ray_start': ray_start,
+            'ray_dir': ray_dir
+        }
 
         # caching the prediction
         self.cache = {
@@ -119,10 +137,14 @@ class BaseModel(BaseFairseqModel):
         if output is None:
             assert self.cache is not None, "need to run forward-pass"
             output = self.cache  # make sure to run forward-pass.
+        sample.update(output['samples'])
 
         images = {}
         images = self._visualize(images, sample, output, [img_id, shape, view, width, 'render'])
         images = self._visualize(images, sample, sample, [img_id, shape, view, width, 'target'])
+        if 'coarse' in output:  # hierarchical sampling
+            images = self._visualize(images, sample, output['coarse'], [img_id, shape, view, width, 'coarse_render'])
+        
         images = {
             tag: recover_image(width=width, **images[tag]) 
                 for tag in images if images[tag] is not None
@@ -142,8 +164,8 @@ class BaseModel(BaseFairseqModel):
                 'min_val': min_depth, 
                 'max_val': max_depth}
             normals = compute_normal_map(
-                output['ray_start'][shape, view].float(),
-                output['ray_dir'][shape, view].float(),
+                sample['ray_start'][shape, view].float(),
+                sample['ray_dir'][shape, view].float(),
                 output['depths'][shape, view].float(),
                 sample['extrinsics'][shape, view].float().inverse(), width)
             images['{}_normal/{}:HWC'.format(name, img_id)] = {

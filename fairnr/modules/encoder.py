@@ -352,8 +352,11 @@ class SparseVoxelEncoder(Encoder):
         dists = (max_depth - min_depth).masked_fill(pts_idx.eq(-1), 0)
         probs = intersection_outputs.get('probs', dists / dists.sum(dim=-1, keepdim=True))
         steps = intersection_outputs.get('steps', dists.sum(-1) / self.step_size)
+        fixed_step_szie = 1.0  / intersection_outputs.get('fixed_steps', -1)
+
+        # sample points and use middle point approximation
         sampled_idx, sampled_depth, sampled_dists = inverse_cdf_sampling(
-            pts_idx, min_depth, max_depth, probs, steps, -1,
+            pts_idx, min_depth, max_depth, probs, steps, fixed_step_szie,
             self.deterministic_step or (not self.training))
         
         # from fairseq import pdb; pdb.set_trace()

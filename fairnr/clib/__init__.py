@@ -251,9 +251,8 @@ class InverseCDFRaySampling(Function):
         if deterministic:
             noise += 0.5
         else:
-            noise = noise.uniform_()
+            noise = noise.uniform_().clamp(min=1e-6, max=1-1e-6)  # in case
         
-        # call cuda function
         # call cuda function
         sampled_idx, sampled_depth, sampled_dists = _ext.inverse_cdf_sampling(
             pts_idx, min_depth.float(), max_depth.float(), noise.float(), probs.float(), steps.float(), fixed_step_size)

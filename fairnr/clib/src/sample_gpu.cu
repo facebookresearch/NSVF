@@ -160,7 +160,7 @@ __global__ void inverse_cdf_sampling_kernel(
                 sampled_idx[K + s] = pts_idx[H + curr_bin];
                 sampled_dists[K + s] = (curr_max_depth - z_low);
                 sampled_depth[K + s] = (curr_max_depth + z_low) * .5;
-
+                
                 // move to next cdf
                 curr_bin++; s++;
                 if (curr_bin == max_hits || pts_idx[H + curr_bin] == -1) {
@@ -182,11 +182,16 @@ __global__ void inverse_cdf_sampling_kernel(
             z_low = z; s++;
         }
         
-        // include the last bin
-        if (z_low < curr_max_depth) {
+        // if there are bins still remained
+        while (z_low < curr_max_depth) {
             sampled_idx[K + s] = pts_idx[H + curr_bin];
             sampled_dists[K + s] = (curr_max_depth - z_low);
             sampled_depth[K + s] = (curr_max_depth + z_low) * .5;
+            curr_bin++; s++;
+            if (curr_bin == max_hits || pts_idx[curr_bin] == -1) break;
+            curr_min_depth = min_depth[H + curr_bin];
+            curr_max_depth = max_depth[H + curr_bin];
+            z_low = curr_min_depth;
         }
     }
 }
