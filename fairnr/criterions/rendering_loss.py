@@ -156,7 +156,6 @@ class SRNLossCriterion(RenderingCriterion):
             other_logs.update(net_output['other_logs'])
 
         # computing loss
-        print(net_output['colors'].device, net_output['colors'].eq(net_output['colors']).all())
         if self.args.color_weight > 0:
             color_loss = utils.rgb_loss(
                 net_output['colors'], target_colors, 

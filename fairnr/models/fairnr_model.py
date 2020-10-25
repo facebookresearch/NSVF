@@ -48,7 +48,7 @@ class BaseModel(BaseFairseqModel):
         self.raymarcher = raymarcher
         self.cache = None
 
-        if getattr(self.args, "use_fine_model"):
+        if getattr(self.args, "use_fine_model", False):
             self.field_fine = copy.deepcopy(field)
         else:
             self.field_fine = None

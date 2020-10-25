@@ -216,7 +216,7 @@ __global__ void svo_intersect_point_kernel(
         make_float3(points[k * 3 + 0], points[k * 3 + 1], points[k * 3 + 2]),
         half_voxel * float(children[k * 9 + 8]));
       stack[ptr] = -1; ptr--;
-
+      
       if (depths.x > -1.0f) { // ray did not miss the voxel
         // TODO: here it should be able to know which children is ok, further optimize the code
         if (children[k * 9 + 8] == 1) {  // this is a terminal node 

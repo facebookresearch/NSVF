@@ -179,10 +179,12 @@ class SparseVoxelEncoder(Encoder):
 
     def reset_runtime_caches(self):
         if self.use_octree:
-            centers, children = build_easy_octree(self.points[self.keep.bool()], self.voxel_size / 2.0)
+            points = self.points[self.keep.bool()]
+            centers, children = build_easy_octree(points, self.voxel_size / 2.0)
             self._runtime_caches['flatten_centers'] = centers
             self._runtime_caches['flatten_children'] = children
-        self._runtime_caches['max_voxel_probs'] = self.points.new_zeros(self.points.size(0))
+        if self.track_max_probs:
+            self._runtime_caches['max_voxel_probs'] = self.points.new_zeros(self.points.size(0))
 
     def clean_runtime_caches(self):
         for name in self._runtime_caches:
@@ -191,6 +193,7 @@ class SparseVoxelEncoder(Encoder):
     def precompute(self, id=None, *args, **kwargs):
         feats  = self.feats[self.keep.bool()]
         points = self.points[self.keep.bool()]
+        points[:, 0] += (self.voxel_size / 10)
         values = self.values.weight[: self.num_keys] if self.values is not None else None
         
         if id is not None:
@@ -358,8 +361,6 @@ class SparseVoxelEncoder(Encoder):
         sampled_idx, sampled_depth, sampled_dists = inverse_cdf_sampling(
             pts_idx, min_depth, max_depth, probs, steps, fixed_step_szie,
             self.deterministic_step or (not self.training))
-        
-        # from fairseq import pdb; pdb.set_trace()
         sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
         sampled_dists.masked_fill_(sampled_idx.eq(-1), 0.0)
