@@ -34,104 +34,74 @@ class NSVFModel(BaseModel):
     FIELD = 'radiance_field'
     RAYMARCHER = 'volume_rendering'
 
-    def _forward(self, ray_start, ray_dir, **kwargs):
-        S, V, P, _ = ray_dir.size()
-        assert S == 1, "naive NeRF only supports single object."
-
+    def preprocessing(self, **kwargs):
         # voxel encoder (precompute for each voxel if needed)
-        encoder_states = self.encoder.precompute(**kwargs)  
+        return self.encoder.precompute(**kwargs) 
 
-        # ray-voxel intersection
-        with GPUTimer() as timer0:
-            ray_start, ray_dir, intersection_outputs, hits = \
-                self.encoder.ray_intersect(ray_start, ray_dir, encoder_states)
+    def intersecting(self, ray_start, ray_dir, encoder_states, **kwargs):
+        S = ray_dir.size(0)
+        ray_start, ray_dir, intersection_outputs, hits = \
+            self.encoder.ray_intersect(ray_start, ray_dir, encoder_states)
 
-            if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
-                uv, size = kwargs['uv'], kwargs['size']
-                mask = hits.reshape(*uv.size()[:2], uv.size(-1))
+        if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
+            uv, size = kwargs['uv'], kwargs['size']
+            mask = hits.reshape(*uv.size()[:2], uv.size(-1))
 
-                # sample rays based on voxel intersections
-                sampled_uv, sampled_masks = self.reader.sample_pixels(
-                    uv, size, mask=mask, return_mask=True)
-                sampled_masks = sampled_masks.reshape(uv.size(0), -1).bool()
-                hits, sampled_masks = hits[sampled_masks].reshape(S, -1), sampled_masks.unsqueeze(-1)
-                intersection_outputs = {name: outs[sampled_masks.expand_as(outs)].reshape(S, -1, outs.size(-1)) 
-                    for name, outs in intersection_outputs.items()}
-                ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, 3)
-                ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, 3)
-                P = hits.size(-1) // V   # the number of pixels per image
-            else:
-                sampled_uv = None
+            # sample rays based on voxel intersections
+            sampled_uv, sampled_masks = self.reader.sample_pixels(
+                uv, size, mask=mask, return_mask=True)
+            sampled_masks = sampled_masks.reshape(uv.size(0), -1).bool()
+            hits, sampled_masks = hits[sampled_masks].reshape(S, -1), sampled_masks.unsqueeze(-1)
+            intersection_outputs = {name: outs[sampled_masks.expand_as(outs)].reshape(S, -1, outs.size(-1)) 
+                for name, outs in intersection_outputs.items()}
+            ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, 3)
+            ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, 3)
         
-        # neural ray-marching
+        else:
+            sampled_uv = None
+        
+        return ray_start, ray_dir, intersection_outputs, hits, sampled_uv
+        
+    def raymarching(self, ray_start, ray_dir, intersection_outputs, encoder_states, fine=False):
+        samples = self.encoder.ray_sample(intersection_outputs)
+        field = self.field_fine if fine and (self.field_fine is not None) else self.field 
+        all_results = self.raymarcher(self.encoder, field, ray_start, ray_dir, samples, encoder_states)
+        all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, encoder_states)
+        all_results['voxel_depth'] = samples['sampled_point_depth'][:, 0]
+        return samples, all_results
+
+    def prepare_hierarchical_sampling(self, intersection_outputs, samples, all_results):
+        intersection_outputs['min_depth'] = samples['sampled_point_depth'] - samples['sampled_point_distance'] * .5
+        intersection_outputs['max_depth'] = samples['sampled_point_depth'] + samples['sampled_point_distance'] * .5
+        intersection_outputs['intersected_voxel_idx'] = samples['sampled_point_voxel_idx'].contiguous()
+        intersection_outputs['probs'] = all_results['probs'] / (all_results['probs'].sum(-1, keepdim=True) + 1e-7)
+        intersection_outputs['steps'] = samples['sampled_point_voxel_idx'].ne(-1).sum(-1).float()
+        return intersection_outputs
+
+    def postprocessing(self, ray_start, ray_dir, all_results, hits, sizes):
+        S, V, P = sizes
         fullsize = S * V * P
         
+        all_results['missed'] = fill_in((fullsize, ), hits, all_results['missed'], 1.0).view(S, V, P)
+        all_results['colors'] = fill_in((fullsize, 3), hits, all_results['colors'], 0.0).view(S, V, P, 3)
+        all_results['depths'] = fill_in((fullsize, ), hits, all_results['depths'], 0.0).view(S, V, P)
+
         BG_DEPTH = self.field.bg_color.depth
-        bg_color = self.field.bg_color(ray_dir)
-        
-        all_results = defaultdict(lambda: None)
-        if hits.sum() > 0:  # check if ray missed everything
-            intersection_outputs = {name: outs[hits] for name, outs in intersection_outputs.items()}
-            ray_start, ray_dir = ray_start[hits], ray_dir[hits]
-            encoder_states = {name: s.reshape(-1, s.size(-1)) if s is not None else None
-                for name, s in encoder_states.items()}
-            
-            # ray-marching
-            samples = self.encoder.ray_sample(intersection_outputs)
-            all_results = self.raymarcher(self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
-
-            # hierarchical sampling
-            if self.hierarchical:
-                intersection_outputs['min_depth'] = samples['sampled_point_depth'] - samples['sampled_point_distance'] * .5
-                intersection_outputs['max_depth'] = samples['sampled_point_depth'] + samples['sampled_point_distance'] * .5
-                intersection_outputs['intersected_voxel_idx'] = samples['sampled_point_voxel_idx'].contiguous()
-                intersection_outputs['probs'] = all_results['probs'] / (all_results['probs'].sum(-1, keepdim=True) + 1e-7)
-                intersection_outputs['steps'] = samples['sampled_point_voxel_idx'].ne(-1).sum(-1).float()
-                field = self.field_fine if self.field_fine is not None else self.field  # option to use fine model.
-                coarse_results = all_results.copy()
-                
-                samples = self.encoder.ray_sample(intersection_outputs)  # second pass
-                all_results = self.raymarcher(self.encoder, field, ray_start, ray_dir, samples, encoder_states)
-                all_results['coarse'] = coarse_results
-            all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, encoder_states)
-            all_results['voxel_depth'] = samples['sampled_point_depth'][:, 0]
-            
-        # fill out the full size
-        hits = hits.reshape(fullsize)
-
-        def fill_values(all_results, hits):
-            all_results['missed'] = fill_in((fullsize, ), hits, all_results['missed'], 1.0).view(S, V, P)
-            all_results['colors'] = fill_in((fullsize, 3), hits, all_results['colors'], 0.0).view(S, V, P, 3)
-            all_results['depths'] = fill_in((fullsize, ), hits, all_results['depths'], 0.0).view(S, V, P)
-
-            all_results['colors'] += all_results['missed'].unsqueeze(-1) * bg_color.reshape(fullsize, 3).view(S, V, P, 3)
-            all_results['depths'] += all_results['missed'] * BG_DEPTH
-            if 'normal' in all_results:
-                all_results['normal'] = fill_in((fullsize, 3), hits, all_results['normal'], 0.0).view(S, V, P, 3)
-            if 'voxel_depth' in all_results:
-                all_results['voxel_depth'] = fill_in((fullsize, ), hits, all_results['voxel_depth'], BG_DEPTH).view(S, V, P)
-            if 'voxel_edges' in all_results:
-                all_results['voxel_edges'] = fill_in((fullsize, 3), hits, all_results['voxel_edges'], 1.0).view(S, V, P, 3)
-            return all_results
-
-        all_results = fill_values(all_results, hits)
-        if self.hierarchical:
-            all_results['coarse'] = fill_values(all_results['coarse'], hits)
-
-        # other logs
-        all_results['other_logs'] = {
-                'voxs_log': self.encoder.voxel_size.item(),
-                'stps_log': self.encoder.step_size.item(),
-                'tvox_log': timer0.sum,
-                'asf_log': (all_results['ae'].float() / fullsize).item(),
-                'ash_log': (all_results['ae'].float() / hits.sum()).item(),
-                'nvox_log': self.encoder.num_voxels.item(),
-                }
-        
-        if sampled_uv is not None:
-            all_results['sampled_uv'] = sampled_uv
-        
+        bg_color = self.field.bg_color(all_results['colors'])
+        all_results['colors'] += all_results['missed'].unsqueeze(-1) * bg_color.reshape(fullsize, 3).view(S, V, P, 3)
+        all_results['depths'] += all_results['missed'] * BG_DEPTH
+        if 'normal' in all_results:
+            all_results['normal'] = fill_in((fullsize, 3), hits, all_results['normal'], 0.0).view(S, V, P, 3)
+        if 'voxel_depth' in all_results:
+            all_results['voxel_depth'] = fill_in((fullsize, ), hits, all_results['voxel_depth'], BG_DEPTH).view(S, V, P)
+        if 'voxel_edges' in all_results:
+            all_results['voxel_edges'] = fill_in((fullsize, 3), hits, all_results['voxel_edges'], 1.0).view(S, V, P, 3)
         return all_results
+
+    def add_other_logs(self, all_results):
+        return {'voxs_log': self.encoder.voxel_size.item(),
+                'stps_log': self.encoder.step_size.item(),
+                'nvox_log': self.encoder.num_voxels.item()}
 
     def _visualize(self, images, sample, output, state, **kwargs):
         img_id, shape, view, width, name = state

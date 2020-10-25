@@ -18,7 +18,7 @@ import skimage.metrics
 import imageio, os
 import numpy as np
 import copy
-
+from collections import defaultdict
 from fairseq.models import BaseFairseqModel
 from fairnr.modules.encoder import get_encoder
 from fairnr.modules.field import get_field
@@ -118,8 +118,65 @@ class BaseModel(BaseFairseqModel):
         return results
 
     def _forward(self, ray_start, ray_dir, **kwargs):
+        S, V, P, _ = ray_dir.size()
+        assert S == 1, "we only supports single object for now."
+
+        encoder_states = self.preprocessing(**kwargs)
+        ray_start, ray_dir, intersection_outputs, hits, sampled_uv = \
+            self.intersecting(ray_start, ray_dir, encoder_states, **kwargs)
+        P = ray_dir.size(1) // V
+        
+        all_results = defaultdict(lambda: None)
+
+        if hits.sum() > 0:
+            intersection_outputs = {
+                name: outs[hits] for name, outs in intersection_outputs.items()}
+            ray_start, ray_dir = ray_start[hits], ray_dir[hits]
+            encoder_states = {name: s.reshape(-1, s.size(-1)) if s is not None else None
+                for name, s in encoder_states.items()}
+            
+            samples, all_results = self.raymarching(               # ray-marching
+                ray_start, ray_dir, intersection_outputs, encoder_states)
+            
+            if self.hierarchical:   # hierarchical sampling
+                intersection_outputs = self.prepare_hierarchical_sampling(
+                    intersection_outputs, samples, all_results)
+                coarse_results = all_results.copy()
+                
+                samples, all_results = self.raymarching(
+                    ray_start, ray_dir, intersection_outputs, encoder_states, fine=True)
+                all_results['coarse'] = coarse_results
+
+        hits = hits.reshape(-1)
+        all_results = self.postprocessing(ray_start, ray_dir, all_results, hits, (S, V, P))
+        if self.hierarchical:
+            all_results['coarse'] = self.postprocessing(
+                ray_start, ray_dir, all_results['coarse'], hits, (S, V, P))
+        
+        if sampled_uv is not None:
+            all_results['sampled_uv'] = sampled_uv
+        
+        all_results['other_logs'] = self.add_other_logs(all_results)
+        return all_results
+
+    def preprocessing(self, **kwargs):
         raise NotImplementedError
     
+    def postprocessing(self, ray_start, ray_dir, all_results, hits, sizes):
+        raise NotImplementedError
+
+    def intersecting(self, ray_start, ray_dir, encoder_states):
+        raise NotImplementedError
+    
+    def raymarching(self, ray_start, ray_dir, intersection_outputs, encoder_states, fine=False):
+        raise NotImplementedError
+
+    def prepare_hierarchical_sampling(self, intersection_outputs, samples, all_results):
+        raise NotImplementedError
+
+    def add_other_logs(self, all_results):
+        raise NotImplementedError
+
     def merge_outputs(self, outputs):
         new_output = {}
         for key in outputs[0]:

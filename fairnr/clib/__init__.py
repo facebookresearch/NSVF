@@ -110,7 +110,7 @@ class SparseVoxelOctreeRayIntersect(Function):
         children = children.expand(S * G, *children.size()[1:]).contiguous()
         inds, min_depth, max_depth = _ext.svo_intersect(
             ray_start.float(), ray_dir.float(), points.float(), children.int(), voxelsize, n_max)
-        from fairseq import pdb; pdb.set_trace()  # 1202 174
+        
         min_depth = min_depth.type_as(ray_start)
         max_depth = max_depth.type_as(ray_start)
         
