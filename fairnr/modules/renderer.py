@@ -12,7 +12,6 @@ import torch.nn.functional as F
 
 from fairnr.modules.linear import FCLayer
 from fairnr.data.geometry import ray
-from torchsearchsorted import searchsorted
 
 MAX_DEPTH = 10000.0
 RENDERER_REGISTRY = {}
@@ -114,7 +113,7 @@ class VolumeRenderer(Renderer):
         
         # post processing
         if 'sigma' in field_outputs:
-            sigma, sampled_dists= field_outputs['sigma'], samples['sampled_point_distance']
+            sigma, sampled_dists= field_outputs['sigma'], field_inputs['dists']
             noise = 0 if not self.discrete_reg and (not self.training) else torch.zeros_like(sigma).normal_()  
             free_energy = torch.relu(noise + sigma) * sampled_dists    
             # (optional) free_energy = (F.elu(sigma - 3, alpha=1) + 1) * dists
@@ -220,47 +219,3 @@ class VolumeRenderer(Renderer):
         if getattr(input_fn, "track_max_probs", False):
             input_fn.track_voxel_probs(samples['sampled_point_voxel_idx'].long(), results['probs'])
         return results
-        
-
-@register_renderer("resampled_volume_rendering")
-class ResampledVolumeRenderer(VolumeRenderer):
-    
-    def forward_chunk(self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states, gt_depths=None):
-        results0 = super().forward_chunk(
-            input_fn, field_fn, ray_start, ray_dir, samples,
-            encoder_states, output_types=['sigma'])  # infer probability
-        # resample based on piecewise distribution with inverse CDF (only sample non-missing points)
-        new_samples = resample_pdf(results0['probs'], samples, n_samples=16, deterministic=True)  
-        return super().forward_chunk(input_fn, field_fn, ray_start, ray_dir, new_samples, 
-            encoder_states, output_types=['texture'], 
-            global_weights=results0['probs'].sum(-1, keepdims=True))  # get texture
-        
-        
-def resample_pdf(probs, samples, n_samples=32, deterministic=False):
-    sampled_depth, sampled_idx, sampled_dists = samples
-    
-    # compute CDF
-    pdf = probs / (probs.sum(-1, keepdims=True) + 1e-7)
-    cdf = torch.cat([torch.zeros_like(pdf[...,:1]), torch.cumsum(pdf, -1)], -1)
-    
-    # generate random samples
-    z = torch.arange(n_samples, device=cdf.device, dtype=cdf.dtype).expand(
-        cdf.size(0), n_samples).contiguous()
-    if deterministic:
-        z = z + 0.5
-    else:
-        z = z + z.clone().uniform_()
-    z = z / float(n_samples)
-
-    # inverse transform sampling
-    inds = searchsorted(cdf, z) - 1
-    inds_miss = inds.eq(sampled_idx.size(1))
-    inds_safe = inds.clamp(max=sampled_idx.size(1)-1)
-    resampled_below, resampled_above = cdf.gather(1, inds_safe), cdf.gather(1, inds_safe + 1)
-    resampled_idx = sampled_idx.gather(1, inds_safe).masked_fill(inds_miss, -1)
-    resampled_depth = sampled_depth.gather(1, inds_safe).masked_fill(inds_miss, MAX_DEPTH)
-    resampled_dists = sampled_dists.gather(1, inds_safe).masked_fill(inds_miss, 0.0)
-    
-    # reparameterization
-    resampled_depth = ((z - resampled_below) / (resampled_above - resampled_below + 1e-7) - 0.5) * resampled_dists + resampled_depth
-    return resampled_depth, resampled_idx, resampled_depth

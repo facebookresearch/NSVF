@@ -108,7 +108,8 @@ class VolumeEncoder(Encoder):
     def forward(self, samples, encoder_states):
         return {
             'pos': samples['sampled_point_xyz'].requires_grad_(True),
-            'ray': samples['sampled_point_ray_direction']
+            'ray': samples['sampled_point_ray_direction'],
+            'dists': samples['sampled_point_distance']
         }
 
 
@@ -430,9 +431,10 @@ class SparseVoxelEncoder(Encoder):
         sampled_idx = samples['sampled_point_voxel_idx'].long()
         sampled_xyz = samples['sampled_point_xyz'].requires_grad_(True)
         sampled_dir = samples['sampled_point_ray_direction']
+        sampled_dis = samples['sampled_point_distance']
 
         # prepare inputs for implicit field
-        inputs = {'pos': sampled_xyz, 'ray': sampled_dir}
+        inputs = {'pos': sampled_xyz, 'ray': sampled_dir, 'dists': sampled_dis}
         if values is not None:
             # resample point features
             point_xyz = F.embedding(sampled_idx, point_xyz)
@@ -818,14 +820,11 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
 
     @torch.enable_grad()
     def forward(self, samples, encoder_states):
-        # TODO: enable mesh embedding learning
-
-        sampled_xyz = samples['sampled_point_xyz'].requires_grad_(True)
-        sampled_dir = samples['sampled_point_ray_direction']
-
-        # prepare inputs for implicit field
-        inputs = {'pos': sampled_xyz, 'ray': sampled_dir}
-        return inputs
+        return {
+            'pos': samples['sampled_point_xyz'].requires_grad_(True),
+            'ray': samples['sampled_point_ray_direction'],
+            'dists': samples['sampled_point_distance']
+        }
 
     @property
     def num_voxels(self):
