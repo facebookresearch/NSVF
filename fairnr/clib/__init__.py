@@ -254,19 +254,19 @@ class InverseCDFRaySampling(Function):
             noise = noise.uniform_().clamp(min=1e-6, max=1-1e-6)  # in case
         
         # call cuda function
-        # to avoid oom?
-        chunk_size = 4 * G
+        chunk_size = 4 * G  # to avoid oom?
         results = [
             _ext.inverse_cdf_sampling(
-            pts_idx[:, i:i+chunk_size].contiguous(), 
-            min_depth.float()[:, i:i+chunk_size].contiguous(), 
-            max_depth.float()[:, i:i+chunk_size].contiguous(), 
-            noise.float()[:, i:i+chunk_size].contiguous(), 
-            probs.float()[:, i:i+chunk_size].contiguous(), 
-            steps.float()[:, i:i+chunk_size].contiguous(), 
-            fixed_step_size)
+                pts_idx[:, i:i+chunk_size].contiguous(), 
+                min_depth.float()[:, i:i+chunk_size].contiguous(), 
+                max_depth.float()[:, i:i+chunk_size].contiguous(), 
+                noise.float()[:, i:i+chunk_size].contiguous(), 
+                probs.float()[:, i:i+chunk_size].contiguous(), 
+                steps.float()[:, i:i+chunk_size].contiguous(), 
+                fixed_step_size)
             for i in range(0, min_depth.size(1), chunk_size)
         ]
+        from fairseq import pdb;pdb.set_trace()
         sampled_idx, sampled_depth, sampled_dists = [
             torch.cat([r[i] for r in results], 1)
             for i in range(3)

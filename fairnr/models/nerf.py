@@ -69,7 +69,6 @@ class NeRFModel(BaseModel):
             intersection_outputs['max_depth'], 
             intersection_outputs['probs'],
             intersection_outputs['steps'], -1, (not self.training))
-        from fairseq import pdb;pdb.set_trace()
         samples = {
             'sampled_point_depth': sampled_depth,
             'sampled_point_distance': sampled_dists,
@@ -94,8 +93,7 @@ class NeRFModel(BaseModel):
         intersection_outputs['probs'] = safe_probs / safe_probs.sum(-1, keepdim=True)
         intersection_outputs['steps'] = intersection_outputs['steps'] * 0 + self.args.fixed_fine_num_samples
         if getattr(self.args, "reduce_fine_for_missed", False):
-            intersection_outputs['steps'] = intersection_outputs['steps'] * safe_probs.sum(-1)
-        from fairseq import pdb;pdb.set_trace()
+            intersection_outputs['steps'] = intersection_outputs['steps'] * safe_probs.sum(-1, keepdim=True)
         return intersection_outputs
 
     def postprocessing(self, ray_start, ray_dir, all_results, hits, sizes):
