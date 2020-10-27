@@ -266,7 +266,6 @@ class InverseCDFRaySampling(Function):
                 fixed_step_size)
             for i in range(0, min_depth.size(1), chunk_size)
         ]
-        from fairseq import pdb;pdb.set_trace()
         sampled_idx, sampled_depth, sampled_dists = [
             torch.cat([r[i] for r in results], 1)
             for i in range(3)

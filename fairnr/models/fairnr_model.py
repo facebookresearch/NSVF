@@ -74,8 +74,6 @@ class BaseModel(BaseFairseqModel):
             help='if set, a second ray marching pass will be performed based on the first time probs.')
         parser.add_argument('--use-fine-model', action='store_true', 
             help='if set, we will simultaneously optimize two networks, a coarse field and a fine field.')
-        parser.add_argument('--fine-num-sample-ratio', type=float, 
-            help='raito of samples compared to the first pass')
         
     @property
     def dummy_loss(self):

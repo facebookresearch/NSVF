@@ -160,8 +160,8 @@ __global__ void inverse_cdf_sampling_kernel(
                 sampled_idx[K + s] = pts_idx[H + curr_bin];
                 sampled_dists[K + s] = (curr_max_depth - z_low);
                 sampled_depth[K + s] = (curr_max_depth + z_low) * .5;
-                if ((j==0) && (batch_index==0)) printf("A j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
-                if ((j==1) && (batch_index==0)) printf("A j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
+                // if ((j==0) && (batch_index==0)) printf("A j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
+                // if ((j==1) && (batch_index==0)) printf("A j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
                 
                 // move to next cdf
                 curr_bin++; 
@@ -182,8 +182,8 @@ __global__ void inverse_cdf_sampling_kernel(
             sampled_idx[K + s] = pts_idx[H + curr_bin];
             sampled_dists[K + s] = (z - z_low);
             sampled_depth[K + s] = (z + z_low) * .5;
-            if ((j==0) && (batch_index==0)) printf("B j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
-            if ((j==1) && (batch_index==0)) printf("B j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
+            // if ((j==0) && (batch_index==0)) printf("B j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
+            // if ((j==1) && (batch_index==0)) printf("B j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
             z_low = z; s++;
         }
         
@@ -192,8 +192,8 @@ __global__ void inverse_cdf_sampling_kernel(
             sampled_idx[K + s] = pts_idx[H + curr_bin];
             sampled_dists[K + s] = (curr_max_depth - z_low);
             sampled_depth[K + s] = (curr_max_depth + z_low) * .5;
-            if ((j==0) && (batch_index==0)) printf("C j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
-            if ((j==1) && (batch_index==0)) printf("C j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
+            // if ((j==0) && (batch_index==0)) printf("C j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
+            // if ((j==1) && (batch_index==0)) printf("C j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
             curr_bin++; 
             s++;
             if ((curr_bin >= max_hits) || (pts_idx[curr_bin] == -1)) 

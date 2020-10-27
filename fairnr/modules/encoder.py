@@ -65,6 +65,53 @@ class Encoder(nn.Module):
         pass
 
 
+@register_encoder('volume_encoder')
+class VolumeEncoder(Encoder):
+    
+    def __init__(self, args):
+        super().__init__(args)
+
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument('--near', type=float, help='near distance of the volume')
+        parser.add_argument('--far',  type=float, help='far distance of the volume')
+
+    def precompute(self, id=None, *args, **kwargs):
+        return {}   # we do not use encoder for NeRF
+
+    def ray_intersect(self, ray_start, ray_dir, encoder_states):
+        S, V, P, _ = ray_dir.size()
+        ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
+        ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
+        intersection_outputs = {
+            "min_depth": ray_dir.new_ones(S, V * P, 1) * self.args.near,
+            "max_depth": ray_dir.new_ones(S, V * P, 1) * self.args.far,
+            "probs": ray_dir.new_ones(S, V * P, 1),
+            "steps": ray_dir.new_ones(S, V * P, 1) * self.args.fixed_num_samples,
+            "intersected_voxel_idx": ray_dir.new_zeros(S, V * P, 1).int()}
+        hits = ray_dir.new_ones(S, V * P).bool()
+        return ray_start, ray_dir, intersection_outputs, hits
+
+    def ray_sample(self, intersection_outputs):
+        sampled_idx, sampled_depth, sampled_dists = inverse_cdf_sampling(
+            intersection_outputs['intersected_voxel_idx'], 
+            intersection_outputs['min_depth'], 
+            intersection_outputs['max_depth'], 
+            intersection_outputs['probs'],
+            intersection_outputs['steps'], -1, (not self.training))
+        return {
+            'sampled_point_depth': sampled_depth,
+            'sampled_point_distance': sampled_dists,
+            'sampled_point_voxel_idx': sampled_idx,  # dummy index (to match raymarcher)
+        }
+
+    def forward(self, samples, encoder_states):
+        return {
+            'pos': samples['sampled_point_xyz'].requires_grad_(True),
+            'ray': samples['sampled_point_ray_direction']
+        }
+
+
 @register_encoder('sparsevoxel_encoder')
 class SparseVoxelEncoder(Encoder):
 

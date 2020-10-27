@@ -19,27 +19,29 @@ from fairseq.models import (
     register_model_architecture
 )
 from fairnr.data.geometry import compute_normal_map, fill_in
-from fairnr.models.fairnr_model import BaseModel
+from fairnr.models.nerf import NeRFModel
 
 MAX_DEPTH = 10000.0
 
 
 @register_model('nsvf')
-class NSVFModel(BaseModel):
+class NSVFModel(NeRFModel):
 
     READER = 'image_reader'
     ENCODER = 'sparsevoxel_encoder'
     FIELD = 'radiance_field'
     RAYMARCHER = 'volume_rendering'
 
-    def preprocessing(self, **kwargs):
-        # voxel encoder (precompute for each voxel if needed)
-        return self.encoder.precompute(**kwargs) 
+    @classmethod
+    def add_args(cls, parser):
+        super().add_args(parser)
+        parser.add_argument('--fine-num-sample-ratio', type=float, default=0,
+            help='raito of samples compared to the first pass')
 
     def intersecting(self, ray_start, ray_dir, encoder_states, **kwargs):
         S = ray_dir.size(0)
-        ray_start, ray_dir, intersection_outputs, hits = \
-            self.encoder.ray_intersect(ray_start, ray_dir, encoder_states)
+        ray_start, ray_dir, intersection_outputs, hits, _ = \
+            super().intersecting(ray_start, ray_dir, encoder_states, **kwargs)
 
         if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
             uv, size = kwargs['uv'], kwargs['size']
@@ -61,23 +63,19 @@ class NSVFModel(BaseModel):
         return ray_start, ray_dir, intersection_outputs, hits, sampled_uv
         
     def raymarching(self, ray_start, ray_dir, intersection_outputs, encoder_states, fine=False):
-        samples = self.encoder.ray_sample(intersection_outputs)
-        field = self.field_fine if fine and (self.field_fine is not None) else self.field 
-        all_results = self.raymarcher(self.encoder, field, ray_start, ray_dir, samples, encoder_states)
+        samples, all_results = super().raymarching(ray_start, ray_dir, intersection_outputs, encoder_states, fine)
         all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, encoder_states)
         all_results['voxel_depth'] = samples['sampled_point_depth'][:, 0]
         return samples, all_results
 
     def prepare_hierarchical_sampling(self, intersection_outputs, samples, all_results):
-        intersection_outputs['min_depth'] = samples['sampled_point_depth'] - samples['sampled_point_distance'] * .5
-        intersection_outputs['max_depth'] = samples['sampled_point_depth'] + samples['sampled_point_distance'] * .5
-        intersection_outputs['intersected_voxel_idx'] = samples['sampled_point_voxel_idx'].contiguous()
-        intersection_outputs['probs'] = all_results['probs'] / (all_results['probs'].sum(-1, keepdim=True) + 1e-7)
-        intersection_outputs['steps'] = samples['sampled_point_voxel_idx'].ne(-1).sum(-1).float() * \
-            getattr(self.args, "fine_num_sample_ratio", 1)
+        intersection_outputs = super().prepare_hierarchical_sampling(intersection_outputs, samples, all_results)
+        if getattr(self.args, "fine_num_sample_ratio", 0) > 0:
+            intersection_outputs['steps'] = samples['sampled_point_voxel_idx'].ne(-1).sum(-1).float() * self.args.fine_num_sample_ratio
         return intersection_outputs
 
     def postprocessing(self, ray_start, ray_dir, all_results, hits, sizes):
+         # we need fill_in for NSVF for background
         S, V, P = sizes
         fullsize = S * V * P
         

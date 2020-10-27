@@ -29,6 +29,7 @@ from fairnr.models.fairnr_model import BaseModel
 class NeRFModel(BaseModel):
     """ This is a simple re-implementation of the vanilla NeRF
     """
+    ENCODER = 'volume_encoder'
     READER = 'image_reader'
     FIELD = 'radiance_field'
     RAYMARCHER = 'volume_rendering'
@@ -36,8 +37,6 @@ class NeRFModel(BaseModel):
     @classmethod
     def add_args(cls, parser):
         super().add_args(parser)
-        parser.add_argument('--near', type=float, help='near distance of the volume')
-        parser.add_argument('--far',  type=float, help='far distance of the volume')
         parser.add_argument('--fixed-num-samples', type=int, 
             help='number of samples for the first pass along the ray.')
         parser.add_argument('--fixed-fine-num-samples', type=int,
@@ -46,40 +45,19 @@ class NeRFModel(BaseModel):
             help='if set, the number of fine samples is discounted based on foreground probability only.')
 
     def preprocessing(self, **kwargs):
-        return {}  # we do not use encoder for NeRF
+        return self.encoder.precompute(**kwargs)
 
     def intersecting(self, ray_start, ray_dir, encoder_states, **kwargs):
-        S, V, P, _ = ray_dir.size()
-        ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
-        ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
-        intersection_outputs = {
-            "min_depth": ray_dir.new_ones(S, V * P, 1) * self.args.near,
-            "max_depth": ray_dir.new_ones(S, V * P, 1) * self.args.far,
-            "probs": ray_dir.new_ones(S, V * P, 1),
-            "steps": ray_dir.new_ones(S, V * P, 1) * self.args.fixed_num_samples,
-            "intersected_voxel_idx": ray_dir.new_zeros(S, V * P, 1).int()}
-        hits = ray_dir.new_ones(S, V * P).bool()
+        ray_start, ray_dir, intersection_outputs, hits = \
+            self.encoder.ray_intersect(ray_start, ray_dir, encoder_states)
         return ray_start, ray_dir, intersection_outputs, hits, None
 
     def raymarching(self, ray_start, ray_dir, intersection_outputs, encoder_states, fine=False):
         # sample points and use middle point approximation
-        sampled_idx, sampled_depth, sampled_dists = _C.inverse_cdf_sampling(
-            intersection_outputs['intersected_voxel_idx'], 
-            intersection_outputs['min_depth'], 
-            intersection_outputs['max_depth'], 
-            intersection_outputs['probs'],
-            intersection_outputs['steps'], -1, (not self.training))
-        samples = {
-            'sampled_point_depth': sampled_depth,
-            'sampled_point_distance': sampled_dists,
-            'sampled_point_voxel_idx': sampled_idx,  # dummy index (to match raymarcher)
-        }
+        samples = self.encoder.ray_sample(intersection_outputs)
         field = self.field_fine if fine and (self.field_fine is not None) else self.field 
-        field_input_fn = lambda samples, encoder_states: {
-            'pos': samples['sampled_point_xyz'].requires_grad_(True),
-            'ray': samples['sampled_point_ray_direction']}
         all_results = self.raymarcher(
-            field_input_fn, field, ray_start, ray_dir, samples, encoder_states
+            self.encoder, field, ray_start, ray_dir, samples, encoder_states
         )
         return samples, all_results
 
@@ -91,7 +69,9 @@ class NeRFModel(BaseModel):
 
         safe_probs = all_results['probs'] + 1e-8  # HACK: make a non-zero distribution
         intersection_outputs['probs'] = safe_probs / safe_probs.sum(-1, keepdim=True)
-        intersection_outputs['steps'] = intersection_outputs['steps'] * 0 + self.args.fixed_fine_num_samples
+        intersection_outputs['steps'] = safe_probs.new_ones(*safe_probs.size()[:-1], 1) 
+        if getattr(self.args, "fixed_fine_num_samples", 0) > 0:
+            intersection_outputs['steps'] = intersection_outputs['steps'] * self.args.fixed_fine_num_samples
         if getattr(self.args, "reduce_fine_for_missed", False):
             intersection_outputs['steps'] = intersection_outputs['steps'] * safe_probs.sum(-1, keepdim=True)
         return intersection_outputs
