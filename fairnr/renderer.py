@@ -175,7 +175,7 @@ class NeuralRenderer(object):
                 }
                 with data_utils.GPUTimer() as timer:
                     outs = model(**_sample)
-                logger.info("rendering frame={}\ttotal time={:.4f}\tvoxel={:.4f}".format(step, timer.sum, outs['other_logs']['tvox_log']))
+                logger.info("rendering frame={}\ttotal time={:.4f}".format(step, timer.sum))
 
                 for k in range(step, next_step):
                     images = model.visualize(_sample, None, 0, k-step)
@@ -183,7 +183,12 @@ class NeuralRenderer(object):
 
                     for key in images:
                         name, type = key.split('/')[0].split('_')
-                        if type in self.output_type and name == 'render':
+                        if type in self.output_type:
+                            if name == 'coarse':
+                                type = 'coarse-' + type
+                            if name == 'target':
+                                continue
+
                             prefix = os.path.join(output_path, type)
                             Path(prefix).mkdir(parents=True, exist_ok=True)
                             image = images[key].permute(2, 0, 1) \
@@ -215,7 +220,7 @@ class NeuralRenderer(object):
                 # imageio.mimsave('{}/{}_{}.gif'.format(self.output_dir, type, timestamp), images, fps=self.fps)
                 imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, type, timestamp), images, fps=self.fps, quality=8)
         else:
-            images = [[imageio.imread(file_path) for file_path in output_files if type in file_path] for type in self.output_type]
+            images = [[imageio.imread(file_path) for file_path in output_files if type == file_path.split('/')[-2]] for type in self.output_type]
             images = [np.concatenate([images[j][i] for j in range(len(images))], 1) for i in range(len(images[0]))]
             imageio.mimwrite('{}/{}_{}.mp4'.format(self.output_dir, 'full', timestamp), images, fps=self.fps, quality=8)
         

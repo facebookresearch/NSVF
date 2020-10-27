@@ -183,7 +183,7 @@ __global__ void inverse_cdf_sampling_kernel(
         }
         
         // if there are bins still remained
-        while (z_low < curr_max_depth) {
+        while (z_low < curr_max_depth && (~done)) {
             sampled_idx[K + s] = pts_idx[H + curr_bin];
             sampled_dists[K + s] = (curr_max_depth - z_low);
             sampled_depth[K + s] = (curr_max_depth + z_low) * .5;

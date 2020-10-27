@@ -76,9 +76,7 @@ class BaseModel(BaseFairseqModel):
             help='if set, we will simultaneously optimize two networks, a coarse field and a fine field.')
         parser.add_argument('--fine-num-sample-ratio', type=float, 
             help='raito of samples compared to the first pass')
-        parser.add_argument('--fine-fixed-num-samples', type=int, default=0,
-            help='instead of using ratio, sample a fixed number of points for each ray, e.g. 64, 128.')
-
+        
     @property
     def dummy_loss(self):
         return sum([p.sum() for p in self.parameters()]) * 0.0
@@ -200,7 +198,7 @@ class BaseModel(BaseFairseqModel):
         images = self._visualize(images, sample, output, [img_id, shape, view, width, 'render'])
         images = self._visualize(images, sample, sample, [img_id, shape, view, width, 'target'])
         if 'coarse' in output:  # hierarchical sampling
-            images = self._visualize(images, sample, output['coarse'], [img_id, shape, view, width, 'coarse_render'])
+            images = self._visualize(images, sample, output['coarse'], [img_id, shape, view, width, 'coarse'])
         
         images = {
             tag: recover_image(width=width, **images[tag]) 

@@ -18,8 +18,6 @@ from fairseq.models import (
     register_model,
     register_model_architecture
 )
-
-from fairnr.data.data_utils import Timer, GPUTimer
 from fairnr.data.geometry import compute_normal_map, fill_in
 from fairnr.models.fairnr_model import BaseModel
 
@@ -75,7 +73,8 @@ class NSVFModel(BaseModel):
         intersection_outputs['max_depth'] = samples['sampled_point_depth'] + samples['sampled_point_distance'] * .5
         intersection_outputs['intersected_voxel_idx'] = samples['sampled_point_voxel_idx'].contiguous()
         intersection_outputs['probs'] = all_results['probs'] / (all_results['probs'].sum(-1, keepdim=True) + 1e-7)
-        intersection_outputs['steps'] = samples['sampled_point_voxel_idx'].ne(-1).sum(-1).float()
+        intersection_outputs['steps'] = samples['sampled_point_voxel_idx'].ne(-1).sum(-1).float() * \
+            getattr(self.args, "fine_num_sample_ratio", 1)
         return intersection_outputs
 
     def postprocessing(self, ray_start, ray_dir, all_results, hits, sizes):

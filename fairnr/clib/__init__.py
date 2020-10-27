@@ -230,7 +230,7 @@ uniform_ray_sampling = UniformRaySampling.apply
 class InverseCDFRaySampling(Function):
     @staticmethod
     def forward(ctx, pts_idx, min_depth, max_depth, probs, steps, fixed_step_size=-1, deterministic=False):
-        G, N, P = 256, pts_idx.size(0), pts_idx.size(1)
+        G, N, P = 200, pts_idx.size(0), pts_idx.size(1)
         H = int(np.ceil(N / G)) * G
 
         if H > N:
@@ -254,8 +254,23 @@ class InverseCDFRaySampling(Function):
             noise = noise.uniform_().clamp(min=1e-6, max=1-1e-6)  # in case
         
         # call cuda function
-        sampled_idx, sampled_depth, sampled_dists = _ext.inverse_cdf_sampling(
-            pts_idx, min_depth.float(), max_depth.float(), noise.float(), probs.float(), steps.float(), fixed_step_size)
+        # to avoid oom?
+        chunk_size = 4 * G
+        results = [
+            _ext.inverse_cdf_sampling(
+            pts_idx[:, i:i+chunk_size].contiguous(), 
+            min_depth.float()[:, i:i+chunk_size].contiguous(), 
+            max_depth.float()[:, i:i+chunk_size].contiguous(), 
+            noise.float()[:, i:i+chunk_size].contiguous(), 
+            probs.float()[:, i:i+chunk_size].contiguous(), 
+            steps.float()[:, i:i+chunk_size].contiguous(), 
+            fixed_step_size)
+            for i in range(0, min_depth.size(1), chunk_size)
+        ]
+        sampled_idx, sampled_depth, sampled_dists = [
+            torch.cat([r[i] for r in results], 1)
+            for i in range(3)
+        ]
         sampled_depth = sampled_depth.type_as(min_depth)
         sampled_dists = sampled_dists.type_as(min_depth)
         

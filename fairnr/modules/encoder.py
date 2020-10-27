@@ -784,6 +784,7 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
     def num_voxels(self):
         return self.vertices.size(0)
 
+
 def bbox2voxels(bbox, voxel_size):
     vox_min, vox_max = bbox[:3], bbox[3:]
     steps = ((vox_max - vox_min) / voxel_size).round().astype('int64') + 1
