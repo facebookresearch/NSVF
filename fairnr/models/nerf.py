@@ -20,8 +20,6 @@ from fairseq.models import (
     register_model_architecture
 )
 
-import fairnr.clib as _C
-from fairnr.data.geometry import compute_normal_map, fill_in
 from fairnr.models.fairnr_model import BaseModel
 
 

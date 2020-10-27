@@ -12,6 +12,9 @@ Here is the official repo for the paper:
 
 * [Neural Sparse Voxel Fields (Liu et al., 2020, <span style="color:red">NeurIPS 2020 Spotlight</span>)](https://arxiv.org/abs/2007.11571).
 
+We also provide our unofficial implementation for:
+* [NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis (Mildenhall et al., 2020)](https://arxiv.org/pdf/2003.08934.pdf).
+
 
 ## Table of contents
 -----

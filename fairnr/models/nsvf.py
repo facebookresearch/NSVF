@@ -21,8 +21,6 @@ from fairseq.models import (
 from fairnr.data.geometry import compute_normal_map, fill_in
 from fairnr.models.nerf import NeRFModel
 
-MAX_DEPTH = 10000.0
-
 
 @register_model('nsvf')
 class NSVFModel(NeRFModel):
