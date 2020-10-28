@@ -243,18 +243,14 @@ class DisentangledRaidanceField(RaidanceField):
                     num_layers=args.texture_layers,
                     outmost_linear=True
                 ), nn.Sigmoid()),  # f(v, n, w)
-                "visibility": nn.Sequential(
+                "lighting": nn.Sequential(
                     ImplicitField(
                     in_dim=sum([self.tex_input_dims[t] for t in [0, 1]]),
-                    out_dim=self.D,
+                    out_dim=self.D * 3,
                     hidden_dim=args.texture_embed_dim,
                     num_layers=args.texture_layers,
                     outmost_linear=True
-                ), nn.Sigmoid()), # v(x, w)
-                "lighting": nn.Sequential(
-                    BackgroundField(
-                    out_dim=self.D * 3, min_color=0
-                ), nn.ReLU())   # L(w)
+                ), nn.ReLU()), # v(x, z, w)
             }
         )
        
@@ -271,11 +267,10 @@ class DisentangledRaidanceField(RaidanceField):
             lt = self.renderer['light-transport'](
                 torch.cat([self.tex_filters['normal'](inputs['normal']),
                            self.tex_filters['ray'](inputs['ray'])], -1)).reshape(-1, self.D, 3)
-            vs = self.renderer['visibility'](
+            li = self.renderer['lighting'](
                 torch.cat([self.tex_filters['feat'](inputs['feat']),
-                           self.tex_filters['pos'](inputs['pos'])], -1)).reshape(-1, self.D, 1)
-            light = self.renderer['lighting'](inputs['ray']).reshape(-1, self.D, 3)
-            texture = (lt * vs * light).mean(1)
+                           self.tex_filters['pos'](inputs['pos'])], -1)).reshape(-1, self.D, 3)
+            texture = (lt * li).mean(1)
             if self.min_color == -1:
                 texture = 2 * texture - 1
             inputs['texture'] = texture
