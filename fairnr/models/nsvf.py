@@ -219,17 +219,6 @@ def nerf5_architecture(args):
     base_architecture(args)
 
 
-@register_model('rnsvf')
-class ResampledNSVFModel(NSVFModel):
-
-    RAYMARCHER = "resampled_volume_rendering"
-
-
-@register_model_architecture("rnsvf", "rnsvf_base")
-def rnsvf_architecture(args):
-    base_architecture(args)
-
-
 @register_model('disco_nsvf')
 class ResampledNSVFModel(NSVFModel):
 
