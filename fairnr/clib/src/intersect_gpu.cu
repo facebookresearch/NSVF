@@ -254,15 +254,15 @@ __device__ float3 RayTriangleIntersection(
   det = __fdividef(1.0f, det);  // CUDA intrinsic function 
   
 	float u = dot(v0O, dir_crs_v0v2) * det;
-	if (u < 0.0f - blur || u > 1.0f + blur)
+	if ((u < 0.0f - blur) || (u > 1.0f + blur))
 		return make_float3(-1.0f, 0.0f, 0.0f);
 
   float3 v0O_crs_v0v1 = cross(v0O, v0v1);
 	float v = dot(dir, v0O_crs_v0v1) * det;
-	if (v < 0.0f - blur || v > 1.0f + blur)
+	if ((v < 0.0f - blur) || (v > 1.0f + blur))
     return make_float3(-1.0f, 0.0f, 0.0f);
     
-  if ((u + v) < 0.0f - blur || (u + v) > 1.0f + blur)
+  if (((u + v) < 0.0f - blur) || ((u + v) > 1.0f + blur))
     return make_float3(-1.0f, 0.0f, 0.0f);
 
   float t = dot(v0v2, v0O_crs_v0v1) * det;

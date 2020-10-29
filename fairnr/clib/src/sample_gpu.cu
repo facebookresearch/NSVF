@@ -46,7 +46,7 @@ __global__ void uniform_ray_sampling_kernel(
     
     // sort all depths
     while (true) {
-      if (umax == max_hits || ucur == max_steps || pts_idx[H + umax] == -1) {
+      if ((umax == max_hits) || (ucur == max_steps) || (pts_idx[H + umax] == -1)) {
         break;  // reach the maximum
       }
       if (umin < max_hits) {
@@ -63,17 +63,17 @@ __global__ void uniform_ray_sampling_kernel(
         curr_depth = min_depth[H] + (float(ucur) + uniform_noise[K + ucur]) * step_size;
       }
       
-      if (last_max_depth <= curr_depth && last_max_depth <= last_min_depth) {
+      if ((last_max_depth <= curr_depth) && (last_max_depth <= last_min_depth)) {
         sampled_depth[K + s] = last_max_depth;
         sampled_idx[K + s] = pts_idx[H + umax];
         umax++; s++; continue;
       }
-      if (curr_depth <= last_min_depth && curr_depth <= last_max_depth) {
+      if ((curr_depth <= last_min_depth) && (curr_depth <= last_max_depth)) {
         sampled_depth[K + s] = curr_depth;
         sampled_idx[K + s] = pts_idx[H + umin - 1];
         ucur++; s++; continue;
       }
-      if (last_min_depth <= curr_depth && last_min_depth <= last_max_depth) {
+      if ((last_min_depth <= curr_depth) && (last_min_depth <= last_max_depth)) {
         sampled_depth[K + s] = last_min_depth;
         sampled_idx[K + s] = pts_idx[H + umin];
         umin++; s++; continue;
@@ -88,10 +88,10 @@ __global__ void uniform_ray_sampling_kernel(
       r_depth = sampled_depth[K + ucur + 1];  
       sampled_depth[K + ucur] = (l_depth + r_depth) * .5;
       sampled_dists[K + ucur] = (r_depth - l_depth);
-      if (umin < max_hits && sampled_depth[K + ucur] >= min_depth[H + umin] && pts_idx[H + umin] > -1) umin++;
-      if (umax < max_hits && sampled_depth[K + ucur] >= max_depth[H + umax] && pts_idx[H + umax] > -1) umax++;
-      if (umax == max_hits || pts_idx[H + umax] == -1) break;
-      if (umin - 1 == umax && sampled_dists[K + ucur] > 0) {
+      if ((umin < max_hits) && (sampled_depth[K + ucur] >= min_depth[H + umin]) && (pts_idx[H + umin] > -1)) umin++;
+      if ((umax < max_hits) && (sampled_depth[K + ucur] >= max_depth[H + umax]) && (pts_idx[H + umax] > -1)) umax++;
+      if ((umax == max_hits) || (pts_idx[H + umax] == -1)) break;
+      if ((umin - 1 == umax) && (sampled_dists[K + ucur] > 0)) {
         sampled_depth[K + step] = sampled_depth[K + ucur];
         sampled_dists[K + step] = sampled_dists[K + ucur];
         sampled_idx[K + step] = sampled_idx[K + ucur];
@@ -160,9 +160,7 @@ __global__ void inverse_cdf_sampling_kernel(
                 sampled_idx[K + s] = pts_idx[H + curr_bin];
                 sampled_dists[K + s] = (curr_max_depth - z_low);
                 sampled_depth[K + s] = (curr_max_depth + z_low) * .5;
-                // if ((j==0) && (batch_index==0)) printf("A j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
-                // if ((j==1) && (batch_index==0)) printf("A j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
-                
+
                 // move to next cdf
                 curr_bin++; 
                 s++;
@@ -176,24 +174,21 @@ __global__ void inverse_cdf_sampling_kernel(
                 z_low = curr_min_depth;
             }
             if (done) break;
+            
             // if the sampled cdf is inside bin
             float u = (curr_cdf - curr_min_cdf) / (curr_max_cdf - curr_min_cdf);
             float z = curr_min_depth + u * (curr_max_depth - curr_min_depth);
             sampled_idx[K + s] = pts_idx[H + curr_bin];
             sampled_dists[K + s] = (z - z_low);
             sampled_depth[K + s] = (z + z_low) * .5;
-            // if ((j==0) && (batch_index==0)) printf("B j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
-            // if ((j==1) && (batch_index==0)) printf("B j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
             z_low = z; s++;
         }
         
         // if there are bins still remained
-        while (z_low < curr_max_depth && (~done)) {
+        while ((z_low < curr_max_depth) && (~done)) {
             sampled_idx[K + s] = pts_idx[H + curr_bin];
             sampled_dists[K + s] = (curr_max_depth - z_low);
             sampled_depth[K + s] = (curr_max_depth + z_low) * .5;
-            // if ((j==0) && (batch_index==0)) printf("C j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
-            // if ((j==1) && (batch_index==0)) printf("C j %d K %d s %d, cb=%d, tt%d, index=%d, depth=%f\n", j, K, s, curr_bin, total_steps, index, sampled_depth[K + s]);
             curr_bin++; 
             s++;
             if ((curr_bin >= max_hits) || (pts_idx[curr_bin] == -1)) 
