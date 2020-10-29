@@ -11,7 +11,7 @@ from fairseq.models import (
     register_model,
     register_model_architecture
 )
-from fairnr.models.nsvf import NSVFModel, MAX_DEPTH
+from fairnr.models.nsvf import NSVFModel
 
 
 @register_model('nmf')

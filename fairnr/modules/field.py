@@ -139,21 +139,12 @@ class RaidanceField(Field):
                             help='hidden dimension of density prediction'),
         parser.add_argument('--texture-embed-dim', type=int, metavar='N',
                             help='hidden dimension of texture prediction')
-
-        parser.add_argument('--input-embed-dim', type=int, metavar='N',
-                            help='number of features for query (in default 3, xyz)')
-        parser.add_argument('--output-embed-dim', type=int, metavar='N',
-                            help='number of features the field returns')
-        parser.add_argument('--raydir-embed-dim', type=int, metavar='N',
-                            help='the number of dimension to encode the ray directions')
-        parser.add_argument('--disable-raydir', action='store_true', 
-                            help='if set, not use view direction as additional inputs')
-        parser.add_argument('--add-pos-embed', type=int, metavar='N', 
-                            help='using periodic activation augmentation')
         parser.add_argument('--feature-layers', type=int, metavar='N',
                             help='number of FC layers used to encode')
         parser.add_argument('--texture-layers', type=int, metavar='N',
                             help='number of FC layers used to predict colors')        
+        parser.add_argument('--no-normalize-normal', action='store_true',
+                            help='if set, do not normalize the gradient of density as the normal direction.')
 
         # specific parameters (hypernetwork does not work right now)
         parser.add_argument('--hypernetwork', action='store_true', 
@@ -188,7 +179,8 @@ class RaidanceField(Field):
                 if getattr(self.args, "hypernetwork", False):
                     filtered_inputs = (filtered_inputs, context)
                 else:
-                    filtered_inputs = (torch.cat([filtered_inputs, context.repeat(filtered_inputs.size(0), 1)], -1),)
+                    # from fairseq import pdb; pdb.set_trace()
+                    filtered_inputs = (torch.cat([filtered_inputs, context.expand(filtered_inputs.size(0), context.size(1))], -1),)
             else:
                 filtered_inputs = (filtered_inputs, )
             inputs['feat'] = self.feature_field(*filtered_inputs)
@@ -204,7 +196,10 @@ class RaidanceField(Field):
                 outputs=inputs['sigma'], inputs=inputs['pos'], 
                 grad_outputs=torch.ones_like(inputs['sigma']), 
                 retain_graph=True)
-            inputs['normal'] = F.normalize(-grad_pos, p=2, dim=1)  # BUG: gradient direction reversed.
+            if not getattr(self.args, "no_normalize_normal", False):
+                inputs['normal'] = F.normalize(-grad_pos, p=2, dim=1)  # BUG: gradient direction reversed.
+            else:
+                inputs['normal'] = -grad_pos  # no normalization. magnitude also has information?
 
         if 'texture' in outputs:        
             filtered_inputs = []
@@ -229,7 +224,12 @@ class DisentangledRaidanceField(RaidanceField):
         super().__init__(args)
         
         # for now we fix the input types
-        assert [name for name in self.tex_filters] == ['feat', 'pos', 'normal', 'ray']
+        assert [name for name in self.tex_filters][:4] == ['feat', 'pos', 'normal', 'ray']
+        lt_in_dim = self.tex_input_dims[2] + self.tex_input_dims[3]
+        lg_in_dim = self.tex_input_dims[0] + self.tex_input_dims[1]
+        if len(self.tex_filters) > 4:
+            lt_in_dim += sum(self.tex_input_dims[4:])
+            lg_in_dim += sum(self.tex_input_dims[4:])
 
         # rebuild the renderer
         self.D = getattr(args, "compressed_light_dim", 64)  # D
@@ -237,7 +237,7 @@ class DisentangledRaidanceField(RaidanceField):
             {
                 "light-transport": nn.Sequential(
                     ImplicitField(
-                    in_dim=sum([self.tex_input_dims[t] for t in [2, 3]]),
+                    in_dim=lt_in_dim,
                     out_dim=self.D * 3,
                     hidden_dim=args.texture_embed_dim,
                     num_layers=args.texture_layers,
@@ -245,7 +245,7 @@ class DisentangledRaidanceField(RaidanceField):
                 ), nn.Sigmoid()),  # f(v, n, w)
                 "lighting": nn.Sequential(
                     ImplicitField(
-                    in_dim=sum([self.tex_input_dims[t] for t in [0, 1]]),
+                    in_dim=lg_in_dim,
                     out_dim=self.D * 3,
                     hidden_dim=args.texture_embed_dim,
                     num_layers=args.texture_layers,
@@ -262,14 +262,22 @@ class DisentangledRaidanceField(RaidanceField):
 
     @torch.enable_grad()  # tracking the gradient in case we need to have normal at testing time.
     def forward(self, inputs, outputs=['sigma', 'texture']):
+        h_g, h_brdf, h_l = None, None, None
+        if inputs.get('context', None) is not None:
+            h_g, h_brdf, h_l = [inputs['context'][k:k+1] for k in range(3)]
+            inputs['context'] = h_g
         inputs = super().forward(inputs, outputs=['sigma', 'normal'])
         if 'texture' in outputs:
-            lt = self.renderer['light-transport'](
-                torch.cat([self.tex_filters['normal'](inputs['normal']),
-                           self.tex_filters['ray'](inputs['ray'])], -1)).reshape(-1, self.D, 3)
-            li = self.renderer['lighting'](
-                torch.cat([self.tex_filters['feat'](inputs['feat']),
-                           self.tex_filters['pos'](inputs['pos'])], -1)).reshape(-1, self.D, 3)
+            lt_inputs = [self.tex_filters['normal'](inputs['normal']), self.tex_filters['ray'](inputs['ray'])]
+            if h_brdf is not None:
+                lt_inputs += [self.tex_filters['context'](h_brdf).expand(lt_inputs[0].size(0), -1)]
+            
+            li_inputs = [self.tex_filters['feat'](inputs['feat']), self.tex_filters['pos'](inputs['pos'])]
+            if h_l is not None:
+                li_inputs += [self.tex_filters['context'](h_l).expand(li_inputs[0].size(0), -1)]
+            
+            lt = self.renderer['light-transport'](torch.cat(lt_inputs, -1)).reshape(-1, self.D, 3)
+            li = self.renderer['lighting'](torch.cat(li_inputs, -1)).reshape(-1, self.D, 3)
             texture = (lt * li).mean(1)
             if self.min_color == -1:
                 texture = 2 * texture - 1

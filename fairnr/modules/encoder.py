@@ -226,6 +226,7 @@ class SparseVoxelEncoder(Encoder):
         parser.add_argument('--track-max-probs', action='store_true', help='if set, tracking the maximum probability in ray-marching.')
 
     def reset_runtime_caches(self):
+        logger.info("reset chache")
         if self.use_octree:
             points = self.points[self.keep.bool()]
             centers, children = build_easy_octree(points, self.voxel_size / 2.0)
@@ -235,6 +236,7 @@ class SparseVoxelEncoder(Encoder):
             self._runtime_caches['max_voxel_probs'] = self.points.new_zeros(self.points.size(0))
 
     def clean_runtime_caches(self):
+        logger.info("clean chache")
         for name in self._runtime_caches:
             self._runtime_caches[name] = None
 
@@ -461,10 +463,10 @@ class SparseVoxelEncoder(Encoder):
             keep = (1 - scores.min(-1)[0]) > th
         else:
             logger.info("pruning based on training set statics (e.g. probs)...")
-            if dist.get_world_size() > 1:  # sync on multi-gpus
+            if dist.is_initialized() and dist.get_world_size() > 1:  # sync on multi-gpus
                 dist.all_reduce(self.max_voxel_probs, op=dist.ReduceOp.MAX)
             keep = self.max_voxel_probs > th
-
+            
         self.keep.masked_scatter_(self.keep.bool(), keep.long())
         logger.info("pruning done. # of voxels before: {}, after: {} voxels".format(keep.size(0), keep.sum()))
     
@@ -564,15 +566,36 @@ class SparseVoxelEncoder(Encoder):
 class MultiSparseVoxelEncoder(Encoder):
     def __init__(self, args):
         super().__init__(args)
+        try:
+            self.all_voxels = nn.ModuleList(
+                [SparseVoxelEncoder(args, vox.strip()) for vox in open(args.voxel_path).readlines()])
 
-        self.voxel_lists = open(args.voxel_path).readlines()
-        self.all_voxels = nn.ModuleList(
-            [SparseVoxelEncoder(args, vox.strip()) for vox in self.voxel_lists])
+        except TypeError:
+            self.all_voxels = nn.ModuleList(
+                [SparseVoxelEncoder(args, None, g.strip() + '/bbox.txt') for g in open(args.data).readlines()])
+        
+        # properties
+        self.deterministic_step = getattr(args, "deterministic_step", False)
+        self.use_octree = getattr(args, "use_octree", False)
+        self.track_max_probs = getattr(args, "track_max_probs", False) 
+
         self.cid = None
-    
+        if getattr(self.args, "global_embeddings", None) is not None:
+            self.global_embed = torch.zeros(*eval(self.args.global_embeddings)).normal_(mean=0, std=0.01)
+            self.global_embed = nn.Parameter(self.global_embed, requires_grad=True)
+        else:
+            self.global_embed = None
+
     @staticmethod
     def add_args(parser):
         SparseVoxelEncoder.add_args(parser)
+
+        parser.add_argument('--global-embeddings', type=str, default=None,
+            help="""set global embeddings if provided in global.txt. We follow this format:
+                (N, D) or (K, N, D) if we have multi-dimensional global features. 
+                D is the global feature dimentions. 
+                N is the number of indices of this feature, 
+                and K is the number of features if provided.""")
 
     def reset_runtime_caches(self):
         for id in range(len(self.all_voxels)):
@@ -582,12 +605,17 @@ class MultiSparseVoxelEncoder(Encoder):
         for id in range(len(self.all_voxels)):
             self.all_voxels[id].clean_runtime_caches()
 
-    def precompute(self, id, *args, **kwargs):
+    def precompute(self, id, global_index=None, *args, **kwargs):
         # TODO: this is a HACK for simplicity
         assert id.size(0) == 1, "for now, only works for one object"
         self.cid = id[0]
-        return self.all_voxels[id[0]].precompute(id, *args, **kwargs)
-    
+        encoder_states = self.all_voxels[id[0]].precompute(id, *args, **kwargs)
+        if (global_index is not None) and (self.global_embed is not None):
+            encoder_states['context'] = torch.stack([
+                F.embedding(global_index[:, i], self.global_embed[i])
+                for i in range(self.global_embed.size(0))], 1)
+        return encoder_states
+
     def export_surfaces(self, field_fn, th, bits):
         raise NotImplementedError("does not support for now.")
 
@@ -604,7 +632,10 @@ class MultiSparseVoxelEncoder(Encoder):
         return self.all_voxels[self.cid].ray_sample(*args, **kwargs)
 
     def forward(self, samples, encoder_states):
-        return self.all_voxels[self.cid].forward(samples, encoder_states)
+        inputs = self.all_voxels[self.cid].forward(samples, encoder_states)
+        if encoder_states.get('context', None) is not None:
+            inputs['context'] = encoder_states['context']
+        return inputs
 
     def track_voxel_probs(self, voxel_idxs, voxel_probs):
         return self.all_voxels[self.cid].track_voxel_probs(voxel_idxs, voxel_probs)
@@ -631,9 +662,28 @@ class MultiSparseVoxelEncoder(Encoder):
     def voxel_size(self):
         return self.all_voxels[0].voxel_size
 
+    @voxel_size.setter
+    def voxel_size(self, x):
+        for id in range(len(self.all_voxels)):
+            self.all_voxels[id].voxel_size = x
+
     @property
     def step_size(self):
         return self.all_voxels[0].step_size
+
+    @step_size.setter
+    def step_size(self, x):
+        for id in range(len(self.all_voxels)):
+            self.all_voxels[id].step_size = x
+
+    @property
+    def max_hits(self):
+        return self.all_voxels[0].max_hits
+
+    @max_hits.setter
+    def max_hits(self, x):
+        for id in range(len(self.all_voxels)):
+            self.all_voxels[id].max_hits = x
 
     @property
     def num_voxels(self):

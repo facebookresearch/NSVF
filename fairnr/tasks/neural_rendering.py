@@ -257,11 +257,12 @@ class SingleObjRenderingTask(FairseqTask):
             
             if getattr(self.args, "pruning_rerun_train_set", False):
                 with torch.no_grad():
-                    model.clean_caches()
+                    model.clean_caches(reset=True)
                     progress = progress_bar.progress_bar(
                         self._unique_trainitr.next_epoch_itr(shuffle=False),
                         prefix=f"pruning based statiscs over training set",
-                        tensorboard_logdir=None, default_log_format='tqdm')
+                        tensorboard_logdir=None, 
+                        default_log_format=self.args.log_format if self.args.log_format is not None else "tqdm")
                     for step, inner_sample in enumerate(progress):
                         outs = model(**self._trainer._prepare_sample(self.filter_dummy(inner_sample)))
                         progress.log(stats=outs['other_logs'], tag='track', step=step)

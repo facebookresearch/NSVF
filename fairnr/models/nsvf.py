@@ -220,7 +220,7 @@ def nerf5_architecture(args):
 
 
 @register_model('disco_nsvf')
-class ResampledNSVFModel(NSVFModel):
+class DiscoNSVFModel(NSVFModel):
 
     FIELD = "disentangled_radiance_field"
 
@@ -229,3 +229,17 @@ class ResampledNSVFModel(NSVFModel):
 def disco_nsvf_architecture(args):
     args.compressed_light_dim = getattr(args, "compressed_light_dim", 64)
     nerf3_architecture(args)
+
+
+@register_model('multi_disco_nsvf')
+class mDiscoNSVFModel(NSVFModel):
+
+    ENCODER = "multi_sparsevoxel_encoder"
+    FIELD = "disentangled_radiance_field"
+
+
+@register_model_architecture("multi_disco_nsvf", "multi_disco_nsvf")
+def mdisco_nsvf_architecture(args):
+    args.inputs_to_density = getattr(args, "inputs_to_density", "pos:10, context:0:256")
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:10, normal:4, ray:4, context:0:256")
+    disco_nsvf_architecture(args)
