@@ -13,7 +13,7 @@ from fairnr.modules.implicit import (
     ImplicitField, SignedDistanceField,
     TextureField, HyperImplicitField, BackgroundField
 )
-from fairnr.modules.linear import NeRFPosEmbLinear
+from fairnr.modules.module_utils import NeRFPosEmbLinear
 
 FIELD_REGISTRY = {}
 

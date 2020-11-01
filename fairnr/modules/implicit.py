@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from fairseq.utils import get_activation_fn
 from fairnr.modules.hyper import HyperFC
-from fairnr.modules.linear import (
+from fairnr.modules.module_utils import (
     NeRFPosEmbLinear, FCLayer, ResFCLayer
 )
 

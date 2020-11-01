@@ -170,3 +170,24 @@ class ResFCLayer(nn.Module):
         x = residual + x
         # return self.layernorm(x)
         return x
+
+
+class InvertableMapping(nn.Module):
+    def __init__(self, style='simple'):
+        super().__init__()
+        self.style = style
+
+    def f(self, x):  # (0, 1) --> (0, +inf)
+        if self.style == 'simple':
+            return x / (1 - x + 1e-7)
+        raise NotImplementedError
+    
+    def g(self, y):  # (0, +inf) --> (0, 1)
+        if self.style == 'simple':
+            return y / (1 + y)
+        raise NotImplementedError
+
+    def dy(self, x):
+        if self.style == 'simple':
+            return 1 / ((1 - x) ** 2 + 1e-7)
+        raise NotImplementedError

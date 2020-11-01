@@ -28,8 +28,10 @@ from fairnr.clib import (
     aabb_ray_intersect, triangle_ray_intersect, svo_ray_intersect,
     uniform_ray_sampling, inverse_cdf_sampling
 )
-from fairnr.modules.linear import FCBlock, Linear, Embedding
-
+from fairnr.modules.module_utils import (
+    FCBlock, Linear, Embedding,
+    InvertableMapping
+)
 MAX_DEPTH = 10000.0
 ENCODER_REGISTRY = {}
 
@@ -79,13 +81,15 @@ class VolumeEncoder(Encoder):
     def precompute(self, id=None, *args, **kwargs):
         return {}   # we do not use encoder for NeRF
 
-    def ray_intersect(self, ray_start, ray_dir, encoder_states):
+    def ray_intersect(self, ray_start, ray_dir, encoder_states, near=None, far=None):
         S, V, P, _ = ray_dir.size()
         ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
         ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
+        near = near if near is not None else self.args.near
+        far = far if far is not None else self.args.far
         intersection_outputs = {
-            "min_depth": ray_dir.new_ones(S, V * P, 1) * self.args.near,
-            "max_depth": ray_dir.new_ones(S, V * P, 1) * self.args.far,
+            "min_depth": ray_dir.new_ones(S, V * P, 1) * near,
+            "max_depth": ray_dir.new_ones(S, V * P, 1) * far,
             "probs": ray_dir.new_ones(S, V * P, 1),
             "steps": ray_dir.new_ones(S, V * P, 1) * self.args.fixed_num_samples,
             "intersected_voxel_idx": ray_dir.new_zeros(S, V * P, 1).int()}
@@ -111,6 +115,152 @@ class VolumeEncoder(Encoder):
             'ray': samples['sampled_point_ray_direction'],
             'dists': samples['sampled_point_distance']
         }
+
+
+@register_encoder('infinite_volume_encoder')
+class InfiniteVolumeEncoder(VolumeEncoder):
+
+    def __init__(self, args):
+        super().__init__(args)
+        self.imap = InvertableMapping(style='simple')
+        self.nofixdz = getattr(args, "no_fix_dz", False)
+        self.stereo = getattr(args, "stereo", False)
+
+    @staticmethod
+    def add_args(parser):
+        VolumeEncoder.add_args(parser)
+        parser.add_argument('--no-fix-dz', action='store_true', help='do not fix dz.')
+        parser.add_argument('--stereo', action='store_true')
+
+    def ray_intersect(self, ray_start, ray_dir, encoder_states):
+        return super().ray_intersect(ray_start, ray_dir, encoder_states, 0, 1)
+
+    def ray_sample(self, intersection_outputs):
+        samples = super().ray_sample(intersection_outputs)
+
+        # map from (0, 1) to (0, +inf) with invertable mapping
+        samples['original_point_distance'] = samples['sampled_point_distance'].clone()
+        samples['original_point_depth'] = samples['sampled_point_depth'].clone()
+        if not self.nofixdz:
+            samples['sampled_point_distance'] = self.imap.dy(samples['original_point_depth']) * samples['original_point_distance']
+        
+        # assign the last point to infinte distance
+        samples['sampled_point_distance'] = samples['sampled_point_distance'].scatter(1, 
+            samples['sampled_point_voxel_idx'].ne(-1).sum(-1, keepdim=True) - 1, 1e8)
+        samples['sampled_point_depth'] = self.imap.f(samples['original_point_depth']) + self.args.near
+        return samples
+
+    def forward(self, samples, encoder_states):
+        field_inputs = super().forward(samples, encoder_states)
+
+        # map R^3 space to S^2 + distance
+        if not self.stereo:
+            r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True)
+            field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), self.imap.g(r)], dim=-1)
+        else:
+            field_inputs['pos'] = field_inputs['pos'] / 4.0
+            r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True)
+            field_inputs['pos'] =  torch.cat([(r ** 2 - 1) / (r ** 2 + 1), field_inputs['pos'] * 2/ (r ** 2 + 1)], dim=-1)
+        
+        return field_inputs
+
+
+@register_encoder('stereographic_volume_encoder')
+class StereographicVolumeEncoder(VolumeEncoder):
+    """ Research code
+    """
+    def __init__(self, args):
+        super().__init__(args)
+        self.scale = getattr(args, "scale", 1)
+        self.nofixdz = getattr(args, "no_fix_dz", False)
+
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument('--near', type=float, help='near distance of the volume')
+        parser.add_argument('--scale', type=float, default=5)
+        parser.add_argument('--no-fix-dz', action='store_true', help='do not fix dz.')
+
+    def ray_intersect(self, ray_start, ray_dir, encoder_states):
+        S, V, P, _ = ray_dir.size()
+        ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
+        ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
+        
+        p_0 = ray_start + self.args.near * ray_dir
+        r_0 = p_0.norm(p=2, dim=-1)           # S x (VP)
+        z_d = (-p_0 * ray_dir).sum(-1)  # project PO to ray direction
+        r_m = torch.sqrt(r_0 ** 2 - z_d ** 2)
+
+        theta_0 = torch.atan2(torch.ones_like(r_0), r_0 / self.scale)
+        theta_m = torch.atan2(torch.ones_like(r_m), r_m / self.scale)
+        
+        # sampling happen in the S3 space (arc)
+        # HACK: do not sample on theta_max!!! (unstable gradient)
+        eps = 1e-4 
+        min_theta = theta_m - theta_0
+        cross_ori = (-torch.sign(z_d)).masked_fill(min_theta < eps, 1.0)
+        min_theta = min_theta.clamp(min=eps) * cross_ori
+        min_theta = torch.stack([min_theta, torch.zeros_like(min_theta) + eps], 2)
+        max_theta = torch.stack([(theta_m + eps) * (1 + cross_ori) * .5 - eps, theta_m], 2)
+        voxel_idx = torch.stack([torch.ones_like(cross_ori), -cross_ori], 2).int()
+        intersection_outputs = {
+            "init_offset": z_d,
+            "radius_min": r_m,
+            "theta_max": theta_m,
+            "min_theta": min_theta,
+            "max_theta": max_theta,
+            "steps": ray_dir.new_ones(S, V * P, 1) * self.args.fixed_num_samples,
+            "intersected_voxel_idx": voxel_idx}
+        hits = ray_dir.new_ones(S, V * P).bool()
+        return ray_start, ray_dir, intersection_outputs, hits
+
+    def ray_sample(self, intersection_outputs):
+        if intersection_outputs.get('probs', None) is None:
+            dists = (intersection_outputs['max_theta'] - intersection_outputs['min_theta']).masked_fill(
+                intersection_outputs['intersected_voxel_idx'].eq(-1), 0)
+            intersection_outputs['probs'] = dists / dists.sum(dim=-1, keepdim=True)
+        sampled_idx, sampled_theta, sampled_dtheta = inverse_cdf_sampling(
+            intersection_outputs['intersected_voxel_idx'], 
+            intersection_outputs['min_theta'], 
+            intersection_outputs['max_theta'], 
+            intersection_outputs['probs'],
+            intersection_outputs['steps'], -1, (not self.training))
+        
+        # back to theta space
+        eps = 1e-8
+        sampled_sg = torch.sign(sampled_theta)
+        sampled_th = intersection_outputs['theta_max'][:, None] - torch.abs(sampled_theta)
+        
+        # map back to Euclidean space
+        sampled_r = self.scale / (torch.tan(sampled_th) + eps)
+        sampled_r = sampled_r.masked_fill(sampled_idx.eq(-1), MAX_DEPTH)
+        sampled_z = torch.sqrt(sampled_r ** 2 - intersection_outputs['radius_min'][:, None] ** 2)
+        sampled_depth = sampled_z * sampled_sg + intersection_outputs['init_offset'][:, None] + self.args.near
+    
+        # compute the differential element
+        if not self.nofixdz:
+            sampled_dists = (sampled_r / (sampled_z + eps)) * (self.scale / (torch.sin(sampled_th) ** 2 + eps)) * sampled_dtheta
+        else:
+            sampled_dists = sampled_dtheta.clone()
+
+        return {
+            'sampled_point_depth': sampled_depth,
+            'sampled_point_distance': sampled_dists,
+            'sampled_point_voxel_idx': sampled_idx,
+            'original_point_distance': sampled_dtheta,
+            'original_point_depth': sampled_theta
+        }
+
+    def forward(self, samples, encoder_states):
+        field_inputs = super().forward(samples, encoder_states)
+
+        # map R^3 space to S^2 + distance
+        field_inputs['pos'] = field_inputs['pos'] / self.scale
+        r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True)
+        # field_inputs['pos'] = torch.cat(
+        #     [(r ** 2 - 1) / (r ** 2 + 1), field_inputs['pos'] * 2/ (r ** 2 + 1)], dim=-1)
+        field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), 
+            torch.atan2(torch.ones_like(r), r)], dim=-1)
+        return field_inputs
 
 
 @register_encoder('sparsevoxel_encoder')
@@ -449,12 +599,17 @@ class SparseVoxelEncoder(Encoder):
 
         return inputs
 
+    @torch.no_grad()
     def track_voxel_probs(self, voxel_idxs, voxel_probs):
         voxel_idxs = voxel_idxs.masked_fill(voxel_idxs.eq(-1), self.max_voxel_probs.size(0))
-        max_voxel_probs = self.max_voxel_probs.new_zeros(voxel_idxs.size(0), self.max_voxel_probs.size(0) + 1).scatter_add_(
-            dim=-1, index=voxel_idxs, src=voxel_probs).max(0)[0][:-1].data
-        self.max_voxel_probs = torch.max(self.max_voxel_probs, max_voxel_probs)
-
+        chunk_size = 4096
+        for start in range(0, voxel_idxs.size(0), chunk_size):
+            end = start + chunk_size
+            end = end if end < voxel_idxs.size(0) else voxel_idxs.size(0)
+            max_voxel_probs = self.max_voxel_probs.new_zeros(end-start, self.max_voxel_probs.size(0) + 1).scatter_add_(
+                dim=-1, index=voxel_idxs[start:end], src=voxel_probs[start:end]).max(0)[0][:-1].data        
+            self.max_voxel_probs = torch.max(self.max_voxel_probs, max_voxel_probs)
+    
     @torch.no_grad()
     def pruning(self, field_fn, th=0.5, encoder_states=None, train_stats=False):
         if not train_stats:
@@ -571,8 +726,9 @@ class MultiSparseVoxelEncoder(Encoder):
                 [SparseVoxelEncoder(args, vox.strip()) for vox in open(args.voxel_path).readlines()])
 
         except TypeError:
+            bbox_path = getattr(args, "bbox_path", "/private/home/jgu/data/shapenet/disco_dataset/bunny_point.txt")
             self.all_voxels = nn.ModuleList(
-                [SparseVoxelEncoder(args, None, g.strip() + '/bbox.txt') for g in open(args.data).readlines()])
+                [SparseVoxelEncoder(args, None, g.strip() + '/bbox.txt') for g in open(bbox_path).readlines()])
         
         # properties
         self.deterministic_step = getattr(args, "deterministic_step", False)
@@ -589,7 +745,7 @@ class MultiSparseVoxelEncoder(Encoder):
     @staticmethod
     def add_args(parser):
         SparseVoxelEncoder.add_args(parser)
-
+        parser.add_argument('--bbox-path', type=str, default=None)
         parser.add_argument('--global-embeddings', type=str, default=None,
             help="""set global embeddings if provided in global.txt. We follow this format:
                 (N, D) or (K, N, D) if we have multi-dimensional global features. 

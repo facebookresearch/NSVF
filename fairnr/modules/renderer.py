@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fairnr.modules.linear import FCLayer
+from fairnr.modules.module_utils import FCLayer
 from fairnr.data.geometry import ray
 
 MAX_DEPTH = 10000.0
@@ -79,7 +79,6 @@ class VolumeRenderer(Renderer):
         chunks: set > 1 if out-of-memory. it can save some memory by time.
         """
         sampled_depth = samples['sampled_point_depth']
-        sampled_dists = samples['sampled_point_distance']
         sampled_idx = samples['sampled_point_voxel_idx'].long()
         
         # only compute when the ray hits
@@ -130,6 +129,7 @@ class VolumeRenderer(Renderer):
         ):
         sampled_depth = samples['sampled_point_depth']
         sampled_idx = samples['sampled_point_voxel_idx'].long()
+        original_depth = samples.get('original_point_depth', None)
 
         tolerance = self.raymarching_tolerance
         chunk_size = self.chunk_size if self.training else self.valid_chunk_size
@@ -193,7 +193,9 @@ class VolumeRenderer(Renderer):
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
         results.update({'probs': probs, 'depths': depth, 'missed': missed, 'ae': accumulated_evaluations})
-        
+        if original_depth is not None:
+            results['z'] = (original_depth * probs).sum(-1)
+
         if 'texture' in outputs:
             results['colors'] = (outputs['texture'] * probs.unsqueeze(-1)).sum(-2)
         if 'normal' in outputs:
@@ -216,6 +218,6 @@ class VolumeRenderer(Renderer):
                         if results[0][name].dim() > 0 else sum([r[name] for r in results])
                     for name in results[0]}
 
-        if getattr(input_fn, "track_max_probs", False):
+        if getattr(input_fn, "track_max_probs", False) and (not self.training):
             input_fn.track_voxel_probs(samples['sampled_point_voxel_idx'].long(), results['probs'])
         return results

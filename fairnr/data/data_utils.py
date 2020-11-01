@@ -144,6 +144,8 @@ def load_intrinsics(filepath, resized_width=None, invert_y=False):
             _intrinsics[:3, :3] = intrinsics
             _intrinsics[3, 3] = 1
             intrinsics = _intrinsics
+        if intrinsics.shape[0] == 1 and intrinsics.shape[1] == 16:
+            intrinsics = intrinsics.reshape(4, 4)
         return intrinsics
     except ValueError:
         pass

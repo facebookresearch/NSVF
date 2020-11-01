@@ -61,10 +61,11 @@ class NeRFModel(BaseModel):
 
     def prepare_hierarchical_sampling(self, intersection_outputs, samples, all_results):
         # this function is basically the same as that in NSVF model.
-        intersection_outputs['min_depth'] = samples['sampled_point_depth'] - samples['sampled_point_distance'] * .5
-        intersection_outputs['max_depth'] = samples['sampled_point_depth'] + samples['sampled_point_distance'] * .5
+        depth = samples.get('original_point_depth', samples['sampled_point_depth'])
+        dists = samples.get('original_point_distance', samples['sampled_point_distance'])
+        intersection_outputs['min_depth'] = depth - dists * .5
+        intersection_outputs['max_depth'] = depth + dists * .5
         intersection_outputs['intersected_voxel_idx'] = samples['sampled_point_voxel_idx'].contiguous()
-
         safe_probs = all_results['probs'] + 1e-8  # HACK: make a non-zero distribution
         intersection_outputs['probs'] = safe_probs / safe_probs.sum(-1, keepdim=True)
         intersection_outputs['steps'] = safe_probs.new_ones(*safe_probs.size()[:-1], 1) 
@@ -82,6 +83,8 @@ class NeRFModel(BaseModel):
         all_results['missed'] = all_results['missed'].view(S, V, P)
         all_results['colors'] = all_results['colors'].view(S, V, P, 3)
         all_results['depths'] = all_results['depths'].view(S, V, P)
+        if 'z' in all_results:
+            all_results['z'] = all_results['z'].view(S, V, P)
 
         BG_DEPTH = self.field.bg_color.depth
         bg_color = self.field.bg_color(all_results['colors'])
@@ -134,3 +137,59 @@ def base_architecture(args):
     # others
     args.chunk_size = getattr(args, "chunk_size", 64)
     args.valid_chunk_size = getattr(args, "valid_chunk_size", 64)
+
+
+@register_model('sg_nerf')
+class SGNeRFModel(NeRFModel):
+    """ This is a simple re-implementation of the vanilla NeRF
+    """
+    ENCODER = 'infinite_volume_encoder'
+
+    def postprocessing(self, ray_start, ray_dir, all_results, hits, sizes):
+        # vanilla nerf hits everything. so no need to fill_in
+        S, V, P = sizes
+        all_results['missed'] = all_results['missed'].view(S, V, P)
+        all_results['colors'] = all_results['colors'].view(S, V, P, 3)
+        all_results['depths'] = all_results['depths'].view(S, V, P)
+        if 'z' in all_results:
+            all_results['z'] = all_results['z'].view(S, V, P)
+        if 'normal' in all_results:
+            all_results['normal'] = all_results['normal'].view(S, V, P, 3)
+        return all_results
+
+@register_model_architecture("sg_nerf", "sg_nerf_base")
+def sg_nerf_architecture(args):
+    INF_FAR = 1e6
+    args.inputs_to_density = getattr(args, "inputs_to_density", "pos:10:4")
+    args.near = getattr(args, "near", 2)
+    args.far = getattr(args, "far", INF_FAR)
+    base_architecture(args)
+
+
+@register_model('sg2_nerf')
+class SG2NeRFModel(SGNeRFModel):
+    """ This is a simple re-implementation of the vanilla NeRF
+    """
+    ENCODER = 'stereographic_volume_encoder'
+
+    def prepare_hierarchical_sampling(self, intersection_outputs, samples, all_results):
+        # this function is basically the same as that in NSVF model.
+        depth = samples['original_point_depth']
+        dists = samples['original_point_distance']
+        intersection_outputs['min_theta'] = depth - dists * .5
+        intersection_outputs['max_theta'] = depth + dists * .5
+        intersection_outputs['intersected_voxel_idx'] = samples['sampled_point_voxel_idx'].contiguous()
+        safe_probs = all_results['probs'] + 1e-8  # HACK: make a non-zero distribution
+        intersection_outputs['probs'] = safe_probs / safe_probs.sum(-1, keepdim=True)
+        intersection_outputs['steps'] = safe_probs.new_ones(*safe_probs.size()[:-1], 1) 
+        if getattr(self.args, "fixed_fine_num_samples", 0) > 0:
+            intersection_outputs['steps'] = intersection_outputs['steps'] * self.args.fixed_fine_num_samples
+        if getattr(self.args, "reduce_fine_for_missed", False):
+            intersection_outputs['steps'] = intersection_outputs['steps'] * safe_probs.sum(-1, keepdim=True)
+        return intersection_outputs
+
+@register_model_architecture("sg2_nerf", "sg2_nerf_base")
+def sg2_nerf_architecture(args):
+    args.inputs_to_density = getattr(args, "inputs_to_density", "pos:10:4")
+    args.near = getattr(args, "near", 2)
+    base_architecture(args)

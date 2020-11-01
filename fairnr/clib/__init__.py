@@ -251,7 +251,7 @@ class InverseCDFRaySampling(Function):
         if deterministic:
             noise += 0.5
         else:
-            noise = noise.uniform_().clamp(min=1e-6, max=1-1e-6)  # in case
+            noise = noise.uniform_().clamp(min=0.001, max=0.999)  # in case
         
         # call cuda function
         chunk_size = 4 * G  # to avoid oom?

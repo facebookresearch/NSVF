@@ -223,7 +223,9 @@ class BaseModel(BaseFairseqModel):
                 sample['extrinsics'][shape, view].float().inverse(), width)
             images['{}_normal/{}:HWC'.format(name, img_id)] = {
                 'img': normals, 'min_val': -1, 'max_val': 1}
-        
+        if 'z' in output and output['z'] is not None:
+            images['{}_z/{}:HWC'.format(name, img_id)] = {
+                'img': output['z'][shape, view], 'min_val': 0, 'max_val': 1}
         return images
 
     def add_eval_scores(self, logging_output, sample, output, criterion, scores=['ssim', 'psnr', 'lpips'], outdir=None):
@@ -260,7 +262,7 @@ class BaseModel(BaseFairseqModel):
                     imsave('output' + figname, pn)
                     imsave('target' + figname, tn)
                     imsave('normal' + figname, recover_image(compute_normal_map(
-                        output['ray_start'][s, v].float(), output['ray_dir'][s, v].float(),
+                        sample['ray_start'][s, v].float(), sample['ray_dir'][s, v].float(),
                         output['depths'][s, v].float(), sample['extrinsics'][s, v].float().inverse(), width=width),
                         min_val=-1, max_val=1, width=width).numpy())
                     
