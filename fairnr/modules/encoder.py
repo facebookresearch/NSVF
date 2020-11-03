@@ -549,22 +549,18 @@ class SparseVoxelEncoder(Encoder):
         return ray_start, ray_dir, intersection_outputs, hits
 
     def ray_sample(self, intersection_outputs):
-        min_depth = intersection_outputs['min_depth']
-        max_depth = intersection_outputs['max_depth']
-        pts_idx = intersection_outputs['intersected_voxel_idx']
-        dists = (max_depth - min_depth).masked_fill(pts_idx.eq(-1), 0)
-        probs = intersection_outputs.get('probs', dists / dists.sum(dim=-1, keepdim=True))
-        steps = intersection_outputs.get('steps', dists.sum(-1) / self.step_size)
-        fixed_step_szie = 1.0  / intersection_outputs.get('fixed_steps', -1)
-
         # sample points and use middle point approximation
         sampled_idx, sampled_depth, sampled_dists = inverse_cdf_sampling(
-            pts_idx, min_depth, max_depth, probs, steps, fixed_step_szie,
-            self.deterministic_step or (not self.training))
+            intersection_outputs['intersected_voxel_idx'],
+            intersection_outputs['min_depth'], 
+            intersection_outputs['max_depth'], 
+            intersection_outputs['probs'],
+            intersection_outputs['steps'], 
+            -1, self.deterministic_step or (not self.training))
         sampled_dists = sampled_dists.clamp(min=0.0)
         sampled_depth.masked_fill_(sampled_idx.eq(-1), MAX_DEPTH)
         sampled_dists.masked_fill_(sampled_idx.eq(-1), 0.0)
-
+        
         samples = {
             'sampled_point_depth': sampled_depth,
             'sampled_point_distance': sampled_dists,
@@ -587,6 +583,11 @@ class SparseVoxelEncoder(Encoder):
 
         # prepare inputs for implicit field
         inputs = {'pos': sampled_xyz, 'ray': sampled_dir, 'dists': sampled_dis}
+
+        # --- just for debugging ---- #
+        # r = inputs['pos'].norm(p=2, dim=-1, keepdim=True)
+        # inputs['pos'] = torch.cat([inputs['pos'] / (r + 1e-8), r / (1 + r)], dim=-1)
+
         if values is not None:
             # resample point features
             point_xyz = F.embedding(sampled_idx, point_xyz)
@@ -1042,6 +1043,7 @@ def bbox2voxels(bbox, voxel_size):
     steps = ((vox_max - vox_min) / voxel_size).round().astype('int64') + 1
     x, y, z = [c.reshape(-1).astype('float32') for c in np.meshgrid(np.arange(steps[0]), np.arange(steps[1]), np.arange(steps[2]))]
     x, y, z = x * voxel_size + vox_min[0], y * voxel_size + vox_min[1], z * voxel_size + vox_min[2]
+    
     return np.stack([x, y, z]).T.astype('float32')
 
 

@@ -35,6 +35,9 @@ class NSVFModel(NeRFModel):
         super().add_args(parser)
         parser.add_argument('--fine-num-sample-ratio', type=float, default=0,
             help='raito of samples compared to the first pass')
+        parser.add_argument('--inverse-distance-coarse-sampling', type=str, 
+            choices=['none', 'camera', 'origin'], default='none',
+            help='if set, we do not sample points uniformly through voxels.')
 
     def intersecting(self, ray_start, ray_dir, encoder_states, **kwargs):
         S = ray_dir.size(0)
@@ -58,6 +61,39 @@ class NSVFModel(NeRFModel):
         else:
             sampled_uv = None
         
+        min_depth = intersection_outputs['min_depth']
+        max_depth = intersection_outputs['max_depth']
+        pts_idx = intersection_outputs['intersected_voxel_idx']
+
+        if getattr(self.args, "inverse_distance_coarse_sampling", 'none') != 'none':
+            assert getattr(self.args, "fixed_num_samples", 0) > 0, "only works with fixed samples"
+            if self.args.inverse_distance_coarse_sampling == 'camera':
+                dists = (min_depth + max_depth) / 2.0
+                dists = ((ray_start[..., None, :] + ray_dir[..., None, :] * dists[..., None]) ** 2).sum(dim=-1).clamp(min=1.0)
+                dists = ((max_depth - min_depth) * 1 / dists).masked_fill(pts_idx.eq(-1), 0)
+            
+            else:
+                # ray sphere (unit) intersection (assuming all camera is inside sphere):
+                # p_v = (ray_start * ray_dir).sum(-1)
+                # p_p = (ray_start * ray_start).sum(-1)
+                # d_u = -p_v + torch.sqrt(p_v ** 2 - p_p + 1)
+                dists = ((ray_start[..., None, :] + ray_dir[..., None, :] * min_depth[..., None]) ** 2).sum(dim=-1).clamp(min=1.0)
+                o_scores = ((max_depth - min_depth) * 1 / dists).masked_fill(pts_idx.eq(-1) | dists.eq(1.0) , 0)
+                i_scores = (max_depth - min_depth).masked_fill(pts_idx.eq(-1) | dists.gt(1.0), 0)
+                dists = i_scores * o_scores.sum(-1, keepdim=True) + o_scores * i_scores.sum(-1, keepdim=True)
+
+            # if self.args.inverse_distance_coarse_sampling == 'origin':
+            #     raise NotImplementedError    
+            # dists = (1 / (min_depth + 1) - 1 / (max_depth + 1)).masked_fill(pts_idx.eq(-1), 0)    # continuous version
+        else:    
+            dists = (max_depth - min_depth).masked_fill(pts_idx.eq(-1), 0)
+            
+        intersection_outputs['probs'] = dists / dists.sum(dim=-1, keepdim=True)
+        if getattr(self.args, "fixed_num_samples", 0) > 0:
+            intersection_outputs['steps'] = intersection_outputs['min_depth'].new_ones(
+                *intersection_outputs['min_depth'].size()[:-1], 1) * self.args.fixed_num_samples
+        else:
+            intersection_outputs['steps'] = dists.sum(-1) / self.encoder.step_size
         return ray_start, ray_dir, intersection_outputs, hits, sampled_uv
         
     def raymarching(self, ray_start, ray_dir, intersection_outputs, encoder_states, fine=False):
