@@ -152,7 +152,7 @@ class SingleObjRenderingTask(FairseqTask):
         return cls(args)
 
     def repeat_dataset(self, split):
-        return 1
+        return 1 if split != 'train' else self.args.distributed_world_size  # IMPORTANT!
 
     def load_dataset(self, split, **kwargs):
         """
