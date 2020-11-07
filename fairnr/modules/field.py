@@ -11,8 +11,7 @@ from torch.autograd import grad
 from collections import OrderedDict
 from fairnr.modules.implicit import (
     ImplicitField, SignedDistanceField,
-    TextureField, HyperImplicitField, BackgroundField,
-    NeRFImplicitField
+    TextureField, HyperImplicitField, BackgroundField
 )
 from fairnr.modules.module_utils import NeRFPosEmbLinear
 
@@ -66,7 +65,9 @@ class RaidanceField(Field):
         self.sgbg = getattr(args, "background_stop_gradient", False)
         self.bg_color = BackgroundField(bg_color=self.trans_bg, min_color=self.min_color, stop_grad=self.sgbg)
 
-        self.nerf_style = getattr(args, "nerf_style_mlp", False)
+        self.nerf_style = getattr(args, "nerf_style_mlp", False)  # NeRF style MLPs
+        self.with_ln = ~getattr(args, "no_layernorm_mlp", False)
+
         self.den_filters, self.den_ori_dims, self.den_input_dims = self.parse_inputs(args.inputs_to_density)
         self.tex_filters, self.tex_ori_dims, self.tex_input_dims = self.parse_inputs(args.inputs_to_texture)
         self.den_filters, self.tex_filters = nn.ModuleDict(self.den_filters), nn.ModuleDict(self.tex_filters)
@@ -75,24 +76,29 @@ class RaidanceField(Field):
 
         # build networks
         if not getattr(args, "hypernetwork", False):
-            if not self.nerf_style:
-                self.feature_field = ImplicitField(den_input_dim, den_feat_dim, 
-                    args.feature_embed_dim, args.feature_layers)
-            else:
-                self.feature_field = NeRFImplicitField(den_input_dim, den_feat_dim,
-                    args.feature_embed_dim, args.feature_layers)
+            self.feature_field = ImplicitField(
+                den_input_dim, den_feat_dim, args.feature_embed_dim, 
+                args.feature_layers + 2 if not self.nerf_style else 8,
+                with_ln=self.with_ln if not self.nerf_style else False, 
+                skips=None if not self.nerf_style else [4],
+                spec_init=True if not self.nerf_style else False)  
         else:
             assert (not self.nerf_style), "Hypernetwork does not support NeRF style MLPs yet."
             den_contxt_dim = self.den_input_dims[-1]
-            self.feature_field = HyperImplicitField(den_contxt_dim, den_input_dim - den_contxt_dim, 
-                den_feat_dim, args.feature_embed_dim, args.feature_layers)
+            self.feature_field = HyperImplicitField(
+                den_contxt_dim, den_input_dim - den_contxt_dim, 
+                den_feat_dim, args.feature_embed_dim, args.feature_layers + 2)  # +2 is to adapt to old code
         
         self.predictor = SignedDistanceField(
-            den_feat_dim, args.density_embed_dim, 
-            recurrent=False, with_ln=(not self.nerf_style))
+            den_feat_dim, args.density_embed_dim, recurrent=False,
+            num_layers=1, with_ln=(not self.nerf_style),
+            spec_init=True if not self.nerf_style else False)
+
         self.renderer = TextureField(
             tex_input_dim, args.texture_embed_dim, 
-            args.texture_layers, with_ln=(not self.nerf_style)) 
+            args.texture_layers + 2 if not self.nerf_style else 1, 
+            with_ln=(not self.nerf_style),
+            spec_init=True if not self.nerf_style else False)
 
     def parse_inputs(self, arguments):
         def fillup(p):
@@ -146,7 +152,9 @@ class RaidanceField(Field):
                                 Choices of types are feat, emb, ray, pos or normal.
                                 """)
         parser.add_argument('--nerf-style-mlp', action='store_true',
-                            help='use NeRF style MLPs for implicit field.')
+                            help='use NeRF style MLPs for implicit function (with skip-connection).')
+        parser.add_argument('--no-layernorm-mlp', action='store_true',
+                            help='do not use layernorm in MLPs.')
         parser.add_argument('--feature-embed-dim', type=int, metavar='N',
                             help='field hidden dimension for FFN')
         parser.add_argument('--density-embed-dim', type=int, metavar='N', 

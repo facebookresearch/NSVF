@@ -382,6 +382,7 @@ class ShapeViewStreamDataset(BaseWrapperDataset):
 
         self.dataset.repeat == 1
         self.dataset.num_view == 1
+        self.total_num_shape = dataset.total_num_shape
 
         # reset the data_index
         self.dataset.data_index = []

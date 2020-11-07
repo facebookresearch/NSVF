@@ -178,6 +178,7 @@ def base_architecture(args):
     args.density_embed_dim = getattr(args, "density_embed_dim", 128)
     args.texture_embed_dim = getattr(args, "texture_embed_dim", 256)
 
+    # API Update: fix the number of layers
     args.feature_layers = getattr(args, "feature_layers", 1)
     args.texture_layers = getattr(args, "texture_layers", 3)
     

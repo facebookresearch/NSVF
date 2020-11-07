@@ -117,9 +117,9 @@ def base_architecture(args):
     args.density_embed_dim = getattr(args, "density_embed_dim", 128)
     args.texture_embed_dim = getattr(args, "texture_embed_dim", 256)
 
-    # BUGFIX: fix the number of layers
-    args.feature_layers = getattr(args, "feature_layers", 3)
-    args.texture_layers = getattr(args, "texture_layers", 5)
+    # API Update: fix the number of layers
+    args.feature_layers = getattr(args, "feature_layers", 1)
+    args.texture_layers = getattr(args, "texture_layers", 3)
     
     args.background_stop_gradient = getattr(args, "background_stop_gradient", False)
     args.background_depth = getattr(args, "background_depth", 5.0)
@@ -172,10 +172,8 @@ def sg_nerf_architecture(args):
 
 @register_model_architecture("sg_nerf", "sg_nerf_new")
 def sg_nerf2_architecture(args):
-    args.hierarchical_sampling = getattr(args, "hierarchical_sampling", False)
     args.nerf_style_mlp = getattr(args, "nerf_style_mlp", True)
-    args.feature_layers = getattr(args, "feature_layers", 8)
-    args.texture_layers = getattr(args, "texture_layers", 1)
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.texture_layers = getattr(args, "texture_layers", 0)
     args.texture_embed_dim = getattr(args, "texture_embed_dim", 128)
-    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, ray:4:3:b")
     sg_nerf_architecture(args)
