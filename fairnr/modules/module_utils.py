@@ -28,7 +28,7 @@ def Embedding(num_embeddings, embedding_dim, padding_idx=None):
 
 class PosEmbLinear(nn.Module):
 
-    def __init__(self, in_dim, out_dim, no_linear=False, scale=1024):
+    def __init__(self, in_dim, out_dim, no_linear=False, scale=1, *args, **kwargs):
         super().__init__()
         assert out_dim % (2 * in_dim) == 0, "dimension must be dividable"
         half_dim = out_dim // 2 // in_dim
@@ -40,6 +40,7 @@ class PosEmbLinear(nn.Module):
         self.scale = scale
         self.in_dim = in_dim
         self.out_dim = out_dim
+        self.cat_input = False
 
     def forward(self, x):
         assert x.size(-1) == self.in_dim, "size must match"
@@ -98,13 +99,13 @@ class FCLayer(nn.Module):
     Reference:
         https://github.com/vsitzmann/pytorch_prototyping/blob/10f49b1e7df38a58fd78451eac91d7ac1a21df64/pytorch_prototyping.py
     """
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_dim, out_dim, with_ln=True):
         super().__init__()
-
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, out_dim),
-            nn.LayerNorm([out_dim]),
-            nn.ReLU(inplace=True))
+        self.net = [nn.Linear(in_dim, out_dim)]
+        if with_ln:
+            self.net += [nn.LayerNorm([out_dim])]
+        self.net += [nn.ReLU()]
+        self.net = nn.Sequential(*self.net)
 
     def forward(self, x):
         return self.net(x) 
@@ -116,24 +117,22 @@ class FCBlock(nn.Module):
                  num_hidden_layers,
                  in_features,
                  out_features,
-                 outermost_linear=False):
+                 outermost_linear=False,
+                 with_ln=True):
         super().__init__()
 
         self.net = []
-        self.net.append(FCLayer(in_features, hidden_ch))
-
+        self.net.append(FCLayer(in_features, hidden_ch, with_ln))
         for i in range(num_hidden_layers):
-            self.net.append(FCLayer(hidden_ch, hidden_ch))
-
+            self.net.append(FCLayer(hidden_ch, hidden_ch, with_ln))
         if outermost_linear:
             self.net.append(Linear(hidden_ch, out_features))
         else:
-            self.net.append(FCLayer(hidden_ch, out_features))
-
+            self.net.append(FCLayer(hidden_ch, out_features, with_ln))
         self.net = nn.Sequential(*self.net)
         self.net.apply(self.init_weights)
 
-    def __getitem__(self,item):
+    def __getitem__(self, item):
         return self.net[item]
 
     def init_weights(self, m):
@@ -142,34 +141,6 @@ class FCBlock(nn.Module):
 
     def forward(self, input):
         return self.net(input)
-
-
-class ResFCLayer(nn.Module):
-    """
-    Reference:
-        https://github.com/autonomousvision/occupancy_networks/blob/master/im2mesh/layers.py
-    """
-    def __init__(self, in_dim, out_dim, hidden_dim, act='relu', dropout=0.0):
-        super().__init__()
-
-        self.fc1 = nn.Linear(in_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, out_dim)
-        # self.layernorm = LayerNorm(out_dim)
-        self.nonlinear = get_activation_fn(activation=act)
-        self.dropout = dropout
-
-        # Initialization (?)
-        nn.init.zeros_(self.fc2.weight)
-
-    def forward(self, x):
-        residual = x
-        x = self.fc1(self.nonlinear(x))
-        x = self.fc2(self.nonlinear(x))
-        if self.dropout > 0:
-            x = F.dropout(x, p=self.dropout, training=self.training)
-        x = residual + x
-        # return self.layernorm(x)
-        return x
 
 
 class InvertableMapping(nn.Module):

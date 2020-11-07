@@ -11,7 +11,8 @@ from torch.autograd import grad
 from collections import OrderedDict
 from fairnr.modules.implicit import (
     ImplicitField, SignedDistanceField,
-    TextureField, HyperImplicitField, BackgroundField
+    TextureField, HyperImplicitField, BackgroundField,
+    NeRFImplicitField
 )
 from fairnr.modules.module_utils import NeRFPosEmbLinear
 
@@ -63,7 +64,9 @@ class RaidanceField(Field):
         self.min_color = getattr(args, "min_color", -1)
         self.trans_bg = getattr(args, "transparent_background", "1.0,1.0,1.0")
         self.sgbg = getattr(args, "background_stop_gradient", False)
-        self.bg_color = BackgroundField(bg_color=self.trans_bg, min_color=self.min_color, stop_grad=self.sgbg)       
+        self.bg_color = BackgroundField(bg_color=self.trans_bg, min_color=self.min_color, stop_grad=self.sgbg)
+
+        self.nerf_style = getattr(args, "nerf_style_mlp", False)
         self.den_filters, self.den_ori_dims, self.den_input_dims = self.parse_inputs(args.inputs_to_density)
         self.tex_filters, self.tex_ori_dims, self.tex_input_dims = self.parse_inputs(args.inputs_to_texture)
         self.den_filters, self.tex_filters = nn.ModuleDict(self.den_filters), nn.ModuleDict(self.tex_filters)
@@ -72,14 +75,24 @@ class RaidanceField(Field):
 
         # build networks
         if not getattr(args, "hypernetwork", False):
-            self.feature_field = ImplicitField(den_input_dim, den_feat_dim, 
-                args.feature_embed_dim, args.feature_layers)
+            if not self.nerf_style:
+                self.feature_field = ImplicitField(den_input_dim, den_feat_dim, 
+                    args.feature_embed_dim, args.feature_layers)
+            else:
+                self.feature_field = NeRFImplicitField(den_input_dim, den_feat_dim,
+                    args.feature_embed_dim, args.feature_layers)
         else:
+            assert (not self.nerf_style), "Hypernetwork does not support NeRF style MLPs yet."
             den_contxt_dim = self.den_input_dims[-1]
             self.feature_field = HyperImplicitField(den_contxt_dim, den_input_dim - den_contxt_dim, 
                 den_feat_dim, args.feature_embed_dim, args.feature_layers)
-        self.predictor = SignedDistanceField(den_feat_dim, args.density_embed_dim, recurrent=False)
-        self.renderer = TextureField(tex_input_dim, args.texture_embed_dim, args.texture_layers) 
+        
+        self.predictor = SignedDistanceField(
+            den_feat_dim, args.density_embed_dim, 
+            recurrent=False, with_ln=(not self.nerf_style))
+        self.renderer = TextureField(
+            tex_input_dim, args.texture_embed_dim, 
+            args.texture_layers, with_ln=(not self.nerf_style)) 
 
     def parse_inputs(self, arguments):
         def fillup(p):
@@ -92,7 +105,7 @@ class RaidanceField(Field):
                 return [p[0], int(p[1]), 3, default]
             elif len(p) == 3:
                 return [p[0], int(p[1]), int(p[2]), default]
-            return [p[0], int(p[1]), int(p[2]), p[4]]
+            return [p[0], int(p[1]), int(p[2]), p[3]]
 
         filters, input_dims, output_dims = OrderedDict(), [], []
         for p in arguments.split(','):
@@ -103,7 +116,7 @@ class RaidanceField(Field):
                     base_dim, base_dim * pos_dim * 2, 
                     angular=(pos_type == 'a'), 
                     no_linear=True,
-                    cat_input=(pos_type != 'a'))
+                    cat_input=(pos_type == 'b'))
                 odim = func.out_dim + func.in_dim if func.cat_input else func.out_dim
 
             else:
@@ -132,7 +145,8 @@ class RaidanceField(Field):
                                 Types of inputs to predict the texture.
                                 Choices of types are feat, emb, ray, pos or normal.
                                 """)
-
+        parser.add_argument('--nerf-style-mlp', action='store_true',
+                            help='use NeRF style MLPs for implicit field.')
         parser.add_argument('--feature-embed-dim', type=int, metavar='N',
                             help='field hidden dimension for FFN')
         parser.add_argument('--density-embed-dim', type=int, metavar='N', 
@@ -179,7 +193,6 @@ class RaidanceField(Field):
                 if getattr(self.args, "hypernetwork", False):
                     filtered_inputs = (filtered_inputs, context)
                 else:
-                    # from fairseq import pdb; pdb.set_trace()
                     filtered_inputs = (torch.cat([filtered_inputs, context.expand(filtered_inputs.size(0), context.size(1))], -1),)
             else:
                 filtered_inputs = (filtered_inputs, )

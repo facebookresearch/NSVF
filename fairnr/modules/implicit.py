@@ -9,9 +9,7 @@ import torch.nn.functional as F
 
 from fairseq.utils import get_activation_fn
 from fairnr.modules.hyper import HyperFC
-from fairnr.modules.module_utils import (
-    NeRFPosEmbLinear, FCLayer, ResFCLayer
-)
+from fairnr.modules.module_utils import FCLayer
 
 
 class BackgroundField(nn.Module):
@@ -46,25 +44,17 @@ class ImplicitField(nn.Module):
     """
     An implicit field is a neural network that outputs a vector given any query point.
     """
-    def __init__(self, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
+    def __init__(self, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, with_ln=True):
         super().__init__()
-        if pos_proj > 0:
-            new_in_dim = in_dim * 2 * pos_proj
-            self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
-            in_dim = new_in_dim + in_dim
-        else:
-            self.nerfpos = None
-
         self.net = []
-        self.net.append(FCLayer(in_dim, hidden_dim))
-        for _ in range(num_layers):
-            self.net.append(FCLayer(hidden_dim, hidden_dim))
-
-        if not outmost_linear:
-            self.net.append(FCLayer(hidden_dim, out_dim))
-        else:
-            self.net.append(nn.Linear(hidden_dim, out_dim))
-
+        prev_dim = in_dim
+        for i in range(num_layers):
+            next_dim = out_dim if i == (num_layers - 1) else hidden_dim
+            if (i == (num_layers - 1)) and outmost_linear:
+                self.net.append(nn.Linear(prev_dim, next_dim))
+            else:
+                self.net.append(FCLayer(prev_dim, next_dim, with_ln))
+            prev_dim = next_dim
         self.net = nn.Sequential(*self.net)
         self.net.apply(self.init_weights)         
 
@@ -73,26 +63,16 @@ class ImplicitField(nn.Module):
             nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity='relu', mode='fan_in')
 
     def forward(self, x):
-        if self.nerfpos is not None:
-            x = torch.cat([x, self.nerfpos(x)], -1)
         return self.net(x)
 
 
 class HyperImplicitField(nn.Module):
 
-    def __init__(self, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
+    def __init__(self, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False):
         super().__init__()
 
         self.hyper_in_dim = hyper_in_dim
         self.in_dim = in_dim
-
-        if pos_proj > 0:
-            new_in_dim = in_dim * 2 * pos_proj
-            self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
-            in_dim = new_in_dim + in_dim
-        else:
-            self.nerfpos = None
-
         self.net = HyperFC(
             hyper_in_dim,
             1, 256, 
@@ -112,7 +92,7 @@ class HyperImplicitField(nn.Module):
 
 class SignedDistanceField(nn.Module):
 
-    def __init__(self, in_dim, hidden_dim, recurrent=False):
+    def __init__(self, in_dim, hidden_dim, recurrent=False, with_ln=True):
         super().__init__()
         self.recurrent = recurrent
 
@@ -121,7 +101,7 @@ class SignedDistanceField(nn.Module):
             self.hidden_layer.apply(init_recurrent_weights)
             lstm_forget_gate_init(self.hidden_layer)
         else:
-            self.hidden_layer = FCLayer(in_dim, hidden_dim)
+            self.hidden_layer = FCLayer(in_dim, hidden_dim, with_ln)
 
         self.output_layer = nn.Linear(hidden_dim, 1)
 
@@ -143,20 +123,39 @@ class TextureField(ImplicitField):
     """
     Pixel generator based on 1x1 conv networks
     """
-    def __init__(self, in_dim, hidden_dim, num_layers, with_alpha=False):
+    def __init__(self, in_dim, hidden_dim, num_layers, with_alpha=False, with_ln=True):
         out_dim = 3 if not with_alpha else 4
-        super().__init__(in_dim, out_dim, hidden_dim, num_layers, outmost_linear=True)
+        super().__init__(in_dim, out_dim, hidden_dim, num_layers, outmost_linear=True, with_ln=with_ln)
 
 
-class OccupancyField(ImplicitField):
+class NeRFImplicitField(nn.Module):
+    """ alternative to default MLP (SRN style).
+        this is an implementation close to the original NeRF paper.
     """
-    Occupancy Network which predicts 0~1 at every space
-    """
-    def __init__(self, in_dim, hidden_dim, num_layers):
-        super().__init__(in_dim, 1, hidden_dim, num_layers, outmost_linear=True)
+    def __init__(self, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, skips=[4]):
+        super().__init__()
+        self.skips = skips
+        self.net = []
+        prev_dim = in_dim
+        for i in range(num_layers):
+            next_dim = out_dim if i == (num_layers - 1) else hidden_dim
+            if (i == (num_layers - 1)) and outmost_linear:
+                self.net.append(nn.Linear(prev_dim, next_dim))
+            else:
+                self.net.append(FCLayer(prev_dim, next_dim, with_ln=False))
+            
+            prev_dim = next_dim
+            if i in self.skips and i != (num_layers - 1):
+                prev_dim += in_dim
+        self.net = nn.ModuleList(self.net)
 
     def forward(self, x):
-        return torch.sigmoid(super().forward(x)).squeeze(-1)
+        y = self.net[0](x)
+        for i in range(len(self.net) - 1):
+            if i in self.skips:
+                y = torch.cat((x, y), dim=-1)
+            y = self.net[i+1](y)
+        return y
 
 
 # ------------------ #

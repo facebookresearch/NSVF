@@ -19,7 +19,10 @@ import imageio, os
 import numpy as np
 import copy
 from collections import defaultdict
+
 from fairseq.models import BaseFairseqModel
+from fairseq.utils import with_torch_seed
+
 from fairnr.modules.encoder import get_encoder
 from fairnr.modules.field import get_field
 from fairnr.modules.renderer import get_renderer
@@ -47,7 +50,7 @@ class BaseModel(BaseFairseqModel):
         self.field = field
         self.raymarcher = raymarcher
         self.cache = None
-
+        self._num_updates = 0
         if getattr(self.args, "use_fine_model", False):
             self.field_fine = copy.deepcopy(field)
         else:
@@ -74,14 +77,19 @@ class BaseModel(BaseFairseqModel):
             help='if set, a second ray marching pass will be performed based on the first time probs.')
         parser.add_argument('--use-fine-model', action='store_true', 
             help='if set, we will simultaneously optimize two networks, a coarse field and a fine field.')
-        
+    
+    def set_num_updates(self, num_updates):
+        self._num_updates = num_updates
+
     @property
     def dummy_loss(self):
         return sum([p.sum() for p in self.parameters()]) * 0.0
 
     # def forward(self, ray_start, ray_dir, ray_split=1, **kwargs):
     def forward(self, ray_split=1, **kwargs):
-        ray_start, ray_dir, uv = self.reader(**kwargs)
+        with with_torch_seed(self.unique_seed):   # make sure different GPU sample different rays
+            ray_start, ray_dir, uv = self.reader(**kwargs)
+        
         kwargs.update({
             'field_fn': self.field.forward,
             'input_fn': self.encoder.forward})
@@ -282,4 +290,6 @@ class BaseModel(BaseFairseqModel):
     def text(self):
         return "fairnr BaseModel"
 
-
+    @property
+    def unique_seed(self):
+        return self._num_updates * 137 + self.args.distributed_rank

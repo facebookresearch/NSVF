@@ -116,6 +116,7 @@ class VolumeRenderer(Renderer):
             noise = 0 if not self.discrete_reg and (not self.training) else torch.zeros_like(sigma).normal_()  
             free_energy = torch.relu(noise + sigma) * sampled_dists    
             # (optional) free_energy = (F.elu(sigma - 3, alpha=1) + 1) * dists
+            # (optional) free_energy = torch.abs(sigma) * sampled_dists  ## ??
             outputs['free_energy'] = masked_scatter(sample_mask, free_energy)
         if 'texture' in field_outputs:
             outputs['texture'] = masked_scatter(sample_mask, field_outputs['texture'])

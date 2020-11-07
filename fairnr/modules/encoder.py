@@ -133,133 +133,61 @@ class InfiniteVolumeEncoder(VolumeEncoder):
         parser.add_argument('--stereo', action='store_true')
 
     def ray_intersect(self, ray_start, ray_dir, encoder_states):
-        return super().ray_intersect(ray_start, ray_dir, encoder_states, 0, 1)
-
-    def ray_sample(self, intersection_outputs):
-        samples = super().ray_sample(intersection_outputs)
-
-        # map from (0, 1) to (0, +inf) with invertable mapping
-        samples['original_point_distance'] = samples['sampled_point_distance'].clone()
-        samples['original_point_depth'] = samples['sampled_point_depth'].clone()
-        if not self.nofixdz:
-            samples['sampled_point_distance'] = self.imap.dy(samples['original_point_depth']) * samples['original_point_distance']
-        
-        # assign the last point to infinte distance
-        samples['sampled_point_distance'] = samples['sampled_point_distance'].scatter(1, 
-            samples['sampled_point_voxel_idx'].ne(-1).sum(-1, keepdim=True) - 1, 1e8)
-        samples['sampled_point_depth'] = self.imap.f(samples['original_point_depth']) + self.args.near
-        return samples
-
-    def forward(self, samples, encoder_states):
-        field_inputs = super().forward(samples, encoder_states)
-
-        # map R^3 space to S^2 + distance
-        if not self.stereo:
-            r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True)
-            field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), self.imap.g(r)], dim=-1)
-        else:
-            field_inputs['pos'] = field_inputs['pos'] / 4.0
-            r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True)
-            field_inputs['pos'] =  torch.cat([(r ** 2 - 1) / (r ** 2 + 1), field_inputs['pos'] * 2/ (r ** 2 + 1)], dim=-1)
-        
-        return field_inputs
-
-
-@register_encoder('stereographic_volume_encoder')
-class StereographicVolumeEncoder(VolumeEncoder):
-    """ Research code
-    """
-    def __init__(self, args):
-        super().__init__(args)
-        self.scale = getattr(args, "scale", 1)
-        self.nofixdz = getattr(args, "no_fix_dz", False)
-
-    @staticmethod
-    def add_args(parser):
-        parser.add_argument('--near', type=float, help='near distance of the volume')
-        parser.add_argument('--scale', type=float, default=5)
-        parser.add_argument('--no-fix-dz', action='store_true', help='do not fix dz.')
-
-    def ray_intersect(self, ray_start, ray_dir, encoder_states):
         S, V, P, _ = ray_dir.size()
         ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
         ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
         
-        p_0 = ray_start + self.args.near * ray_dir
-        r_0 = p_0.norm(p=2, dim=-1)           # S x (VP)
-        z_d = (-p_0 * ray_dir).sum(-1)  # project PO to ray direction
-        r_m = torch.sqrt(r_0 ** 2 - z_d ** 2)
-
-        theta_0 = torch.atan2(torch.ones_like(r_0), r_0 / self.scale)
-        theta_m = torch.atan2(torch.ones_like(r_m), r_m / self.scale)
+        # ray sphere (unit) intersection (assuming all camera is inside sphere):
+        p_v = (ray_start * ray_dir).sum(-1)
+        p_p = (ray_start * ray_start).sum(-1)
+        d_u = -p_v + torch.sqrt(p_v ** 2 - p_p + 1)
         
-        # sampling happen in the S3 space (arc)
-        # HACK: do not sample on theta_max!!! (unstable gradient)
-        eps = 1e-4 
-        min_theta = theta_m - theta_0
-        cross_ori = (-torch.sign(z_d)).masked_fill(min_theta < eps, 1.0)
-        min_theta = min_theta.clamp(min=eps) * cross_ori
-        min_theta = torch.stack([min_theta, torch.zeros_like(min_theta) + eps], 2)
-        max_theta = torch.stack([(theta_m + eps) * (1 + cross_ori) * .5 - eps, theta_m], 2)
-        voxel_idx = torch.stack([torch.ones_like(cross_ori), -cross_ori], 2).int()
         intersection_outputs = {
-            "init_offset": z_d,
-            "radius_min": r_m,
-            "theta_max": theta_m,
-            "min_theta": min_theta,
-            "max_theta": max_theta,
+            "min_depth": torch.arange(-1, 1, 1, dtype=ray_dir.dtype, device=ray_dir.device)[None, None, :].expand(S, V * P, 2),
+            "max_depth": torch.arange( 0, 2, 1, dtype=ray_dir.dtype, device=ray_dir.device)[None, None, :].expand(S, V * P, 2),
+            "probs": ray_dir.new_ones(S, V * P, 2) * .5,
             "steps": ray_dir.new_ones(S, V * P, 1) * self.args.fixed_num_samples,
-            "intersected_voxel_idx": voxel_idx}
+            "intersected_voxel_idx": torch.arange( 0, 2, 1, device=ray_dir.device)[None, None, :].expand(S, V * P, 2).int(),
+            "unit_sphere_depth": d_u}
         hits = ray_dir.new_ones(S, V * P).bool()
         return ray_start, ray_dir, intersection_outputs, hits
-
+        
     def ray_sample(self, intersection_outputs):
-        if intersection_outputs.get('probs', None) is None:
-            dists = (intersection_outputs['max_theta'] - intersection_outputs['min_theta']).masked_fill(
-                intersection_outputs['intersected_voxel_idx'].eq(-1), 0)
-            intersection_outputs['probs'] = dists / dists.sum(dim=-1, keepdim=True)
-        sampled_idx, sampled_theta, sampled_dtheta = inverse_cdf_sampling(
-            intersection_outputs['intersected_voxel_idx'], 
-            intersection_outputs['min_theta'], 
-            intersection_outputs['max_theta'], 
-            intersection_outputs['probs'],
-            intersection_outputs['steps'], -1, (not self.training))
+        samples = super().ray_sample(intersection_outputs)   # HACK: < 1, unit sphere;  > 1, outside the sphere
         
-        # back to theta space
-        eps = 1e-8
-        sampled_sg = torch.sign(sampled_theta)
-        sampled_th = intersection_outputs['theta_max'][:, None] - torch.abs(sampled_theta)
-        
-        # map back to Euclidean space
-        sampled_r = self.scale / (torch.tan(sampled_th) + eps)
-        sampled_r = sampled_r.masked_fill(sampled_idx.eq(-1), MAX_DEPTH)
-        sampled_z = torch.sqrt(sampled_r ** 2 - intersection_outputs['radius_min'][:, None] ** 2)
-        sampled_depth = sampled_z * sampled_sg + intersection_outputs['init_offset'][:, None] + self.args.near
-    
-        # compute the differential element
-        if not self.nofixdz:
-            sampled_dists = (sampled_r / (sampled_z + eps)) * (self.scale / (torch.sin(sampled_th) ** 2 + eps)) * sampled_dtheta
-        else:
-            sampled_dists = sampled_dtheta.clone()
+        # map from (0, 1) to (0, +inf) with invertable mapping
+        samples['original_point_distance'] = samples['sampled_point_distance'].clone()
+        samples['original_point_depth'] = samples['sampled_point_depth'].clone()
 
-        return {
-            'sampled_point_depth': sampled_depth,
-            'sampled_point_distance': sampled_dists,
-            'sampled_point_voxel_idx': sampled_idx,
-            'original_point_distance': sampled_dtheta,
-            'original_point_depth': sampled_theta
-        }
+        if not self.nofixdz:
+            # raise NotImplementedError("need to re-compute later")
+            in_dists = 1 / intersection_outputs['unit_sphere_depth'][:, None] * (samples['original_point_distance']).masked_fill(
+                samples['sampled_point_voxel_idx'].ne(0), 0)
+            out_dists = 1 / ((1 - samples['original_point_depth']) ** 2 + 1e-7) * (samples['original_point_distance']).masked_fill(
+                samples['sampled_point_voxel_idx'].ne(1), 0)
+            samples['sampled_point_distance'] = in_dists + out_dists
+        
+        # assign correct depth
+        in_depth = intersection_outputs['unit_sphere_depth'][:, None] * (
+            samples['original_point_depth'] + 1.0).masked_fill(samples['sampled_point_voxel_idx'].ne(0), 0)
+        out_depth = (intersection_outputs['unit_sphere_depth'][:, None] + 1 / (1 - samples['original_point_depth'] + 1e-7) - 1
+            ).masked_fill(samples['sampled_point_voxel_idx'].ne(1), 0)
+        samples['sampled_point_depth'] = in_depth + out_depth
+
+        # assign big distance in the end
+        if self.nofixdz:
+            samples['sampled_point_distance'] = samples['sampled_point_distance'].scatter(1, 
+                samples['sampled_point_voxel_idx'].ne(-1).sum(-1, keepdim=True) - 1, 1e8)
+        return samples
 
     def forward(self, samples, encoder_states):
         field_inputs = super().forward(samples, encoder_states)
-
-        # map R^3 space to S^2 + distance
-        field_inputs['pos'] = field_inputs['pos'] / self.scale
-        r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True)
-        # field_inputs['pos'] = torch.cat(
-        #     [(r ** 2 - 1) / (r ** 2 + 1), field_inputs['pos'] * 2/ (r ** 2 + 1)], dim=-1)
-        field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), 
-            torch.atan2(torch.ones_like(r), r)], dim=-1)
+        if not self.stereo:
+            r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True) # .clamp(min=1.0)
+            field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), r / (1.0 + r)], dim=-1)
+        else:
+            r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True).clamp(min=1.0)
+            field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), 1 / r], dim=-1)
         return field_inputs
 
 
@@ -644,7 +572,8 @@ class SparseVoxelEncoder(Encoder):
             field_inputs = self.forward(
                 {'sampled_point_xyz': sampled_xyz, 
                  'sampled_point_voxel_idx': sampled_idx,
-                 'sampled_point_ray_direction': None}, 
+                 'sampled_point_ray_direction': None,
+                 'sampled_point_distance': None}, 
                 {'voxel_vertex_idx': feats,
                  'voxel_center_xyz': points,
                  'voxel_vertex_emb': values})  # get field inputs
@@ -765,6 +694,9 @@ class MultiSparseVoxelEncoder(Encoder):
     def precompute(self, id, global_index=None, *args, **kwargs):
         # TODO: this is a HACK for simplicity
         assert id.size(0) == 1, "for now, only works for one object"
+        
+        # HACK
+        # id = id * 0 + 2
         self.cid = id[0]
         encoder_states = self.all_voxels[id[0]].precompute(id, *args, **kwargs)
         if (global_index is not None) and (self.global_embed is not None):

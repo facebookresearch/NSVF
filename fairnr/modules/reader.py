@@ -52,8 +52,8 @@ class ImageReader(Reader):
         self.num_pixels = args.pixel_per_view
         self.no_sampling = getattr(args, "no_sampling_at_reader", False)
         self.deltas = None
+        self.all_data = self.find_data()
         if getattr(args, "trainable_extrinsics", False):
-            self.all_data = self.find_data()
             self.all_data_idx = {data_img: (s, v) 
                 for s, data in enumerate(self.all_data) 
                 for v, data_img in enumerate(data)}
