@@ -218,6 +218,22 @@ def nerf3_architecture(args):
     nerf2_architecture(args)
 
 
+@register_model_architecture("nsvf", "nsvf_xyz_nope")
+def nerf3nope_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:0:3, sigma:0:1, ray:4")
+    nerf2_architecture(args)
+
+
+@register_model_architecture("nsvf", "nsvf_xyzn_nope")
+def nerf2nope_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:0:3, normal:0:3, sigma:0:1, ray:4")
+    nerf2_architecture(args)
+
+@register_model_architecture("nsvf", "nsvf_xyzn_noz")
+def nerf3noz_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "pos:10, normal:4, ray:4")
+    nerf2_architecture(args)
+
 @register_model_architecture("nsvf", "nsvf_embn")
 def nerf4_architecture(args):
     args.inputs_to_density = getattr(args, "inputs_to_density", "emb:6:32")

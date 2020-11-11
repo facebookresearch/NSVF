@@ -65,22 +65,25 @@ class RaidanceField(Field):
         self.sgbg = getattr(args, "background_stop_gradient", False)
         self.bg_color = BackgroundField(bg_color=self.trans_bg, min_color=self.min_color, stop_grad=self.sgbg)
 
+        # MLP specs
         self.nerf_style = getattr(args, "nerf_style_mlp", False)  # NeRF style MLPs
-        self.with_ln = ~getattr(args, "no_layernorm_mlp", False)
+        self.with_ln = not getattr(args, "no_layernorm_mlp", False)
+        self.skips = getattr(args, "feature_field_skip_connect", None) 
 
+        # input specs
         self.den_filters, self.den_ori_dims, self.den_input_dims = self.parse_inputs(args.inputs_to_density)
         self.tex_filters, self.tex_ori_dims, self.tex_input_dims = self.parse_inputs(args.inputs_to_texture)
         self.den_filters, self.tex_filters = nn.ModuleDict(self.den_filters), nn.ModuleDict(self.tex_filters)
         den_input_dim, tex_input_dim = sum(self.den_input_dims), sum(self.tex_input_dims)
         den_feat_dim = self.tex_input_dims[0]
-
+        
         # build networks
         if not getattr(args, "hypernetwork", False):
             self.feature_field = ImplicitField(
                 den_input_dim, den_feat_dim, args.feature_embed_dim, 
-                args.feature_layers + 2 if not self.nerf_style else 8,
+                args.feature_layers + 2 if not self.nerf_style else 8,          # +2 is to adapt to old code
                 with_ln=self.with_ln if not self.nerf_style else False, 
-                skips=None if not self.nerf_style else [4],
+                skips=self.skips if not self.nerf_style else [4],
                 spec_init=True if not self.nerf_style else False)  
         else:
             assert (not self.nerf_style), "Hypernetwork does not support NeRF style MLPs yet."
@@ -90,14 +93,14 @@ class RaidanceField(Field):
                 den_feat_dim, args.feature_embed_dim, args.feature_layers + 2)  # +2 is to adapt to old code
         
         self.predictor = SignedDistanceField(
-            den_feat_dim, args.density_embed_dim, recurrent=False,
-            num_layers=1, with_ln=(not self.nerf_style),
+            den_feat_dim, args.density_embed_dim, recurrent=False, num_layers=1, 
+            with_ln=self.with_ln if not self.nerf_style else False,
             spec_init=True if not self.nerf_style else False)
 
         self.renderer = TextureField(
             tex_input_dim, args.texture_embed_dim, 
-            args.texture_layers + 2 if not self.nerf_style else 1, 
-            with_ln=(not self.nerf_style),
+            args.texture_layers + 2 if not self.nerf_style else 2, 
+            with_ln=self.with_ln if not self.nerf_style else False,
             spec_init=True if not self.nerf_style else False)
 
     def parse_inputs(self, arguments):
@@ -151,10 +154,14 @@ class RaidanceField(Field):
                                 Types of inputs to predict the texture.
                                 Choices of types are feat, emb, ray, pos or normal.
                                 """)
+
         parser.add_argument('--nerf-style-mlp', action='store_true',
                             help='use NeRF style MLPs for implicit function (with skip-connection).')
         parser.add_argument('--no-layernorm-mlp', action='store_true',
                             help='do not use layernorm in MLPs.')
+        parser.add_argument('--feature-field-skip-connect', type=int, default=None,
+                            help='add skip-connection in the feature field.')
+
         parser.add_argument('--feature-embed-dim', type=int, metavar='N',
                             help='field hidden dimension for FFN')
         parser.add_argument('--density-embed-dim', type=int, metavar='N', 
@@ -227,9 +234,7 @@ class RaidanceField(Field):
             for i, name in enumerate(self.tex_filters):
                 d_in, func = self.tex_ori_dims[i], self.tex_filters[name]
                 assert (name in inputs), "the encoder must contain target inputs"
-                assert inputs[name].size(-1) == d_in, "dimension must match"
-
-                filtered_inputs += [func(inputs[name])]
+                filtered_inputs += [func(inputs[name])] if name != 'sigma' else [func(inputs[name].unsqueeze(-1))]
                 
             filtered_inputs = torch.cat(filtered_inputs, -1)
             inputs['texture'] = self.renderer(filtered_inputs)

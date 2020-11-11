@@ -317,3 +317,19 @@ def build_easy_octree(points, half_voxel):
     centers, children = build_octree(center, coords, int(depths))
     centers = centers.float() * half_voxel + residual   # transform back to float
     return centers, children
+
+
+def cartesian_to_spherical(xyz):
+    """ xyz: batch x 3
+    """
+    r = xyz.norm(p=2, dim=-1)
+    theta = torch.atan2(xyz[:, :2].norm(p=2, dim=-1), xyz[:, 2])
+    phi = torch.atan2(xyz[:, 1], xyz[:, 0])
+    return torch.stack((r, theta, phi), 1)
+
+
+def spherical_to_cartesian(rtp):
+    x = rtp[:, 0] * torch.sin(rtp[:, 1]) * torch.cos(rtp[:, 2])
+    y = rtp[:, 0] * torch.sin(rtp[:, 1]) * torch.sin(rtp[:, 2])
+    z = rtp[:, 0] * torch.cos(rtp[:, 1])
+    return torch.stack((x, y, z), 1)

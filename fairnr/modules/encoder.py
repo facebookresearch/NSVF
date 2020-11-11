@@ -124,13 +124,13 @@ class InfiniteVolumeEncoder(VolumeEncoder):
         super().__init__(args)
         self.imap = InvertableMapping(style='simple')
         self.nofixdz = getattr(args, "no_fix_dz", False)
-        self.stereo = getattr(args, "stereo", False)
+        self.sample_msi = getattr(args, "sample_msi", False)
 
     @staticmethod
     def add_args(parser):
         VolumeEncoder.add_args(parser)
         parser.add_argument('--no-fix-dz', action='store_true', help='do not fix dz.')
-        parser.add_argument('--stereo', action='store_true')
+        parser.add_argument('--sample-msi', action='store_true')
 
     def ray_intersect(self, ray_start, ray_dir, encoder_states):
         S, V, P, _ = ray_dir.size()
@@ -148,7 +148,8 @@ class InfiniteVolumeEncoder(VolumeEncoder):
             "probs": ray_dir.new_ones(S, V * P, 2) * .5,
             "steps": ray_dir.new_ones(S, V * P, 1) * self.args.fixed_num_samples,
             "intersected_voxel_idx": torch.arange( 0, 2, 1, device=ray_dir.device)[None, None, :].expand(S, V * P, 2).int(),
-            "unit_sphere_depth": d_u}
+            "unit_sphere_depth": d_u,
+            "p_v": p_v, "p_p": p_p}
         hits = ray_dir.new_ones(S, V * P).bool()
         return ray_start, ray_dir, intersection_outputs, hits
         
@@ -158,36 +159,38 @@ class InfiniteVolumeEncoder(VolumeEncoder):
         # map from (0, 1) to (0, +inf) with invertable mapping
         samples['original_point_distance'] = samples['sampled_point_distance'].clone()
         samples['original_point_depth'] = samples['sampled_point_depth'].clone()
+        
+        # assign correct depth
+        in_depth = intersection_outputs['unit_sphere_depth'][:, None] * (
+            samples['original_point_depth'].clamp(max=0.0) + 1.0).masked_fill(samples['sampled_point_voxel_idx'].ne(0), 0)
+        if not self.sample_msi:
+            out_depth = (intersection_outputs['unit_sphere_depth'][:, None] + 1 / (1 - samples['original_point_depth'].clamp(min=0.0) + 1e-7) - 1
+                ).masked_fill(samples['sampled_point_voxel_idx'].ne(1), 0)
+        else:
+            p_v, p_p = intersection_outputs['p_v'][:, None], intersection_outputs['p_p'][:, None]
+            out_depth = (-p_v + torch.sqrt(p_v ** 2 - p_p + 1. / (1. - samples['original_point_depth'].clamp(min=0.0) + 1e-7) ** 2)
+                ).masked_fill(samples['sampled_point_voxel_idx'].ne(1), 0)
+        samples['sampled_point_depth'] = in_depth + out_depth
 
         if not self.nofixdz:
             # raise NotImplementedError("need to re-compute later")
             in_dists = 1 / intersection_outputs['unit_sphere_depth'][:, None] * (samples['original_point_distance']).masked_fill(
                 samples['sampled_point_voxel_idx'].ne(0), 0)
-            out_dists = 1 / ((1 - samples['original_point_depth']) ** 2 + 1e-7) * (samples['original_point_distance']).masked_fill(
+            alpha = 1. if not self.sample_msi else 1. / torch.sqrt(1. + (p_v ** 2 - p_p) * (1. - samples['original_point_depth'].clamp(min=0.0) + 1e-7) ** 2)
+            out_dists = alpha / ((1 - samples['original_point_depth'].clamp(min=0.0)) ** 2 + 1e-7) * (samples['original_point_distance']).masked_fill(
                 samples['sampled_point_voxel_idx'].ne(1), 0)
             samples['sampled_point_distance'] = in_dists + out_dists
-        
-        # assign correct depth
-        in_depth = intersection_outputs['unit_sphere_depth'][:, None] * (
-            samples['original_point_depth'] + 1.0).masked_fill(samples['sampled_point_voxel_idx'].ne(0), 0)
-        out_depth = (intersection_outputs['unit_sphere_depth'][:, None] + 1 / (1 - samples['original_point_depth'] + 1e-7) - 1
-            ).masked_fill(samples['sampled_point_voxel_idx'].ne(1), 0)
-        samples['sampled_point_depth'] = in_depth + out_depth
-
-        # assign big distance in the end
-        if self.nofixdz:
+        else:
             samples['sampled_point_distance'] = samples['sampled_point_distance'].scatter(1, 
                 samples['sampled_point_voxel_idx'].ne(-1).sum(-1, keepdim=True) - 1, 1e8)
+        
         return samples
 
     def forward(self, samples, encoder_states):
         field_inputs = super().forward(samples, encoder_states)
-        if not self.stereo:
-            r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True) # .clamp(min=1.0)
-            field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), r / (1.0 + r)], dim=-1)
-        else:
-            r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True).clamp(min=1.0)
-            field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), 1 / r], dim=-1)
+
+        r = field_inputs['pos'].norm(p=2, dim=-1, keepdim=True) # .clamp(min=1.0)
+        field_inputs['pos'] = torch.cat([field_inputs['pos'] / (r + 1e-8), r / (1.0 + r)], dim=-1)
         return field_inputs
 
 
@@ -222,7 +225,7 @@ class SparseVoxelEncoder(Encoder):
                 fine_points = torch.from_numpy(np.loadtxt(self.voxel_path)[:, 3:].astype('float32'))
         else:
             bbox = np.loadtxt(self.bbox_path)
-            voxel_size = bbox[-1]
+            voxel_size = bbox[-1] if getattr(args, "voxel_size", None) is None else args.voxel_size
             fine_points = torch.from_numpy(bbox2voxels(bbox[:6], voxel_size))
         half_voxel = voxel_size * .5
 
