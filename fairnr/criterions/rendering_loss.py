@@ -129,6 +129,7 @@ class SRNLossCriterion(RenderingCriterion):
                                 """)
         parser.add_argument('--alpha-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
+        parser.add_argument('--eikonal-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
         parser.add_argument('--eval-lpips', action='store_true',
                             help="evaluate LPIPS scores in validation")
@@ -136,7 +137,7 @@ class SRNLossCriterion(RenderingCriterion):
         
     def compute_loss(self, model, net_output, sample, reduce=True):
         losses, other_logs = {}, {}
-        
+    
         # prepare data before computing loss
         sampled_uv = sample['sampled_uv']  # S, V, 2, N, P, P (patch-size)
         S, V, _, N, P1, P2 = sampled_uv.size()
@@ -198,6 +199,9 @@ class SRNLossCriterion(RenderingCriterion):
             output_colors = net_output['colors'].reshape(-1, P1, P2, 3).permute(0, 3, 1, 2) * .5 + .5
             vgg_loss = self.vgg(output_colors, target_colors)
             losses['vgg_loss'] = (vgg_loss, self.args.vgg_weight)
+
+        if self.args.eikonal_weight > 0:
+            losses['eik_loss'] = (net_output['eikonal-term'].mean(), self.args.eikonal_weight)
 
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
        

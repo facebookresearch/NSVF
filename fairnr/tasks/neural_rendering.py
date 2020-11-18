@@ -247,7 +247,6 @@ class SingleObjRenderingTask(FairseqTask):
         self._num_updates[name] = num_updates
 
     def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
-        
         if self.pruning_every_steps is not None and \
             (update_num % self.pruning_every_steps == 0) and \
             (update_num > 0) and \

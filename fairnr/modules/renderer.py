@@ -190,7 +190,7 @@ class VolumeRenderer(Renderer):
 
         if global_weights is not None:
             probs = probs * global_weights
-            
+
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
         results.update({'probs': probs, 'depths': depth, 'missed': missed, 'ae': accumulated_evaluations})
@@ -201,6 +201,8 @@ class VolumeRenderer(Renderer):
             results['colors'] = (outputs['texture'] * probs.unsqueeze(-1)).sum(-2)
         if 'normal' in outputs:
             results['normal'] = (outputs['normal'] * probs.unsqueeze(-1)).sum(-2)
+            results['eikonal-term'] = (outputs['normal'].norm(p=2, dim=-1) - 1) ** 2
+            results['eikonal-term'] = results['eikonal-term'][sampled_idx.ne(-1)]
         return results
 
     def forward(self, input_fn, field_fn, ray_start, ray_dir, samples, *args, **kwargs):

@@ -147,6 +147,20 @@ def nerf2_architecture(args):
     base_architecture(args)
 
 
+@register_model('sdf_nerf')
+class SDFNeRFModel(NeRFModel):
+
+    FIELD = "sdf_radiance_field"
+
+
+@register_model_architecture("sdf_nerf", "sdf_nerf")
+def sdf_nsvf_architecture(args):
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    nerf2_architecture(args)
+
+
 @register_model('sg_nerf')
 class SGNeRFModel(NeRFModel):
     """ This is a simple re-implementation of the vanilla NeRF

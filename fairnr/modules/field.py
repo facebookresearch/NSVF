@@ -3,6 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -69,15 +71,22 @@ class RaidanceField(Field):
         self.nerf_style = getattr(args, "nerf_style_mlp", False)  # NeRF style MLPs
         self.with_ln = not getattr(args, "no_layernorm_mlp", False)
         self.skips = getattr(args, "feature_field_skip_connect", None) 
+        self.skips = [self.skips] if self.skips is not None else None
 
         # input specs
         self.den_filters, self.den_ori_dims, self.den_input_dims = self.parse_inputs(args.inputs_to_density)
         self.tex_filters, self.tex_ori_dims, self.tex_input_dims = self.parse_inputs(args.inputs_to_texture)
         self.den_filters, self.tex_filters = nn.ModuleDict(self.den_filters), nn.ModuleDict(self.tex_filters)
-        den_input_dim, tex_input_dim = sum(self.den_input_dims), sum(self.tex_input_dims)
-        den_feat_dim = self.tex_input_dims[0]
         
         # build networks
+        self.build_feature_field(args)
+        self.build_density_predictor(args)
+        self.build_texture_renderer(args)
+
+    def build_feature_field(self, args): 
+        den_feat_dim = self.tex_input_dims[0]
+        den_input_dim, tex_input_dim = sum(self.den_input_dims), sum(self.tex_input_dims)
+
         if not getattr(args, "hypernetwork", False):
             self.feature_field = ImplicitField(
                 den_input_dim, den_feat_dim, args.feature_embed_dim, 
@@ -92,11 +101,15 @@ class RaidanceField(Field):
                 den_contxt_dim, den_input_dim - den_contxt_dim, 
                 den_feat_dim, args.feature_embed_dim, args.feature_layers + 2)  # +2 is to adapt to old code
         
+    def build_density_predictor(self, args):
+        den_feat_dim = self.tex_input_dims[0]
         self.predictor = SignedDistanceField(
             den_feat_dim, args.density_embed_dim, recurrent=False, num_layers=1, 
             with_ln=self.with_ln if not self.nerf_style else False,
             spec_init=True if not self.nerf_style else False)
 
+    def build_texture_renderer(self, args):
+        tex_input_dim = sum(self.tex_input_dims)
         self.renderer = TextureField(
             tex_input_dim, args.texture_embed_dim, 
             args.texture_layers + 2 if not self.nerf_style else 2, 
@@ -159,7 +172,7 @@ class RaidanceField(Field):
                             help='use NeRF style MLPs for implicit function (with skip-connection).')
         parser.add_argument('--no-layernorm-mlp', action='store_true',
                             help='do not use layernorm in MLPs.')
-        parser.add_argument('--feature-field-skip-connect', type=int, default=None,
+        parser.add_argument('--feature-field-skip-connect', type=int,
                             help='add skip-connection in the feature field.')
 
         parser.add_argument('--feature-embed-dim', type=int, metavar='N',
@@ -216,14 +229,17 @@ class RaidanceField(Field):
         if 'sigma' in outputs:
             assert 'feat' in inputs, "feature must be pre-computed"
             inputs['sigma'] = self.predictor(inputs['feat'])[0]
-
-        if (('texture' in outputs) and ("normal" in self.tex_filters)) or ("normal" in outputs):
+            
+        if ('normal' not in inputs) and (
+            (('texture' in outputs) and ("normal" in self.tex_filters)) 
+            or ("normal" in outputs)):
+            
             assert 'sigma' in inputs, "sigma must be pre-computed"
             assert 'pos' in inputs, "position is used to compute sigma"
             grad_pos, = grad(
                 outputs=inputs['sigma'], inputs=inputs['pos'], 
-                grad_outputs=torch.ones_like(inputs['sigma']), 
-                retain_graph=True)
+                grad_outputs=torch.ones_like(inputs['sigma'], requires_grad=False), 
+                retain_graph=True, create_graph=True)
             if not getattr(self.args, "no_normalize_normal", False):
                 inputs['normal'] = F.normalize(-grad_pos, p=2, dim=1)  # BUG: gradient direction reversed.
             else:
@@ -241,6 +257,100 @@ class RaidanceField(Field):
 
         return inputs
 
+
+@register_field('sdf_radiance_field')
+class SDFRaidanceField(RaidanceField):
+
+    def build_feature_field(self, args):
+        den_feat_dim = self.tex_input_dims[0]
+        den_input_dim, tex_input_dim = sum(self.den_input_dims), sum(self.tex_input_dims)
+
+        assert not getattr(args, "hypernetwork", False), "does not support hypernetwork for now"
+        assert (den_input_dim == 3) or (
+            self.den_filters['pos'].cat_input and len(self.den_filters) == 1), "cat pos in the end"
+
+        num_layers = args.feature_layers + 2 if not self.nerf_style else 8
+        skips = self.skips if not self.nerf_style else [4]
+
+        self.feature_field = ImplicitField(
+            den_input_dim, den_feat_dim + 1, args.feature_embed_dim,  # +1 is for SDF values
+            num_layers, with_ln=False, skips=skips, outmost_linear=True, spec_init=False)  
+        
+        """ 
+        Geometric initialization from https://arxiv.org/pdf/1911.10414.pdf
+        This enforce a model to approximate a SDF function: 
+            f(x; \theta) \approx |x| - 1   
+        """
+        bias = 1.0
+        for l in range(num_layers):
+            lin = self.feature_field.net[l] 
+            if l < num_layers - 1:
+                lin = lin.net[0]
+
+            if l == num_layers - 1:  # last layer
+                torch.nn.init.normal_(lin.weight, mean=math.sqrt(math.pi) / math.sqrt(lin.weight.size(1)), std=0.0001)
+                torch.nn.init.constant_(lin.bias, -bias)
+            elif l == 0:
+                torch.nn.init.constant_(lin.bias, 0.0)
+                if den_input_dim > 3:
+                    torch.nn.init.constant_(lin.weight[:, :-3], 0.0)
+                torch.nn.init.normal_(lin.weight[:, -3:], 0.0, math.sqrt(2) / math.sqrt(lin.weight.size(0)))
+            elif (l - 1) in skips:
+                torch.nn.init.constant_(lin.bias, 0.0)
+                torch.nn.init.normal_(lin.weight, 0.0, math.sqrt(2) / math.sqrt(lin.weight.size(0)))
+                torch.nn.init.constant_(lin.weight[:, :den_input_dim-3], 0.0)
+            else:
+                torch.nn.init.constant_(lin.bias, 0.0)
+                torch.nn.init.normal_(lin.weight, 0.0, math.sqrt(2) / math.sqrt(lin.weight.size(0)))
+
+    def build_density_predictor(self, args):
+        class Sdf2Densityv1(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.alpha = nn.Parameter(torch.scalar_tensor(10.0), requires_grad=True)
+                self.sigma = nn.Parameter(torch.scalar_tensor(30.0), requires_grad=True)
+            def forward(self, x):
+                return self.sigma * torch.tanh(-torch.abs(self.alpha) * x[:, 0]), None
+
+        class Sdf2Densityv2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigma = nn.Parameter(torch.scalar_tensor(50.0), requires_grad=True)
+                # self.alpha = nn.Parameter(torch.scalar_tensor(0.05), requires_grad=True)
+
+            def forward(self, x):
+                return -self.sigma * x[:, 0], None
+
+        class Sdf2Densityv3(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigma = nn.Parameter(torch.scalar_tensor(100.0), requires_grad=True)
+                # self.alpha = nn.Parameter(torch.scalar_tensor(0.05), requires_grad=True)
+
+            def forward(self, x):
+                return F.elu(-self.sigma * x[:, 0]), None
+
+
+        self.predictor = Sdf2Densityv1()
+
+    @torch.enable_grad()
+    def forward(self, inputs, outputs=['sigma', 'texture']):
+        if 'sigma' in outputs:
+            inputs = super().forward(inputs, ['sigma'])
+            inputs['sdf'] = inputs['feat'][:, 0]
+            inputs['feat'] = inputs['feat'][:, 1:]  # remove sdf from feature
+
+        if 'texture' in outputs:
+            # compute gradient for sdf, no need to normalize them
+            inputs['normal'] = grad(
+                outputs=inputs['sdf'], inputs=inputs['pos'], 
+                grad_outputs=torch.ones_like(inputs['sdf'], requires_grad=False), 
+                retain_graph=True, create_graph=True)[0]
+
+            inputs = super().forward(inputs, ['texture'])
+
+        # inputs['normal'].register_hook(lambda x: print('normal grad', x.sum()))
+        return inputs
 
 
 @register_field('disentangled_radiance_field')

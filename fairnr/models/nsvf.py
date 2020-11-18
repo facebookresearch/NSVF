@@ -128,9 +128,6 @@ class NSVFModel(NeRFModel):
                         sample['extrinsics'][shape, view].float().inverse(),
                         width, proj=True)
                 }
-        if 'normal' in output and output['normal'] is not None:
-            images['{}_predn/{}:HWC'.format(name, img_id)] = {
-                'img': output['normal'][shape, view], 'min_val': -1, 'max_val': 1}
         return images
     
     @torch.no_grad()
@@ -273,3 +270,17 @@ def mdisco_nsvf_architecture(args):
     args.inputs_to_density = getattr(args, "inputs_to_density", "pos:10, context:0:256")
     args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:10, normal:4, ray:4, context:0:256")
     disco_nsvf_architecture(args)
+
+
+@register_model('sdf_nsvf')
+class SDFNSVFModel(NSVFModel):
+
+    FIELD = "sdf_radiance_field"
+
+
+@register_model_architecture("sdf_nsvf", "sdf_nsvf")
+def sdf_nsvf_architecture(args):
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    nerf2nope_architecture(args)

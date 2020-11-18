@@ -90,7 +90,7 @@ class NeRFPosEmbLinear(nn.Module):
         outstr = 'Sinusoidal (in={}, out={}, angular={})'.format(
             self.in_dim, self.out_dim, self.angular)
         if self.cat_input:
-            outstr = 'Cat({}, {})'.format(self.in_dim, outstr)
+            outstr = 'Cat({}, {})'.format(outstr, self.in_dim)
         return outstr
 
 
