@@ -216,8 +216,9 @@ class BaseModel(BaseFairseqModel):
         img_id, shape, view, width, name = state
         if 'colors' in output and output['colors'] is not None:
             images['{}_color/{}:HWC'.format(name, img_id)] ={
-                'img': output['colors'][shape, view]}
-        
+                'img': output['colors'][shape, view],
+                'min_val': float(self.args.min_color)
+            }
         if 'depths' in output and output['depths'] is not None:
             min_depth, max_depth = output['depths'].min(), output['depths'].max()
             images['{}_depth/{}:HWC'.format(name, img_id)] = {
@@ -246,8 +247,8 @@ class BaseModel(BaseFairseqModel):
         for s in range(predicts.size(0)):
             for v in range(predicts.size(1)):
                 width = int(sample['size'][s, v][1])
-                p = recover_image(predicts[s, v], width=width)
-                t = recover_image(targets[s, v], width=width)
+                p = recover_image(predicts[s, v], width=width, min_val=float(self.args.min_color))
+                t = recover_image(targets[s, v],  width=width, min_val=float(self.args.min_color))
                 pn, tn = p.numpy(), t.numpy()
                 p, t = p.to(predicts.device), t.to(targets.device)
 

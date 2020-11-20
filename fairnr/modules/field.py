@@ -254,7 +254,10 @@ class RaidanceField(Field):
                 
             filtered_inputs = torch.cat(filtered_inputs, -1)
             inputs['texture'] = self.renderer(filtered_inputs)
-
+            
+            if self.min_color == 0:
+                inputs['texture'] = torch.sigmoid(inputs['texture'])
+            
         return inputs
 
 
@@ -308,7 +311,8 @@ class SDFRaidanceField(RaidanceField):
             def __init__(self):
                 super().__init__()
                 self.alpha = nn.Parameter(torch.scalar_tensor(10.0), requires_grad=True)
-                self.sigma = nn.Parameter(torch.scalar_tensor(30.0), requires_grad=True)
+                self.sigma = nn.Parameter(torch.scalar_tensor(50.0), requires_grad=True)
+            
             def forward(self, x):
                 return self.sigma * torch.tanh(-torch.abs(self.alpha) * x[:, 0]), None
 
@@ -348,8 +352,6 @@ class SDFRaidanceField(RaidanceField):
                 retain_graph=True, create_graph=True)[0]
 
             inputs = super().forward(inputs, ['texture'])
-
-        # inputs['normal'].register_hook(lambda x: print('normal grad', x.sum()))
         return inputs
 
 
