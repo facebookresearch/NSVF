@@ -27,7 +27,7 @@ from fairnr.modules.encoder import get_encoder
 from fairnr.modules.field import get_field
 from fairnr.modules.renderer import get_renderer
 from fairnr.modules.reader import get_reader
-from fairnr.data.geometry import ray, compute_normal_map, compute_normal_map
+from fairnr.data.geometry import ray, compute_normal_map
 from fairnr.data.data_utils import recover_image
 
 logger = logging.getLogger(__name__)
@@ -81,11 +81,20 @@ class BaseModel(BaseFairseqModel):
     def set_num_updates(self, num_updates):
         self._num_updates = num_updates
 
+    def upgrade_state_dict_named(self, state_dict, name):
+        super().upgrade_state_dict_named(state_dict, name)
+        if (self.field_fine is None) and \
+            ("field_fine" in [key.split('.')[0] for key in state_dict.keys()]):
+            # load checkpoint has fine-field network, copying weights to field network
+            for fine_key in [key for key in state_dict.keys() if "field_fine" in key]:
+                state_dict[fine_key.replace("field_fine", "field")] = state_dict[fine_key]
+                del state_dict[fine_key]
+
+
     @property
     def dummy_loss(self):
         return sum([p.sum() for p in self.parameters()]) * 0.0
 
-    # def forward(self, ray_start, ray_dir, ray_split=1, **kwargs):
     def forward(self, ray_split=1, **kwargs):
         with with_torch_seed(self.unique_seed):   # make sure different GPU sample different rays
             ray_start, ray_dir, uv = self.reader(**kwargs)
@@ -223,8 +232,8 @@ class BaseModel(BaseFairseqModel):
             min_depth, max_depth = output['depths'].min(), output['depths'].max()
             images['{}_depth/{}:HWC'.format(name, img_id)] = {
                 'img': output['depths'][shape, view], 
-                'min_val': min_depth, 
-                'max_val': max_depth}
+                'min_val': 0, 
+                'max_val': 4}
             normals = compute_normal_map(
                 sample['ray_start'][shape, view].float(),
                 sample['ray_dir'][shape, view].float(),
@@ -232,6 +241,16 @@ class BaseModel(BaseFairseqModel):
                 sample['extrinsics'][shape, view].float().inverse(), width)
             images['{}_normal/{}:HWC'.format(name, img_id)] = {
                 'img': normals, 'min_val': -1, 'max_val': 1}
+            
+            # generate point clouds from depth
+            # images['{}_point/{}'.format(name, img_id)] = {
+            #     'img': torch.cat(
+            #         [ray(sample['ray_start'][shape, view].float(), 
+            #             sample['ray_dir'][shape, view].float(),
+            #             output['depths'][shape, view].unsqueeze(-1).float()),
+            #          (output['colors'][shape, view] - self.args.min_color) / (1 - self.args.min_color)], 1),   # XYZRGB
+            #     'raw': True }
+            
         if 'z' in output and output['z'] is not None:
             images['{}_z/{}:HWC'.format(name, img_id)] = {
                 'img': output['z'][shape, view], 'min_val': 0, 'max_val': 1}

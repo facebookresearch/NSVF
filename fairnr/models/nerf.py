@@ -141,6 +141,21 @@ def base_architecture(args):
     args.chunk_size = getattr(args, "chunk_size", 64)
     args.valid_chunk_size = getattr(args, "valid_chunk_size", 64)
 
+@register_model_architecture("nerf", "nerf_deep")
+def nerf_deep_architecture(args):
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    base_architecture(args)
+    
+@register_model_architecture("nerf", "nerf_nerf")
+def nerf_nerf_architecture(args):
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.texture_layers = getattr(args, "texture_layers", 0)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    base_architecture(args)
+
 @register_model_architecture("nerf", "nerf_xyzn_nope")
 def nerf2_architecture(args):
     args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:0:3, normal:0:3, sigma:0:1, ray:4")

@@ -130,6 +130,7 @@ class SRNLossCriterion(RenderingCriterion):
         parser.add_argument('--alpha-weight', type=float, default=0.0)
         parser.add_argument('--vgg-weight', type=float, default=0.0)
         parser.add_argument('--eikonal-weight', type=float, default=0.0)
+        parser.add_argument('--regz-weight', type=float, default=0.0)
         parser.add_argument('--vgg-level', type=int, choices=[1,2,3,4], default=2)
         parser.add_argument('--eval-lpips', action='store_true',
                             help="evaluate LPIPS scores in validation")
@@ -202,6 +203,9 @@ class SRNLossCriterion(RenderingCriterion):
 
         if self.args.eikonal_weight > 0:
             losses['eik_loss'] = (net_output['eikonal-term'].mean(), self.args.eikonal_weight)
+        
+        if self.args.regz_weight > 0:
+            losses['reg_loss'] = (net_output['regz-term'].mean(), self.args.regz_weight)
 
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
        

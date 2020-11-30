@@ -27,10 +27,11 @@ except:
 try:
     import fairnr.clib._ext as _ext
 except ImportError:
-    raise ImportError(
-        "Could not import _ext module.\n"
-        "Please see the setup instructions in the README"
-    )
+    pass
+    # raise ImportError(
+    #     "Could not import _ext module.\n"
+    #     "Please see the setup instructions in the README"
+    # )
 
 MAX_DEPTH = 10000.0
 

@@ -57,6 +57,9 @@ class VolumeRenderer(Renderer):
         self.valid_chunk_size = 1024 * getattr(args, "valid_chunk_size", self.chunk_size // 1024)
         self.discrete_reg = getattr(args, "discrete_regularization", False)
         self.raymarching_tolerance = getattr(args, "raymarching_tolerance", 0.0)
+        self.trace_normal = getattr(args, "trace_normal", False)
+
+        self.step = 0
 
     @staticmethod
     def add_args(parser):
@@ -70,7 +73,9 @@ class VolumeRenderer(Renderer):
         parser.add_argument('--valid-chunk-size', type=int, metavar='D', 
                             help='chunk size used when no training. In default the same as chunk-size.')
         parser.add_argument('--raymarching-tolerance', type=float, default=0)
-    
+
+        parser.add_argument('--trace-normal', action='store_true')
+
     def forward_once(
         self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states, 
         early_stop=None, output_types=['sigma', 'texture']
@@ -122,12 +127,17 @@ class VolumeRenderer(Renderer):
             outputs['texture'] = masked_scatter(sample_mask, field_outputs['texture'])
         if 'normal' in field_outputs:
             outputs['normal'] = masked_scatter(sample_mask, field_outputs['normal'])
+        if 'feat_n2' in field_outputs:
+            outputs['feat_n2'] = masked_scatter(sample_mask, field_outputs['feat_n2'])
         return outputs, sample_mask.sum()
 
     def forward_chunk(
         self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states,
         gt_depths=None, output_types=['sigma', 'texture'], global_weights=None,
         ):
+        if self.trace_normal:
+            output_types += ['normal']
+
         sampled_depth = samples['sampled_point_depth']
         sampled_idx = samples['sampled_point_voxel_idx'].long()
         original_depth = samples.get('original_point_depth', None)
@@ -199,10 +209,22 @@ class VolumeRenderer(Renderer):
 
         if 'texture' in outputs:
             results['colors'] = (outputs['texture'] * probs.unsqueeze(-1)).sum(-2)
+        
         if 'normal' in outputs:
             results['normal'] = (outputs['normal'] * probs.unsqueeze(-1)).sum(-2)
-            results['eikonal-term'] = (outputs['normal'].norm(p=2, dim=-1) - 1) ** 2
+            if not self.trace_normal:
+                results['eikonal-term'] = (outputs['normal'].norm(p=2, dim=-1) - 1) ** 2
+            else:
+                results['eikonal-term'] = torch.log((outputs['normal'] ** 2).sum(-1) + 1e-6)
             results['eikonal-term'] = results['eikonal-term'][sampled_idx.ne(-1)]
+
+        if 'feat_n2' in outputs:
+            results['regz-term'] = outputs['feat_n2'][sampled_idx.ne(-1)]
+
+        outdir = "/checkpoint/jgu/space/neuralrendering/vc/MeviT60_resized/nerf_nerf_colmapv2_smallr/output_debug"
+        torch.save([outputs, probs, sampled_depth], outdir + '/debug.{}.pt'.format(self.step))
+        self.step += 1
+        
         return results
 
     def forward(self, input_fn, field_fn, ray_start, ray_dir, samples, *args, **kwargs):

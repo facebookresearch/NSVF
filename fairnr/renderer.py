@@ -188,13 +188,21 @@ class NeuralRenderer(object):
                                 type = 'coarse-' + type
                             if name == 'target':
                                 continue
-
+                            
                             prefix = os.path.join(output_path, type)
                             Path(prefix).mkdir(parents=True, exist_ok=True)
-                            image = images[key].permute(2, 0, 1) \
-                                if images[key].dim() == 3 else torch.stack(3*[images[key]], 0)        
-                            save_image(image, os.path.join(prefix, image_name + '.png'), format=None)
-                            image_names.append(os.path.join(prefix, image_name + '.png'))
+                            if type == 'point':
+                                data_utils.save_point_cloud(
+                                    os.path.join(prefix, image_name + '.ply'),
+                                    images[key][:, :3].cpu().numpy(), 
+                                    (images[key][:, 3:] * 255).cpu().int().numpy())
+                                # from fairseq import pdb; pdb.set_trace()
+
+                            else:
+                                image = images[key].permute(2, 0, 1) \
+                                    if images[key].dim() == 3 else torch.stack(3*[images[key]], 0)        
+                                save_image(image, os.path.join(prefix, image_name + '.png'), format=None)
+                                image_names.append(os.path.join(prefix, image_name + '.png'))
                     
                     # save pose matrix
                     prefix = os.path.join(output_path, 'pose')

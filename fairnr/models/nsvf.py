@@ -18,6 +18,7 @@ from fairseq.models import (
     register_model,
     register_model_architecture
 )
+from fairseq.utils import item
 from fairnr.data.geometry import compute_normal_map, fill_in
 from fairnr.models.nerf import NeRFModel
 
@@ -93,7 +94,7 @@ class NSVFModel(NeRFModel):
         all_results['missed'] = fill_in((fullsize, ), hits, all_results['missed'], 1.0).view(S, V, P)
         all_results['colors'] = fill_in((fullsize, 3), hits, all_results['colors'], 0.0).view(S, V, P, 3)
         all_results['depths'] = fill_in((fullsize, ), hits, all_results['depths'], 0.0).view(S, V, P)
-
+        
         BG_DEPTH = self.field.bg_color.depth
         bg_color = self.field.bg_color(all_results['colors'])
         all_results['colors'] += all_results['missed'].unsqueeze(-1) * bg_color.reshape(fullsize, 3).view(S, V, P, 3)
@@ -107,9 +108,9 @@ class NSVFModel(NeRFModel):
         return all_results
 
     def add_other_logs(self, all_results):
-        return {'voxs_log': self.encoder.voxel_size.item(),
-                'stps_log': self.encoder.step_size.item(),
-                'nvox_log': self.encoder.num_voxels.item()}
+        return {'voxs_log': item(self.encoder.voxel_size),
+                'stps_log': item(self.encoder.step_size),
+                'nvox_log': item(self.encoder.num_voxels)}
 
     def _visualize(self, images, sample, output, state, **kwargs):
         img_id, shape, view, width, name = state
@@ -158,7 +159,7 @@ class NSVFModel(NeRFModel):
 @register_model_architecture("nsvf", "nsvf_base")
 def base_architecture(args):
     # parameter needs to be changed
-    args.voxel_size = getattr(args, "voxel_size", 0.25)
+    args.voxel_size = getattr(args, "voxel_size", None)
     args.max_hits = getattr(args, "max_hits", 60)
     args.raymarching_stepsize = getattr(args, "raymarching_stepsize", 0.01)
     args.raymarching_stepsize_ratio = getattr(args, "raymarching_stepsize_ratio", 0.0)
@@ -208,6 +209,20 @@ def nerf2_architecture(args):
     args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:10, ray:4")
     base_architecture(args)
 
+
+@register_model_architecture("nsvf", "nsvf_nerf")
+def nerf_style_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, ray:4")
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.texture_layers = getattr(args, "texture_layers", 0)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    nerf2_architecture(args)
+
+@register_model_architecture("nsvf", "nsvf_nerf_nov")
+def nerf_noview_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256")
+    nerf_style_architecture(args)
 
 @register_model_architecture("nsvf", "nsvf_xyzn")
 def nerf3_architecture(args):

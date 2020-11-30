@@ -11,7 +11,6 @@ import numpy as np
 import torch
 import sys, os
 import argparse
-import open3d as o3d
 
 from fairseq import options
 from fairseq import checkpoint_utils

@@ -264,6 +264,11 @@ class RaidanceField(Field):
 @register_field('sdf_radiance_field')
 class SDFRaidanceField(RaidanceField):
 
+    @staticmethod
+    def add_args(parser):
+        parser.add_argument('--reg-z', action='store_true', help='regularize latent feature')
+        RaidanceField.add_args(parser)
+
     def build_feature_field(self, args):
         den_feat_dim = self.tex_input_dims[0]
         den_input_dim, tex_input_dim = sum(self.den_input_dims), sum(self.tex_input_dims)
@@ -343,6 +348,9 @@ class SDFRaidanceField(RaidanceField):
             inputs = super().forward(inputs, ['sigma'])
             inputs['sdf'] = inputs['feat'][:, 0]
             inputs['feat'] = inputs['feat'][:, 1:]  # remove sdf from feature
+            if getattr(self.args, "reg_z", False):
+                inputs['feat'] = inputs['feat'] - inputs['sdf'][:, None]
+                inputs['feat_n2'] = (inputs['feat'] ** 2).sum(-1)
 
         if 'texture' in outputs:
             # compute gradient for sdf, no need to normalize them

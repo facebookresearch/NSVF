@@ -8,7 +8,10 @@ import torch
 import torch.nn.functional as F
 
 from fairnr.data import data_utils as D
-from fairnr.clib._ext import build_octree
+try:
+    from fairnr.clib._ext import build_octree
+except ImportError:
+    pass
 
 INF = 1000.0
 

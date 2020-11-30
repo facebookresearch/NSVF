@@ -205,43 +205,77 @@ class SparseVoxelEncoder(Encoder):
         assert (self.bbox_path is not None) or (self.voxel_path is not None), \
             "at least initial bounding box or pretrained voxel files are required."
         self.voxel_index = None
-        if self.voxel_path is not None:
-            assert os.path.exists(self.voxel_path), "voxel file must exist"
-            assert getattr(args, "voxel_size", None) is not None, "final voxel size is essential."
-            
-            voxel_size = args.voxel_size
+        self.scene_scale = getattr(args, "scene_scale", 1.0)
 
+        if self.voxel_path is not None:
+            # read voxel file
+            assert os.path.exists(self.voxel_path), "voxel file must exist"
+            
             if Path(self.voxel_path).suffix == '.ply':
                 from plyfile import PlyData, PlyElement
-                plydata = PlyData.read(self.voxel_path)['vertex']
+                plyvoxel = PlyData.read(self.voxel_path)
+                elements = [x.name for x in plyvoxel.elements]
+                
+                assert 'vertex' in elements
+                plydata = plyvoxel['vertex']
                 fine_points = torch.from_numpy(
                     np.stack([plydata['x'], plydata['y'], plydata['z']]).astype('float32').T)
-                try:
+
+                if 'face' in elements:
+                    # read voxel meshes... automatically detect voxel size
+                    faces = plyvoxel['face']['vertex_indices']
+                    t = fine_points[faces[0].astype('int64')]
+                    voxel_size = torch.abs(t[0] - t[1]).max()
+
+                    # indexing voxel vertices
+                    fine_points = torch.unique(fine_points, dim=0)
+
+                    # vertex_ids, _ = discretize_points(fine_points, voxel_size)
+                    # vertex_ids_offset = vertex_ids + 1
+                    
+                    # # simple hashing
+                    # vertex_ids = vertex_ids[:, 0] * 1000000 + vertex_ids[:, 1] * 1000 + vertex_ids[:, 2]
+                    # vertex_ids_offset = vertex_ids_offset[:, 0] * 1000000 + vertex_ids_offset[:, 1] * 1000 + vertex_ids_offset[:, 2]
+
+                    # vertex_ids = {k: True for k in vertex_ids.tolist()}
+                    # vertex_inside = [v in vertex_ids for v in vertex_ids_offset.tolist()]
+                    
+                    # # get voxel centers
+                    # fine_points = fine_points[torch.tensor(vertex_inside)] + voxel_size * .5
+                    # fine_points = fine_points + voxel_size * .5   --> use all corners as centers
+                
+                else:
+                    # voxel size must be provided
+                    assert getattr(args, "voxel_size", None) is not None, "final voxel size is essential."
+                    voxel_size = args.voxel_size
+
+                if 'quality' in elements:
                     self.voxel_index = torch.from_numpy(plydata['quality']).long()
-                except ValueError:
-                    pass
+               
             else:
-                # supporting the old version voxel points
+                # supporting the old style .txt voxel points
                 fine_points = torch.from_numpy(np.loadtxt(self.voxel_path)[:, 3:].astype('float32'))
         else:
+            # read bounding-box file
             bbox = np.loadtxt(self.bbox_path)
             voxel_size = bbox[-1] if getattr(args, "voxel_size", None) is None else args.voxel_size
             fine_points = torch.from_numpy(bbox2voxels(bbox[:6], voxel_size))
+        
         half_voxel = voxel_size * .5
-
+        
         # transform from voxel centers to voxel corners (key/values)
         fine_coords, _ = discretize_points(fine_points, half_voxel)
         fine_keys0 = offset_points(fine_coords, 1.0).reshape(-1, 3)
         fine_keys, fine_feats = torch.unique(fine_keys0, dim=0, sorted=True, return_inverse=True)
         fine_feats = fine_feats.reshape(-1, 8)
         num_keys = torch.scalar_tensor(fine_keys.size(0)).long()
-
+        
         # ray-marching step size
         if getattr(args, "raymarching_stepsize_ratio", 0) > 0:
             step_size = args.raymarching_stepsize_ratio * voxel_size
         else:
             step_size = args.raymarching_stepsize
-
+        
         # register parameters (will be saved to checkpoints)
         self.register_buffer("points", fine_points)          # voxel centers
         self.register_buffer("keys", fine_keys.long())       # id used to find voxel corners/embeddings
@@ -252,6 +286,8 @@ class SparseVoxelEncoder(Encoder):
         self.register_buffer("voxel_size", torch.scalar_tensor(voxel_size))
         self.register_buffer("step_size", torch.scalar_tensor(step_size))
         self.register_buffer("max_hits", torch.scalar_tensor(args.max_hits))
+
+        logger.info("loaded {} voxel centers, {} voxel corners".format(fine_points.size(0), num_keys))
 
         # set-up other hyperparameters and initialize running time caches
         self.embed_dim = getattr(args, "voxel_embed_dim", None)
@@ -285,11 +321,25 @@ class SparseVoxelEncoder(Encoder):
             state_dict[name + '.keep'] = state_dict[name + '.keep'][self.voxel_index]
         
         # update the buffers shapes
-        self.points = self.points.new_zeros(*state_dict[name + '.points'].size())
-        self.feats  = self.feats.new_zeros(*state_dict[name + '.feats'].size())
-        self.keys   = self.keys.new_zeros(*state_dict[name + '.keys'].size())
-        self.keep   = self.keep.new_zeros(*state_dict[name + '.keep'].size())
+        if name + '.points' in state_dict:
+            self.points = self.points.new_zeros(*state_dict[name + '.points'].size())
+            self.feats  = self.feats.new_zeros(*state_dict[name + '.feats'].size())
+            self.keys   = self.keys.new_zeros(*state_dict[name + '.keys'].size())
+            self.keep   = self.keep.new_zeros(*state_dict[name + '.keep'].size())
+        
+        else:
+            # this usually happens when loading a NeRF checkpoint to NSVF
+            # use initialized values
+            state_dict[name + '.points'] = self.points
+            state_dict[name + '.feats'] = self.feats
+            state_dict[name + '.keys'] = self.keys
+            state_dict[name + '.keep'] = self.keep
     
+            state_dict[name + '.voxel_size'] = self.voxel_size
+            state_dict[name + '.step_size'] = self.step_size
+            state_dict[name + '.max_hits'] = self.max_hits
+            state_dict[name + '.num_keys'] = self.num_keys
+
     @staticmethod
     def add_args(parser):
         parser.add_argument('--initial-boundingbox', type=str, help='the initial bounding box to initialize the model')
@@ -305,6 +355,7 @@ class SparseVoxelEncoder(Encoder):
                             help='if the concrete step size is not given (=0), we use the ratio to the voxel size as step size.')
         parser.add_argument('--use-octree', action='store_true', help='if set, instead of looping over the voxels, we build an octree.')
         parser.add_argument('--track-max-probs', action='store_true', help='if set, tracking the maximum probability in ray-marching.')
+        parser.add_argument('--scene-scale', type=float, default=1.0)
 
     def reset_runtime_caches(self):
         logger.info("reset chache")
@@ -513,7 +564,11 @@ class SparseVoxelEncoder(Encoder):
         sampled_dis = samples['sampled_point_distance']
 
         # prepare inputs for implicit field
-        inputs = {'pos': sampled_xyz, 'ray': sampled_dir, 'dists': sampled_dis}
+        #  / self.scene_scale
+        inputs = {
+            'pos': sampled_xyz, 
+            'ray': sampled_dir, 
+            'dists': sampled_dis}
 
         # --- just for debugging ---- #
         # r = inputs['pos'].norm(p=2, dim=-1, keepdim=True)
@@ -873,10 +928,14 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
         mesh = o3d.io.read_triangle_mesh(self.mesh_path)
         vertices = torch.from_numpy(np.asarray(mesh.vertices, dtype=np.float32))
         faces = torch.from_numpy(np.asarray(mesh.triangles, dtype=np.long))
-    
+
         step_size = args.raymarching_stepsize
-        cage_size = step_size * 10  # truncated space around the triangle surfaces
-        self.register_buffer("cage_size", torch.scalar_tensor(cage_size))
+        if getattr(args, "raymarching_margin", None) is None:
+            margin = step_size * 10  # truncated space around the triangle surfaces
+        else:
+            margin = args.raymarching_margin
+        
+        self.register_buffer("margin", torch.scalar_tensor(margin))
         self.register_buffer("step_size", torch.scalar_tensor(step_size))
         self.register_buffer("max_hits", torch.scalar_tensor(args.max_hits))
 
@@ -901,6 +960,8 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
         parser.add_argument('--max-hits', type=int, metavar='N', help='due to restrictions we set a maximum number of hits')
         parser.add_argument('--raymarching-stepsize', type=float, metavar='D', 
                             help='ray marching step size for sparse voxels')
+        parser.add_argument('--raymarching-margin', type=float, default=None,
+                            help='margin around the surface.')
         parser.add_argument('--blur-ratio', type=float, default=0,
                             help="it is possible to shoot outside the triangle. default=0")
         parser.add_argument('--trainable-vertices', action='store_true',
@@ -930,11 +991,11 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
 
     @property
     def voxel_size(self):
-        return self.cage_size
+        return self.margin
 
     def ray_intersect(self, ray_start, ray_dir, encoder_states):
         point_xyz = encoder_states['mesh_vertex_xyz']
-        point_feats =encoder_states['mesh_face_vertex_idx']
+        point_feats = encoder_states['mesh_face_vertex_idx']
         
         S, V, P, _ = ray_dir.size()
         F, G = point_feats.size(1), point_xyz.size(1)
@@ -943,11 +1004,11 @@ class TriangleMeshEncoder(SparseVoxelEncoder):
         ray_start = ray_start.expand_as(ray_dir).contiguous().view(S, V * P, 3).contiguous()
         ray_dir = ray_dir.reshape(S, V * P, 3).contiguous()
         pts_idx, depth, uv = triangle_ray_intersect(
-            self.cage_size, self.blur_ratio, self.max_hits, point_xyz, point_feats, ray_start, ray_dir)
+            self.margin, self.blur_ratio, self.max_hits, point_xyz, point_feats, ray_start, ray_dir)
         min_depth = (depth[:,:,:,0] + depth[:,:,:,1]).masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
         max_depth = (depth[:,:,:,0] + depth[:,:,:,2]).masked_fill_(pts_idx.eq(-1), MAX_DEPTH)
         hits = pts_idx.ne(-1).any(-1)  # remove all points that completely miss the object
-        
+
         if S > 1:  # extend the point-index to multiple shapes (just in case)
             pts_idx = (pts_idx + G * torch.arange(S, 
                 device=pts_idx.device, dtype=pts_idx.dtype)[:, None, None]
