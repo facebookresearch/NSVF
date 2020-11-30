@@ -59,7 +59,7 @@ class VolumeRenderer(Renderer):
         self.raymarching_tolerance = getattr(args, "raymarching_tolerance", 0.0)
         self.trace_normal = getattr(args, "trace_normal", False)
 
-        self.step = 0
+        # self.step = 0
 
     @staticmethod
     def add_args(parser):
@@ -221,9 +221,9 @@ class VolumeRenderer(Renderer):
         if 'feat_n2' in outputs:
             results['regz-term'] = outputs['feat_n2'][sampled_idx.ne(-1)]
 
-        outdir = "/checkpoint/jgu/space/neuralrendering/vc/MeviT60_resized/nerf_nerf_colmapv2_smallr/output_debug"
-        torch.save([outputs, probs, sampled_depth], outdir + '/debug.{}.pt'.format(self.step))
-        self.step += 1
+        # outdir = "/checkpoint/jgu/space/neuralrendering/vc/MeviT60_resized/nerf_nerf_colmapv2_smallr/output_debug"
+        # torch.save([outputs, probs, sampled_depth], outdir + '/debug.{}.pt'.format(self.step))
+        # self.step += 1
         
         return results
 
