@@ -59,8 +59,6 @@ class VolumeRenderer(Renderer):
         self.raymarching_tolerance = getattr(args, "raymarching_tolerance", 0.0)
         self.trace_normal = getattr(args, "trace_normal", False)
 
-        # self.step = 0
-
     @staticmethod
     def add_args(parser):
         # ray-marching parameters
@@ -123,6 +121,8 @@ class VolumeRenderer(Renderer):
             # (optional) free_energy = (F.elu(sigma - 3, alpha=1) + 1) * dists
             # (optional) free_energy = torch.abs(sigma) * sampled_dists  ## ??
             outputs['free_energy'] = masked_scatter(sample_mask, free_energy)
+        if 'sdf' in field_outputs:
+            outputs['sdf'] = masked_scatter(sample_mask, field_outputs['sdf'])
         if 'texture' in field_outputs:
             outputs['texture'] = masked_scatter(sample_mask, field_outputs['texture'])
         if 'normal' in field_outputs:
@@ -219,12 +219,9 @@ class VolumeRenderer(Renderer):
             results['eikonal-term'] = results['eikonal-term'][sampled_idx.ne(-1)]
 
         if 'feat_n2' in outputs:
+            results['feat_n2'] = (outputs['feat_n2'] * probs).sum(-1)
             results['regz-term'] = outputs['feat_n2'][sampled_idx.ne(-1)]
-
-        # outdir = "/checkpoint/jgu/space/neuralrendering/vc/MeviT60_resized/nerf_nerf_colmapv2_smallr/output_debug"
-        # torch.save([outputs, probs, sampled_depth], outdir + '/debug.{}.pt'.format(self.step))
-        # self.step += 1
-        
+            
         return results
 
     def forward(self, input_fn, field_fn, ray_start, ray_dir, samples, *args, **kwargs):
@@ -245,4 +242,34 @@ class VolumeRenderer(Renderer):
 
         if getattr(input_fn, "track_max_probs", False) and (not self.training):
             input_fn.track_voxel_probs(samples['sampled_point_voxel_idx'].long(), results['probs'])
+        return results
+
+
+@register_renderer('surface_volume_rendering')
+class SurfaceVolumeRenderer(VolumeRenderer):
+
+    def forward_chunk(
+        self, input_fn, field_fn, ray_start, ray_dir, samples, encoder_states,
+        gt_depths=None, output_types=['sigma', 'texture'], global_weights=None,
+        ):
+        results = super().forward_chunk(
+            input_fn, field_fn, ray_start, ray_dir, samples, encoder_states,
+            output_types=['sigma', 'normal'])
+        
+        # render at the "intersection"
+        n_probs = results['probs'].clamp(min=1e-6).masked_fill(samples['sampled_point_voxel_idx'].eq(-1), 0)
+        n_depth = (samples['sampled_point_depth'] * n_probs).sum(-1, keepdim=True) / n_probs.sum(-1, keepdim=True).clamp(min=1e-6)
+        n_bound = samples['sampled_point_depth'] + samples['sampled_point_distance'] / 2
+        n_vidxs = ((n_depth - n_bound) >= 0).sum(-1, keepdim=True)
+        n_vidxs = samples['sampled_point_voxel_idx'].gather(1, n_vidxs)
+
+        new_samples = {
+            'sampled_point_depth': n_depth,
+            'sampled_point_distance': torch.ones_like(n_depth) * 1e-3,  # dummy distance. not useful.
+            'sampled_point_voxel_idx': n_vidxs,
+        }
+        new_results, _ = self.forward_once(input_fn, field_fn, ray_start, ray_dir, new_samples, encoder_states)
+        results['colors'] = new_results['texture'].squeeze(1) * (1 - results['missed'][:, None])
+        results['normal'] = new_results['normal'].squeeze(1)
+        results['eikonal-term'] = torch.cat([results['eikonal-term'], (results['normal'].norm(p=2, dim=-1) - 1) ** 2], 0)
         return results

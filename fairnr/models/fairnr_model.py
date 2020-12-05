@@ -80,6 +80,7 @@ class BaseModel(BaseFairseqModel):
     
     def set_num_updates(self, num_updates):
         self._num_updates = num_updates
+        super().set_num_updates(num_updates)
 
     def upgrade_state_dict_named(self, state_dict, name):
         super().upgrade_state_dict_named(state_dict, name)
@@ -296,7 +297,11 @@ class BaseModel(BaseFairseqModel):
                         sample['ray_start'][s, v].float(), sample['ray_dir'][s, v].float(),
                         output['depths'][s, v].float(), sample['extrinsics'][s, v].float().inverse(), width=width),
                         min_val=-1, max_val=1, width=width).numpy())
-                    
+                    if 'featn2' in output:
+                        imsave('featn2' + figname, output['featn2'][s, v].cpu().numpy())
+                    if 'voxel' in output:
+                        imsave('voxel' + figname, output['voxel'][s, v].cpu().numpy())
+
         if len(ssims) > 0:
             logging_output['ssim_loss'] = np.mean(ssims)
         if len(psnrs) > 0:

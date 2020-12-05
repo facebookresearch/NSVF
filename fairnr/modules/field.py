@@ -42,6 +42,7 @@ class Field(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
+        self.updates = -1
 
     def forward(self, **kwargs):
         raise NotImplementedError
@@ -49,7 +50,9 @@ class Field(nn.Module):
     @staticmethod
     def add_args(parser):
         pass
-
+    
+    def set_num_updates(self, num_updates):
+        self.updates = num_updates
 
 @register_field('radiance_field')
 class RaidanceField(Field):
@@ -82,6 +85,16 @@ class RaidanceField(Field):
         self.build_feature_field(args)
         self.build_density_predictor(args)
         self.build_texture_renderer(args)
+
+        if getattr(args, "zero_z_steps", 0) > 0:
+            self.register_buffer("zero_z", torch.scalar_tensor(1))  # it will be saved to checkpoint
+        else:
+            self.zero_z = 0
+
+    def set_num_updates(self, updates):
+        self.updates = updates
+        if getattr(self.args, "zero_z_steps", 0) <= self.updates:
+            self.zero_z = self.zero_z * 0
 
     def build_feature_field(self, args): 
         den_feat_dim = self.tex_input_dims[0]
@@ -187,6 +200,7 @@ class RaidanceField(Field):
                             help='number of FC layers used to predict colors')        
         parser.add_argument('--no-normalize-normal', action='store_true',
                             help='if set, do not normalize the gradient of density as the normal direction.')
+        parser.add_argument('--zero-z-steps', type=int, default=0)
 
         # specific parameters (hypernetwork does not work right now)
         parser.add_argument('--hypernetwork', action='store_true', 
@@ -225,7 +239,7 @@ class RaidanceField(Field):
             else:
                 filtered_inputs = (filtered_inputs, )
             inputs['feat'] = self.feature_field(*filtered_inputs)
-        
+            
         if 'sigma' in outputs:
             assert 'feat' in inputs, "feature must be pre-computed"
             inputs['sigma'] = self.predictor(inputs['feat'])[0]
@@ -247,6 +261,10 @@ class RaidanceField(Field):
 
         if 'texture' in outputs:        
             filtered_inputs = []
+            if self.zero_z == 1:
+                inputs['feat'] = inputs['feat'] * 0.0  # zero-out latent feature
+            inputs['feat_n2'] = (inputs['feat'] ** 2).sum(-1)
+
             for i, name in enumerate(self.tex_filters):
                 d_in, func = self.tex_ori_dims[i], self.tex_filters[name]
                 assert (name in inputs), "the encoder must contain target inputs"
@@ -267,6 +285,7 @@ class SDFRaidanceField(RaidanceField):
     @staticmethod
     def add_args(parser):
         parser.add_argument('--reg-z', action='store_true', help='regularize latent feature')
+        parser.add_argument('--dropout-z', type=float, default=0.0)
         RaidanceField.add_args(parser)
 
     def build_feature_field(self, args):
@@ -284,6 +303,11 @@ class SDFRaidanceField(RaidanceField):
             den_input_dim, den_feat_dim + 1, args.feature_embed_dim,  # +1 is for SDF values
             num_layers, with_ln=False, skips=skips, outmost_linear=True, spec_init=False)  
         
+        if getattr(args, "dropout_z", 0.0) > 0.0:
+            self.dropout_z = nn.Dropout(p=self.args.dropout_z)
+        else:
+            self.dropout_z = None
+
         """ 
         Geometric initialization from https://arxiv.org/pdf/1911.10414.pdf
         This enforce a model to approximate a SDF function: 
@@ -310,6 +334,11 @@ class SDFRaidanceField(RaidanceField):
             else:
                 torch.nn.init.constant_(lin.bias, 0.0)
                 torch.nn.init.normal_(lin.weight, 0.0, math.sqrt(2) / math.sqrt(lin.weight.size(0)))
+        
+        # fearure --> 0
+        self.feature_field.net[7].weight.data[1:] = self.feature_field.net[7].weight.data[1:] * 0.0
+        self.feature_field.net[7].bias.data[1:] = self.feature_field.net[7].bias.data[1:] * 0.0
+        
 
     def build_density_predictor(self, args):
         class Sdf2Densityv1(nn.Module):
@@ -339,26 +368,28 @@ class SDFRaidanceField(RaidanceField):
             def forward(self, x):
                 return F.elu(-self.sigma * x[:, 0]), None
 
-
         self.predictor = Sdf2Densityv1()
 
     @torch.enable_grad()
     def forward(self, inputs, outputs=['sigma', 'texture']):
-        if 'sigma' in outputs:
+        if ('sigma' in outputs):
             inputs = super().forward(inputs, ['sigma'])
             inputs['sdf'] = inputs['feat'][:, 0]
             inputs['feat'] = inputs['feat'][:, 1:]  # remove sdf from feature
-            if getattr(self.args, "reg_z", False):
-                inputs['feat'] = inputs['feat'] - inputs['sdf'][:, None]
-                inputs['feat_n2'] = (inputs['feat'] ** 2).sum(-1)
+            if (getattr(self.args, "zero_z_steps", 0) > self.updates) and self.training:
+                inputs['feat'] = inputs['feat'] * 0.0  # zero-out latent feature
 
-        if 'texture' in outputs:
+            if self.dropout_z is not None:
+                inputs['feat'] = self.dropout_z(inputs['feat'])  # apply dropout on the feature.
+            inputs['feat_n2'] = (inputs['feat'] ** 2).sum(-1)
+
+        if ('texture' in outputs) or ('normal' in outputs):
             # compute gradient for sdf, no need to normalize them
             inputs['normal'] = grad(
                 outputs=inputs['sdf'], inputs=inputs['pos'], 
                 grad_outputs=torch.ones_like(inputs['sdf'], requires_grad=False), 
                 retain_graph=True, create_graph=True)[0]
-
+        if 'texture' in outputs:
             inputs = super().forward(inputs, ['texture'])
         return inputs
 

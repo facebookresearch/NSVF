@@ -105,6 +105,8 @@ class NSVFModel(NeRFModel):
             all_results['voxel_depth'] = fill_in((fullsize, ), hits, all_results['voxel_depth'], BG_DEPTH).view(S, V, P)
         if 'voxel_edges' in all_results:
             all_results['voxel_edges'] = fill_in((fullsize, 3), hits, all_results['voxel_edges'], 1.0).view(S, V, P, 3)
+        if 'feat_n2' in all_results:
+            all_results['feat_n2'] = fill_in((fullsize,), hits, all_results['feat_n2'], 0.0).view(S, V, P)
         return all_results
 
     def add_other_logs(self, all_results):
@@ -129,6 +131,13 @@ class NSVFModel(NeRFModel):
                         sample['extrinsics'][shape, view].float().inverse(),
                         width, proj=True)
                 }
+        
+        if 'feat_n2' in output and output['feat_n2'] is not None:
+            images['{}_featn2/{}:HWC'.format(name, img_id)] = {
+                'img': output['feat_n2'][shape, view].float(),
+                'min_val': 0,
+                'max_val': 1
+            }
         return images
     
     @torch.no_grad()
@@ -235,6 +244,13 @@ def nerf3nope_architecture(args):
     args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:0:3, sigma:0:1, ray:4")
     nerf2_architecture(args)
 
+@register_model_architecture("nsvf", "nsvf_xyzn_old")
+def nerfold_architecture(args):
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, normal:0:3, sigma:0:1, ray:4")
+    nerf2_architecture(args)
 
 @register_model_architecture("nsvf", "nsvf_xyzn_nope")
 def nerf2nope_architecture(args):
@@ -299,3 +315,15 @@ def sdf_nsvf_architecture(args):
     args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
     args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
     nerf2nope_architecture(args)
+
+
+@register_model('sdf_nsvf_sfx')
+class SDFSFXNSVFModel(SDFNSVFModel):
+
+    FIELD = "sdf_radiance_field"
+    RAYMARCHER = "surface_volume_rendering"
+
+
+@register_model_architecture("sdf_nsvf_sfx", "sdf_nsvf_sfx")
+def sdf_nsvfsfx_architecture(args):
+    sdf_nsvf_architecture(args)

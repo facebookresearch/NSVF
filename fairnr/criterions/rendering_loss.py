@@ -204,9 +204,8 @@ class SRNLossCriterion(RenderingCriterion):
         if self.args.eikonal_weight > 0:
             losses['eik_loss'] = (net_output['eikonal-term'].mean(), self.args.eikonal_weight)
         
-        if self.args.regz_weight > 0:
-            losses['reg_loss'] = (net_output['regz-term'].mean(), self.args.regz_weight)
-
+        # if self.args.regz_weight > 0:
+        losses['reg_loss'] = (net_output['regz-term'].mean(), self.args.regz_weight)
         loss = sum(losses[key][0] * losses[key][1] for key in losses)
        
         # add a dummy loss
