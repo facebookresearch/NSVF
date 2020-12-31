@@ -244,5 +244,7 @@ class NeuralRenderer(object):
             reader = imageio.get_reader(tempfile)
             for im in reader:
                 writer.append_data(im)
-            os.remove(tempfile)
         writer.close()
+        for timestamp in timestamps:
+            tempfile = os.path.join(self.output_dir, 'full_' + timestamp + '.mp4')
+            os.remove(tempfile)

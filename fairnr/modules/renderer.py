@@ -117,7 +117,8 @@ class VolumeRenderer(Renderer):
         if 'sigma' in field_outputs:
             sigma, sampled_dists= field_outputs['sigma'], field_inputs['dists']
             noise = 0 if not self.discrete_reg and (not self.training) else torch.zeros_like(sigma).normal_()  
-            free_energy = torch.relu(noise + sigma) * sampled_dists    
+            free_energy = torch.relu(noise + sigma) * sampled_dists   
+            free_energy = free_energy * 7.0  # ? [debug] 
             # (optional) free_energy = (F.elu(sigma - 3, alpha=1) + 1) * dists
             # (optional) free_energy = torch.abs(sigma) * sampled_dists  ## ??
             outputs['free_energy'] = masked_scatter(sample_mask, free_energy)
@@ -203,7 +204,13 @@ class VolumeRenderer(Renderer):
 
         depth = (sampled_depth * probs).sum(-1)
         missed = 1 - probs.sum(-1)
-        results.update({'probs': probs, 'depths': depth, 'missed': missed, 'ae': accumulated_evaluations})
+        
+        results.update({
+            'probs': probs, 'depths': depth, 
+            'max_depths': sampled_depth.masked_fill(hits.eq(0), -1).max(1).values,
+            'min_depths': sampled_depth.min(1).values,
+            'missed': missed, 'ae': accumulated_evaluations
+        })
         if original_depth is not None:
             results['z'] = (original_depth * probs).sum(-1)
 

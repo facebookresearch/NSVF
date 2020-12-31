@@ -41,18 +41,20 @@ class BaseModel(BaseFairseqModel):
     RAYMARCHER = 'abstract_renderer'
     READER = 'abstract_reader'
 
-    def __init__(self, args, reader, encoder, field, raymarcher):
+    def __init__(self, args, setups):
         super().__init__()
         self.args = args
         self.hierarchical = getattr(self.args, "hierarchical_sampling", False)
-        self.reader = reader
-        self.encoder = encoder
-        self.field = field
-        self.raymarcher = raymarcher
+        
+        self.reader = setups['reader']
+        self.encoder = setups['encoder']
+        self.field = setups['field']
+        self.raymarcher = setups['raymarcher']
+
         self.cache = None
         self._num_updates = 0
         if getattr(self.args, "use_fine_model", False):
-            self.field_fine = copy.deepcopy(field)
+            self.field_fine = copy.deepcopy(self.field)
         else:
             self.field_fine = None
 
@@ -63,7 +65,13 @@ class BaseModel(BaseFairseqModel):
         encoder = get_encoder(cls.ENCODER)(args)
         field = get_field(cls.FIELD)(args)
         raymarcher = get_renderer(cls.RAYMARCHER)(args)
-        return cls(args, reader, encoder, field, raymarcher)
+        setups = {
+            'reader': reader,
+            'encoder': encoder,
+            'field': field,
+            'raymarcher': raymarcher
+        }
+        return cls(args, setups)
 
     @classmethod
     def add_args(cls, parser):
@@ -138,8 +146,12 @@ class BaseModel(BaseFairseqModel):
         encoder_states = self.preprocessing(**kwargs)
         ray_start, ray_dir, intersection_outputs, hits, sampled_uv = \
             self.intersecting(ray_start, ray_dir, encoder_states, **kwargs)
-        P = ray_dir.size(1) // V
         
+        # save the original rays
+        ray_start0 = ray_start.reshape(-1, 3).clone()
+        ray_dir0 = ray_dir.reshape(-1, 3).clone()
+
+        P = ray_dir.size(1) // V
         all_results = defaultdict(lambda: None)
 
         if hits.sum() > 0:
@@ -162,7 +174,7 @@ class BaseModel(BaseFairseqModel):
                 all_results['coarse'] = coarse_results
 
         hits = hits.reshape(-1)
-        all_results = self.postprocessing(ray_start, ray_dir, all_results, hits, (S, V, P))
+        all_results = self.postprocessing(ray_start0, ray_dir0, all_results, hits, (S, V, P))
         if self.hierarchical:
             all_results['coarse'] = self.postprocessing(
                 ray_start, ray_dir, all_results['coarse'], hits, (S, V, P))
@@ -231,10 +243,13 @@ class BaseModel(BaseFairseqModel):
             }
         if 'depths' in output and output['depths'] is not None:
             min_depth, max_depth = output['depths'].min(), output['depths'].max()
+            if getattr(self.args, "near", None) is not None:
+                min_depth = self.args.near
+                max_depth = self.args.far
             images['{}_depth/{}:HWC'.format(name, img_id)] = {
                 'img': output['depths'][shape, view], 
-                'min_val': 0, 
-                'max_val': 4}
+                'min_val': min_depth, 
+                'max_val': max_depth}
             normals = compute_normal_map(
                 sample['ray_start'][shape, view].float(),
                 sample['ray_dir'][shape, view].float(),

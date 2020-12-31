@@ -68,13 +68,14 @@ class NeRFModel(BaseModel):
         intersection_outputs['min_depth'] = depth - dists * .5
         intersection_outputs['max_depth'] = depth + dists * .5
         intersection_outputs['intersected_voxel_idx'] = samples['sampled_point_voxel_idx'].contiguous()
-        safe_probs = all_results['probs'] + 1e-8  # HACK: make a non-zero distribution
+        # safe_probs = all_results['probs'] + 1e-8  # HACK: make a non-zero distribution
+        safe_probs = all_results['probs'] + 1e-5  # NeRF used 1e-5, will this make a change?
         intersection_outputs['probs'] = safe_probs / safe_probs.sum(-1, keepdim=True)
-        intersection_outputs['steps'] = safe_probs.new_ones(*safe_probs.size()[:-1], 1) 
+        intersection_outputs['steps'] = safe_probs.new_ones(*safe_probs.size()[:-1]) 
         if getattr(self.args, "fixed_fine_num_samples", 0) > 0:
             intersection_outputs['steps'] = intersection_outputs['steps'] * self.args.fixed_fine_num_samples
         if getattr(self.args, "reduce_fine_for_missed", False):
-            intersection_outputs['steps'] = intersection_outputs['steps'] * safe_probs.sum(-1, keepdim=True)
+            intersection_outputs['steps'] = intersection_outputs['steps'] * safe_probs.sum(-1)
         return intersection_outputs
 
     def postprocessing(self, ray_start, ray_dir, all_results, hits, sizes):

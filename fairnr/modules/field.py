@@ -217,7 +217,7 @@ class RaidanceField(Field):
     @torch.enable_grad()  # tracking the gradient in case we need to have normal at testing time.
     def forward(self, inputs, outputs=['sigma', 'texture']):
         filtered_inputs, context = [], None
-        if 'feat' not in inputs:        
+        if inputs.get('feat', None) is None:        
             for i, name in enumerate(self.den_filters):
                 d_in, func = self.den_ori_dims[i], self.den_filters[name]
                 assert (name in inputs), "the encoder must contain target inputs"
@@ -286,6 +286,8 @@ class SDFRaidanceField(RaidanceField):
     def add_args(parser):
         parser.add_argument('--reg-z', action='store_true', help='regularize latent feature')
         parser.add_argument('--dropout-z', type=float, default=0.0)
+        parser.add_argument('--project-to-surface', action='store_true', 
+            help='project any point to the surface to obtain color.')
         RaidanceField.add_args(parser)
 
     def build_feature_field(self, args):
@@ -335,11 +337,10 @@ class SDFRaidanceField(RaidanceField):
                 torch.nn.init.constant_(lin.bias, 0.0)
                 torch.nn.init.normal_(lin.weight, 0.0, math.sqrt(2) / math.sqrt(lin.weight.size(0)))
         
-        # fearure --> 0
+        # force the initial fearures to 0
         self.feature_field.net[7].weight.data[1:] = self.feature_field.net[7].weight.data[1:] * 0.0
         self.feature_field.net[7].bias.data[1:] = self.feature_field.net[7].bias.data[1:] * 0.0
         
-
     def build_density_predictor(self, args):
         class Sdf2Densityv1(nn.Module):
             def __init__(self):
@@ -381,14 +382,23 @@ class SDFRaidanceField(RaidanceField):
 
             if self.dropout_z is not None:
                 inputs['feat'] = self.dropout_z(inputs['feat'])  # apply dropout on the feature.
-            inputs['feat_n2'] = (inputs['feat'] ** 2).sum(-1)
-
+            
         if ('texture' in outputs) or ('normal' in outputs):
             # compute gradient for sdf, no need to normalize them
             inputs['normal'] = grad(
                 outputs=inputs['sdf'], inputs=inputs['pos'], 
                 grad_outputs=torch.ones_like(inputs['sdf'], requires_grad=False), 
                 retain_graph=True, create_graph=True)[0]
+
+            # compute color for points projected on the surface
+            if getattr(self.args, "project_to_surface", False):
+                inputs['pos'] = inputs['pos'] - inputs['sdf'][:, None] * inputs['normal']
+                inputs['feat'] = None
+                inputs = super().forward(inputs, outputs=['feat'])
+                inputs['feat'] = inputs['feat'][:, 1:]
+            
+            inputs['feat_n2'] = (inputs['feat'] ** 2).sum(-1)
+
         if 'texture' in outputs:
             inputs = super().forward(inputs, ['texture'])
         return inputs

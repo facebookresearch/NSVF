@@ -73,12 +73,15 @@ class VolumeEncoder(Encoder):
     def __init__(self, args):
         super().__init__(args)
 
+        self.context = None
+
     @staticmethod
     def add_args(parser):
         parser.add_argument('--near', type=float, help='near distance of the volume')
         parser.add_argument('--far',  type=float, help='far distance of the volume')
 
-    def precompute(self, id=None, *args, **kwargs):
+    def precompute(self, id=None, context=None, *args, **kwargs):
+        self.context = context  # save context which maybe useful later
         return {}   # we do not use encoder for NeRF
 
     def ray_intersect(self, ray_start, ray_dir, encoder_states, near=None, far=None):
@@ -91,7 +94,7 @@ class VolumeEncoder(Encoder):
             "min_depth": ray_dir.new_ones(S, V * P, 1) * near,
             "max_depth": ray_dir.new_ones(S, V * P, 1) * far,
             "probs": ray_dir.new_ones(S, V * P, 1),
-            "steps": ray_dir.new_ones(S, V * P, 1) * self.args.fixed_num_samples,
+            "steps": ray_dir.new_ones(S, V * P) * self.args.fixed_num_samples,
             "intersected_voxel_idx": ray_dir.new_zeros(S, V * P, 1).int()}
         hits = ray_dir.new_ones(S, V * P).bool()
         return ray_start, ray_dir, intersection_outputs, hits
@@ -110,12 +113,14 @@ class VolumeEncoder(Encoder):
         }
 
     def forward(self, samples, encoder_states):
-        return {
+        inputs = {
             'pos': samples['sampled_point_xyz'].requires_grad_(True),
             'ray': samples['sampled_point_ray_direction'],
             'dists': samples['sampled_point_distance']
         }
-
+        if self.context is not None:
+            inputs.update({'context': self.context})
+        return inputs
 
 @register_encoder('infinite_volume_encoder')
 class InfiniteVolumeEncoder(VolumeEncoder):
@@ -635,7 +640,9 @@ class SparseVoxelEncoder(Encoder):
                 {'voxel_vertex_idx': feats,
                  'voxel_center_xyz': points,
                  'voxel_vertex_emb': values})  # get field inputs
-     
+            if encoder_states.get('context', None) is not None:
+                field_inputs['context'] = encoder_states['context']
+            
             # evaluation with density
             field_outputs = field_fn(field_inputs, outputs=['sigma'])
             free_energy = -torch.relu(field_outputs['sigma']).reshape(-1, bits ** 3)
@@ -872,8 +879,11 @@ class SharedSparseVoxelEncoder(MultiSparseVoxelEncoder):
     def pruning(self, field_fn, th=0.5, train_stats=False):
         for cid in range(len(self.all_voxels)):
            id = torch.tensor([cid], device=self.contexts.weight.device)
+           encoder_states = {name: v[0] if v is not None else v 
+                    for name, v in self.precompute(id).items()}
+           encoder_states['context'] = self.contexts(id)
            self.all_voxels[cid].pruning(field_fn, th, 
-                encoder_states={name: v[0] for name, v in self.precompute(id).items()},
+                encoder_states=encoder_states,
                 train_stats=train_stats)
 
     @torch.no_grad()
@@ -881,22 +891,28 @@ class SharedSparseVoxelEncoder(MultiSparseVoxelEncoder):
         logger.info("splitting...")
         all_feats, all_points = [], []
         for id in range(len(self.all_voxels)):
-            feats, points, values = self.all_voxels[id].precompute(id=None)
+            encoder_states = self.all_voxels[id].precompute(id=None)
+            feats = encoder_states['voxel_vertex_idx']
+            points = encoder_states['voxel_center_xyz']
+            values = encoder_states['voxel_vertex_emb']
+
             all_feats.append(feats)
             all_points.append(points)
+        
         feats, points = torch.cat(all_feats, 0), torch.cat(all_points, 0)
         unique_feats, unique_idx = torch.unique(feats, dim=0, return_inverse=True)
         unique_points = points[
             unique_feats.new_zeros(unique_feats.size(0)).scatter_(
                 0, unique_idx, torch.arange(unique_idx.size(0), device=unique_feats.device)
         )]
-        new_points, new_feats, new_values = splitting_points(unique_points, unique_feats, values, self.voxel_size / 2.0)
-        new_num_keys = new_values.size(0)
+        new_points, new_feats, new_values, new_keys = splitting_points(unique_points, unique_feats, values, self.voxel_size / 2.0)
+        new_num_keys = new_keys.size(0)
         new_point_length = new_points.size(0)
 
         # set new voxel embeddings (shared voxels)
-        self.all_voxels[0].values.weight = nn.Parameter(new_values)
-        self.all_voxels[0].values.num_embeddings = new_num_keys
+        if values is not None:
+            self.all_voxels[0].values.weight = nn.Parameter(new_values)
+            self.all_voxels[0].values.num_embeddings = new_num_keys
 
         for id in range(len(self.all_voxels)):
             self.all_voxels[id].total_size = new_num_keys

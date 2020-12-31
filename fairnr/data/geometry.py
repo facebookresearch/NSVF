@@ -301,6 +301,11 @@ def get_edge(depth_pts, voxel_pts, voxel_size, th=0.05):
 
 # fill-in image
 def fill_in(shape, hits, input, initial=1.0):
+    input_sizes = [k for k in input.size()]
+    if (len(input_sizes) == len(shape)) and \
+        all([shape[i] == input_sizes[i] for i in range(len(shape))]):
+        return input   # shape is the same no need to fill
+        
     if isinstance(initial, torch.Tensor):
         output = initial.expand(*shape)
     else:

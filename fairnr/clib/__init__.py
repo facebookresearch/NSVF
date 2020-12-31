@@ -233,13 +233,14 @@ class InverseCDFRaySampling(Function):
     def forward(ctx, pts_idx, min_depth, max_depth, probs, steps, fixed_step_size=-1, deterministic=False):
         G, N, P = 200, pts_idx.size(0), pts_idx.size(1)
         H = int(np.ceil(N / G)) * G
-
+        
         if H > N:
-            pts_idx = torch.cat([pts_idx, pts_idx[:H-N]], 0)
-            min_depth = torch.cat([min_depth, min_depth[:H-N]], 0)
-            max_depth = torch.cat([max_depth, max_depth[:H-N]], 0)
-            probs = torch.cat([probs, probs[:H-N]], 0)
-            steps = torch.cat([steps, steps[:H-N]], 0)
+            pts_idx = torch.cat([pts_idx, pts_idx[:1].expand(H-N, P)], 0)
+            min_depth = torch.cat([min_depth, min_depth[:1].expand(H-N, P)], 0)
+            max_depth = torch.cat([max_depth, max_depth[:1].expand(H-N, P)], 0)
+            probs = torch.cat([probs, probs[:1].expand(H-N, P)], 0)
+            steps = torch.cat([steps, steps[:1].expand(H-N)], 0)
+        # print(G, P, np.ceil(N / G), N, H, pts_idx.shape, min_depth.device)
         pts_idx = pts_idx.reshape(G, -1, P)
         min_depth = min_depth.reshape(G, -1, P)
         max_depth = max_depth.reshape(G, -1, P)
