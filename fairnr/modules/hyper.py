@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import functools
 
-from fairnr.modules.linear import FCBlock
+from fairnr.modules.module_utils import FCBlock
 
 
 def partialclass(cls, *args, **kwds):

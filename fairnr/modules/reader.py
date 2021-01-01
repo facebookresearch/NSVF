@@ -51,10 +51,9 @@ class ImageReader(Reader):
         super().__init__(args)
         self.num_pixels = args.pixel_per_view
         self.no_sampling = getattr(args, "no_sampling_at_reader", False)
-        
         self.deltas = None
+        self.all_data = self.find_data()
         if getattr(args, "trainable_extrinsics", False):
-            self.all_data = self.find_data()
             self.all_data_idx = {data_img: (s, v) 
                 for s, data in enumerate(self.all_data) 
                 for v, data_img in enumerate(data)}
@@ -113,7 +112,6 @@ class ImageReader(Reader):
                     rotation = rotation @ d_r
                     translation = translation + d_t
                     ext = torch.cat([torch.cat([rotation, translation[:, None]], 1), ext[3:]], 0)
-
                 ray_start[s] += [translation]
                 ray_dir[s] += [get_ray_direction(translation, flatten_uv[s, v], ixt, ext, 1)]
         ray_start = torch.stack([torch.stack(r) for r in ray_start])

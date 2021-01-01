@@ -17,6 +17,8 @@ import skimage.metrics
 import pandas as pd
 import pylab as plt
 import fairseq.distributed_utils as du
+
+from plyfile import PlyData, PlyElement
 from fairseq.meters import StopwatchMeter
 
 def get_rank():    
@@ -133,7 +135,12 @@ def load_mask(path, resolution=None):
 
 
 def load_matrix(path):
-    return np.array([[float(w) for w in line.strip().split()] for line in open(path)]).astype(np.float32)
+    lines = [[float(w) for w in line.strip().split()] for line in open(path)]
+    if len(lines[0]) == 2:
+        lines = lines[1:]
+    if len(lines[-1]) == 2:
+        lines = lines[:-1]
+    return np.array(lines).astype(np.float32)
 
 
 def load_intrinsics(filepath, resized_width=None, invert_y=False):
@@ -144,12 +151,15 @@ def load_intrinsics(filepath, resized_width=None, invert_y=False):
             _intrinsics[:3, :3] = intrinsics
             _intrinsics[3, 3] = 1
             intrinsics = _intrinsics
+        if intrinsics.shape[0] == 1 and intrinsics.shape[1] == 16:
+            intrinsics = intrinsics.reshape(4, 4)
         return intrinsics
     except ValueError:
         pass
 
     # Get camera intrinsics
     with open(filepath, 'r') as file:
+        
         f, cx, cy, _ = map(float, file.readline().split())
     fx = f
     if invert_y:
@@ -248,12 +258,14 @@ def sample_pixel_from_image(
 
 
 def colormap(dz):
-    # return plt.cm.jet(dz)
+    return plt.cm.jet(dz)
     # return plt.cm.viridis(dz)
-    return plt.cm.gray(dz)
+    # return plt.cm.gray(dz)
 
 
-def recover_image(img, min_val=-1, max_val=1, width=512, bg=None, weight=None):
+def recover_image(img, min_val=-1, max_val=1, width=512, bg=None, weight=None, raw=False):
+    if raw: return img
+
     sizes = img.size()
     height = sizes[0] // width
     img = img.float().to('cpu')
@@ -290,6 +302,18 @@ def compute_psnr(p, t):
     ssim = skimage.metrics.structural_similarity(p, t, multichannel=True, data_range=1)
     psnr = skimage.metrics.peak_signal_noise_ratio(p, t, data_range=1)
     return ssim, psnr
+
+
+def save_point_cloud(filename, xyz, rgb=None):
+    if rgb is None:
+        vertex = np.array([(xyz[k, 0], xyz[k, 1], xyz[k, 2]) for k in range(xyz.shape[0])], 
+            dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+    else:
+        vertex = np.array([(xyz[k, 0], xyz[k, 1], xyz[k, 2], rgb[k, 0], rgb[k, 1], rgb[k, 2]) for k in range(xyz.shape[0])], 
+            dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+    # PlyData([PlyElement.describe(vertex, 'vertex')], text=True).write(filename)
+    # from fairseq import pdb; pdb.set_trace()
+    PlyData([PlyElement.describe(vertex, 'vertex')]).write(open(filename, 'wb'))
 
 
 class InfIndex(object):

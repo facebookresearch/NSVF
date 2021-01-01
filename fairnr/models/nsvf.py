@@ -18,97 +18,101 @@ from fairseq.models import (
     register_model,
     register_model_architecture
 )
-
-from fairnr.data.data_utils import Timer, GPUTimer
+from fairseq.utils import item
 from fairnr.data.geometry import compute_normal_map, fill_in
-from fairnr.models.fairnr_model import BaseModel
-
-MAX_DEPTH = 10000.0
+from fairnr.models.nerf import NeRFModel
 
 
 @register_model('nsvf')
-class NSVFModel(BaseModel):
+class NSVFModel(NeRFModel):
 
     READER = 'image_reader'
     ENCODER = 'sparsevoxel_encoder'
     FIELD = 'radiance_field'
     RAYMARCHER = 'volume_rendering'
 
-    def _forward(self, ray_start, ray_dir, **kwargs):
-        S, V, P, _ = ray_dir.size()
-        assert S == 1, "naive NeRF only supports single object."
+    @classmethod
+    def add_args(cls, parser):
+        super().add_args(parser)
+        parser.add_argument('--fine-num-sample-ratio', type=float, default=0,
+            help='raito of samples compared to the first pass')
+        parser.add_argument('--inverse-distance-coarse-sampling', type=str, 
+            choices=['none', 'camera', 'origin'], default='none',
+            help='if set, we do not sample points uniformly through voxels.')
 
-        # voxel encoder (precompute for each voxel if needed)
-        encoder_states = self.encoder.precompute(**kwargs)  
+    def intersecting(self, ray_start, ray_dir, encoder_states, **kwargs):
+        S = ray_dir.size(0)
+        ray_start, ray_dir, intersection_outputs, hits, _ = \
+            super().intersecting(ray_start, ray_dir, encoder_states, **kwargs)
 
-        # ray-voxel intersection
-        with GPUTimer() as timer0:
-            ray_start, ray_dir, intersection_outputs, hits = \
-                self.encoder.ray_intersect(ray_start, ray_dir, encoder_states)
+        if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
+            uv, size = kwargs['uv'], kwargs['size']
+            mask = hits.reshape(*uv.size()[:2], uv.size(-1))
 
-            if self.reader.no_sampling and self.training:  # sample points after ray-voxel intersection
-                uv, size = kwargs['uv'], kwargs['size']
-                mask = hits.reshape(*uv.size()[:2], uv.size(-1))
-
-                # sample rays based on voxel intersections
-                sampled_uv, sampled_masks = self.reader.sample_pixels(
-                    uv, size, mask=mask, return_mask=True)
-                sampled_masks = sampled_masks.reshape(uv.size(0), -1).bool()
-                hits, sampled_masks = hits[sampled_masks].reshape(S, -1), sampled_masks.unsqueeze(-1)
-                intersection_outputs = {name: outs[sampled_masks.expand_as(outs)].reshape(S, -1, outs.size(-1)) 
-                    for name, outs in intersection_outputs.items()}
-                ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, 3)
-                ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, 3)
-                P = hits.size(-1) // V   # the number of pixels per image
-            else:
-                sampled_uv = None
+            # sample rays based on voxel intersections
+            sampled_uv, sampled_masks = self.reader.sample_pixels(
+                uv, size, mask=mask, return_mask=True)
+            sampled_masks = sampled_masks.reshape(uv.size(0), -1).bool()
+            hits, sampled_masks = hits[sampled_masks].reshape(S, -1), sampled_masks.unsqueeze(-1)
+            intersection_outputs = {name: outs[sampled_masks.expand_as(outs)].reshape(S, -1, outs.size(-1)) 
+                for name, outs in intersection_outputs.items()}
+            ray_start = ray_start[sampled_masks.expand_as(ray_start)].reshape(S, -1, 3)
+            ray_dir = ray_dir[sampled_masks.expand_as(ray_dir)].reshape(S, -1, 3)
         
-        # neural ray-marching
+        else:
+            sampled_uv = None
+        
+        min_depth = intersection_outputs['min_depth']
+        max_depth = intersection_outputs['max_depth']
+        pts_idx = intersection_outputs['intersected_voxel_idx']
+        dists = (max_depth - min_depth).masked_fill(pts_idx.eq(-1), 0)
+        intersection_outputs['probs'] = dists / dists.sum(dim=-1, keepdim=True)
+        if getattr(self.args, "fixed_num_samples", 0) > 0:
+            intersection_outputs['steps'] = intersection_outputs['min_depth'].new_ones(
+                *intersection_outputs['min_depth'].size()[:-1], 1) * self.args.fixed_num_samples
+        else:
+            intersection_outputs['steps'] = dists.sum(-1) / self.encoder.step_size
+        return ray_start, ray_dir, intersection_outputs, hits, sampled_uv
+        
+    def raymarching(self, ray_start, ray_dir, intersection_outputs, encoder_states, fine=False):
+        samples, all_results = super().raymarching(ray_start, ray_dir, intersection_outputs, encoder_states, fine)
+        all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, encoder_states)
+        all_results['voxel_depth'] = samples['sampled_point_depth'][:, 0]
+        return samples, all_results
+
+    def prepare_hierarchical_sampling(self, intersection_outputs, samples, all_results):
+        intersection_outputs = super().prepare_hierarchical_sampling(intersection_outputs, samples, all_results)
+        if getattr(self.args, "fine_num_sample_ratio", 0) > 0:
+            intersection_outputs['steps'] = samples['sampled_point_voxel_idx'].ne(-1).sum(-1).float() * self.args.fine_num_sample_ratio
+        return intersection_outputs
+
+    def postprocessing(self, ray_start, ray_dir, all_results, hits, sizes):
+         # we need fill_in for NSVF for background
+        S, V, P = sizes
         fullsize = S * V * P
         
-        BG_DEPTH = self.field.bg_color.depth
-        bg_color = self.field.bg_color(ray_dir)
-        
-        all_results = defaultdict(lambda: None)
-        if hits.sum() > 0:  # check if ray missed everything
-            intersection_outputs = {name: outs[hits] for name, outs in intersection_outputs.items()}
-            ray_start, ray_dir = ray_start[hits], ray_dir[hits]
-            
-            # sample evalution points along the ray
-            samples = self.encoder.ray_sample(intersection_outputs)
-            encoder_states = {name: s.reshape(-1, s.size(-1)) if s is not None else None
-                for name, s in encoder_states.items()}
-            
-            # rendering
-            all_results = self.raymarcher(
-                self.encoder, self.field, ray_start, ray_dir, samples, encoder_states)
-            all_results['depths'] = all_results['depths'] + BG_DEPTH * all_results['missed']
-            all_results['voxel_edges'] = self.encoder.get_edge(ray_start, ray_dir, samples, encoder_states)
-            all_results['voxel_depth'] = samples['sampled_point_depth'][:, 0]
-
-        # fill out the full size
-        hits = hits.reshape(fullsize)
         all_results['missed'] = fill_in((fullsize, ), hits, all_results['missed'], 1.0).view(S, V, P)
-        all_results['depths'] = fill_in((fullsize, ), hits, all_results['depths'], BG_DEPTH).view(S, V, P)
-        all_results['voxel_depth'] = fill_in((fullsize, ), hits, all_results['voxel_depth'], BG_DEPTH).view(S, V, P)
-        all_results['voxel_edges'] = fill_in((fullsize, 3), hits, all_results['voxel_edges'], 1.0).view(S, V, P, 3)
         all_results['colors'] = fill_in((fullsize, 3), hits, all_results['colors'], 0.0).view(S, V, P, 3)
-        all_results['bg_color'] = bg_color.reshape(fullsize, 3).view(S, V, P, 3)
-        all_results['colors'] += all_results['missed'].unsqueeze(-1) * all_results['bg_color']
+        all_results['depths'] = fill_in((fullsize, ), hits, all_results['depths'], 0.0).view(S, V, P)
+        
+        BG_DEPTH = self.field.bg_color.depth
+        bg_color = self.field.bg_color(all_results['colors'])
+        all_results['colors'] += all_results['missed'].unsqueeze(-1) * bg_color.reshape(fullsize, 3).view(S, V, P, 3)
+        all_results['depths'] += all_results['missed'] * BG_DEPTH
         if 'normal' in all_results:
             all_results['normal'] = fill_in((fullsize, 3), hits, all_results['normal'], 0.0).view(S, V, P, 3)
-
-        # other logs
-        all_results['other_logs'] = {
-                'voxs_log': self.encoder.voxel_size.item(),
-                'stps_log': self.encoder.step_size.item(),
-                'tvox_log': timer0.sum,
-                'asf_log': (all_results['ae'].float() / fullsize).item(),
-                'ash_log': (all_results['ae'].float() / hits.sum()).item(),
-                'nvox_log': self.encoder.num_voxels,
-                }
-        all_results['sampled_uv'] = sampled_uv
+        if 'voxel_depth' in all_results:
+            all_results['voxel_depth'] = fill_in((fullsize, ), hits, all_results['voxel_depth'], BG_DEPTH).view(S, V, P)
+        if 'voxel_edges' in all_results:
+            all_results['voxel_edges'] = fill_in((fullsize, 3), hits, all_results['voxel_edges'], 1.0).view(S, V, P, 3)
+        if 'feat_n2' in all_results:
+            all_results['feat_n2'] = fill_in((fullsize,), hits, all_results['feat_n2'], 0.0).view(S, V, P)
         return all_results
+
+    def add_other_logs(self, all_results):
+        return {'voxs_log': item(self.encoder.voxel_size),
+                'stps_log': item(self.encoder.step_size),
+                'nvox_log': item(self.encoder.num_voxels)}
 
     def _visualize(self, images, sample, output, state, **kwargs):
         img_id, shape, view, width, name = state
@@ -121,15 +125,19 @@ class NSVFModel(BaseModel):
                 'max_val': 1,
                 'weight':
                     compute_normal_map(
-                        output['ray_start'][shape, view].float(),
-                        output['ray_dir'][shape, view].float(),
+                        sample['ray_start'][shape, view].float(),
+                        sample['ray_dir'][shape, view].float(),
                         output['voxel_depth'][shape, view].float(),
                         sample['extrinsics'][shape, view].float().inverse(),
                         width, proj=True)
                 }
-        if 'normal' in output and output['normal'] is not None:
-            images['{}_predn/{}:HWC'.format(name, img_id)] = {
-                'img': output['normal'][shape, view], 'min_val': -1, 'max_val': 1}
+        
+        if 'feat_n2' in output and output['feat_n2'] is not None:
+            images['{}_featn2/{}:HWC'.format(name, img_id)] = {
+                'img': output['feat_n2'][shape, view].float(),
+                'min_val': 0,
+                'max_val': 1
+            }
         return images
     
     @torch.no_grad()
@@ -160,7 +168,7 @@ class NSVFModel(BaseModel):
 @register_model_architecture("nsvf", "nsvf_base")
 def base_architecture(args):
     # parameter needs to be changed
-    args.voxel_size = getattr(args, "voxel_size", 0.25)
+    args.voxel_size = getattr(args, "voxel_size", None)
     args.max_hits = getattr(args, "max_hits", 60)
     args.raymarching_stepsize = getattr(args, "raymarching_stepsize", 0.01)
     args.raymarching_stepsize_ratio = getattr(args, "raymarching_stepsize_ratio", 0.0)
@@ -177,6 +185,7 @@ def base_architecture(args):
     args.density_embed_dim = getattr(args, "density_embed_dim", 128)
     args.texture_embed_dim = getattr(args, "texture_embed_dim", 256)
 
+    # API Update: fix the number of layers
     args.feature_layers = getattr(args, "feature_layers", 1)
     args.texture_layers = getattr(args, "texture_layers", 3)
     
@@ -210,11 +219,48 @@ def nerf2_architecture(args):
     base_architecture(args)
 
 
+@register_model_architecture("nsvf", "nsvf_nerf")
+def nerf_style_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, ray:4")
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.texture_layers = getattr(args, "texture_layers", 0)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    nerf2_architecture(args)
+
+@register_model_architecture("nsvf", "nsvf_nerf_nov")
+def nerf_noview_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256")
+    nerf_style_architecture(args)
+
 @register_model_architecture("nsvf", "nsvf_xyzn")
 def nerf3_architecture(args):
     args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:10, normal:4, ray:4")
     nerf2_architecture(args)
 
+
+@register_model_architecture("nsvf", "nsvf_xyz_nope")
+def nerf3nope_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:0:3, sigma:0:1, ray:4")
+    nerf2_architecture(args)
+
+@register_model_architecture("nsvf", "nsvf_xyzn_old")
+def nerfold_architecture(args):
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, normal:0:3, sigma:0:1, ray:4")
+    nerf2_architecture(args)
+
+@register_model_architecture("nsvf", "nsvf_xyzn_nope")
+def nerf2nope_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:0:3, normal:0:3, sigma:0:1, ray:4")
+    nerf2_architecture(args)
+
+@register_model_architecture("nsvf", "nsvf_xyzn_noz")
+def nerf3noz_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "pos:10, normal:4, ray:4")
+    nerf2_architecture(args)
 
 @register_model_architecture("nsvf", "nsvf_embn")
 def nerf4_architecture(args):
@@ -231,19 +277,8 @@ def nerf5_architecture(args):
     base_architecture(args)
 
 
-@register_model('rnsvf')
-class ResampledNSVFModel(NSVFModel):
-
-    RAYMARCHER = "resampled_volume_rendering"
-
-
-@register_model_architecture("rnsvf", "rnsvf_base")
-def rnsvf_architecture(args):
-    base_architecture(args)
-
-
 @register_model('disco_nsvf')
-class ResampledNSVFModel(NSVFModel):
+class DiscoNSVFModel(NSVFModel):
 
     FIELD = "disentangled_radiance_field"
 
@@ -252,3 +287,43 @@ class ResampledNSVFModel(NSVFModel):
 def disco_nsvf_architecture(args):
     args.compressed_light_dim = getattr(args, "compressed_light_dim", 64)
     nerf3_architecture(args)
+
+
+@register_model('multi_disco_nsvf')
+class mDiscoNSVFModel(NSVFModel):
+
+    ENCODER = "multi_sparsevoxel_encoder"
+    FIELD = "disentangled_radiance_field"
+
+
+@register_model_architecture("multi_disco_nsvf", "multi_disco_nsvf")
+def mdisco_nsvf_architecture(args):
+    args.inputs_to_density = getattr(args, "inputs_to_density", "pos:10, context:0:256")
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, pos:10, normal:4, ray:4, context:0:256")
+    disco_nsvf_architecture(args)
+
+
+@register_model('sdf_nsvf')
+class SDFNSVFModel(NSVFModel):
+
+    FIELD = "sdf_radiance_field"
+
+
+@register_model_architecture("sdf_nsvf", "sdf_nsvf")
+def sdf_nsvf_architecture(args):
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    nerf2nope_architecture(args)
+
+
+@register_model('sdf_nsvf_sfx')
+class SDFSFXNSVFModel(SDFNSVFModel):
+
+    FIELD = "sdf_radiance_field"
+    RAYMARCHER = "surface_volume_rendering"
+
+
+@register_model_architecture("sdf_nsvf_sfx", "sdf_nsvf_sfx")
+def sdf_nsvfsfx_architecture(args):
+    sdf_nsvf_architecture(args)

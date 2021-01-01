@@ -71,6 +71,8 @@ class SingleObjRenderingTask(FairseqTask):
                             help='specific detailed number of updates to half the voxel sizes')
         parser.add_argument("--reduce-step-size-at", type=str, default=None,
                             help='specific detailed number of updates to reduce the raymarching step sizes')
+        parser.add_argument("--prune-voxel-at", type=str, default=None,
+                            help='specific detailed number of pruning voxels')
         parser.add_argument("--rendering-every-steps", type=int, default=None,
                             help="if set, enables rendering online with default parameters")
         parser.add_argument("--rendering-args", type=str, metavar='JSON')
@@ -113,18 +115,21 @@ class SingleObjRenderingTask(FairseqTask):
         else:
             self.writer = None
 
-        self._num_updates = {'pv': 0, 'sv': 0, 'rs': 0, 're': 0}
+        self._num_updates = {'pv': -1, 'sv': -1, 'rs': -1, 're': -1}
         self.pruning_every_steps = getattr(self.args, "pruning_every_steps", None)
         self.pruning_th = getattr(self.args, "pruning_th", 0.5)
         self.rendering_every_steps = getattr(self.args, "rendering_every_steps", None)
         self.steps_to_half_voxels = getattr(self.args, "half_voxel_size_at", None)
         self.steps_to_reduce_step = getattr(self.args, "reduce_step_size_at", None)
-        
+        self.steps_to_prune_voxels = getattr(self.args, "prune_voxel_at", None)
+
         if self.steps_to_half_voxels is not None:
             self.steps_to_half_voxels = [int(s) for s in self.steps_to_half_voxels.split(',')]
         if self.steps_to_reduce_step is not None:
             self.steps_to_reduce_step = [int(s) for s in self.steps_to_reduce_step.split(',')]
-           
+        if self.steps_to_prune_voxels is not None:
+            self.steps_to_prune_voxels = [int(s) for s in self.steps_to_prune_voxels.split(',')]
+
         if self.rendering_every_steps is not None:
             gen_args = {
                 'path': args.save_dir,
@@ -247,21 +252,23 @@ class SingleObjRenderingTask(FairseqTask):
         self._num_updates[name] = num_updates
 
     def train_step(self, sample, model, criterion, optimizer, update_num, ignore_grad=False):
-        
-        if self.pruning_every_steps is not None and \
+        if (((self.pruning_every_steps is not None) and \
             (update_num % self.pruning_every_steps == 0) and \
-            (update_num > 0) and \
+            (update_num > 0)) or \
+            ((self.steps_to_prune_voxels is not None) and \
+             update_num in self.steps_to_prune_voxels) \
+             ) and \
             (update_num > self._num_updates['pv']) and \
             hasattr(model, 'prune_voxels'):
             model.eval()
-            
             if getattr(self.args, "pruning_rerun_train_set", False):
                 with torch.no_grad():
-                    model.clean_caches()
+                    model.clean_caches(reset=True)
                     progress = progress_bar.progress_bar(
                         self._unique_trainitr.next_epoch_itr(shuffle=False),
                         prefix=f"pruning based statiscs over training set",
-                        tensorboard_logdir=None, default_log_format='tqdm')
+                        tensorboard_logdir=None, 
+                        default_log_format=self.args.log_format if self.args.log_format is not None else "tqdm")
                     for step, inner_sample in enumerate(progress):
                         outs = model(**self._trainer._prepare_sample(self.filter_dummy(inner_sample)))
                         progress.log(stats=outs['other_logs'], tag='track', step=step)

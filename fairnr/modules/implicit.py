@@ -9,9 +9,7 @@ import torch.nn.functional as F
 
 from fairseq.utils import get_activation_fn
 from fairnr.modules.hyper import HyperFC
-from fairnr.modules.linear import (
-    NeRFPosEmbLinear, FCLayer, ResFCLayer
-)
+from fairnr.modules.module_utils import FCLayer
 
 
 class BackgroundField(nn.Module):
@@ -42,57 +40,49 @@ class BackgroundField(nn.Module):
 
 
 class ImplicitField(nn.Module):
-    
-    """
-    An implicit field is a neural network that outputs a vector given any query point.
-    """
-    def __init__(self, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
+    def __init__(self, in_dim, out_dim, hidden_dim, num_layers, 
+                outmost_linear=False, with_ln=True, skips=None, spec_init=True):
         super().__init__()
-        if pos_proj > 0:
-            new_in_dim = in_dim * 2 * pos_proj
-            self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
-            in_dim = new_in_dim + in_dim
-        else:
-            self.nerfpos = None
-
+        self.skips = skips
         self.net = []
-        self.net.append(FCLayer(in_dim, hidden_dim))
-        for _ in range(num_layers):
-            self.net.append(FCLayer(hidden_dim, hidden_dim))
 
-        if not outmost_linear:
-            self.net.append(FCLayer(hidden_dim, out_dim))
-        else:
-            self.net.append(nn.Linear(hidden_dim, out_dim))
+        prev_dim = in_dim
+        for i in range(num_layers):
+            next_dim = out_dim if i == (num_layers - 1) else hidden_dim
+            if (i == (num_layers - 1)) and outmost_linear:
+                self.net.append(nn.Linear(prev_dim, next_dim))
+            else:
+                self.net.append(FCLayer(prev_dim, next_dim, with_ln=with_ln))
+            prev_dim = next_dim
+            if (self.skips is not None) and (i in self.skips) and (i != (num_layers - 1)):
+                prev_dim += in_dim
+        
+        if num_layers > 0:
+            self.net = nn.ModuleList(self.net)
+            if spec_init:
+                self.net.apply(self.init_weights)
 
-        self.net = nn.Sequential(*self.net)
-        self.net.apply(self.init_weights)         
+    def forward(self, x):
+        y = self.net[0](x)
+        for i in range(len(self.net) - 1):
+            if (self.skips is not None) and (i in self.skips):
+                y = torch.cat((x, y), dim=-1)
+            y = self.net[i+1](y)
+        return y
 
     def init_weights(self, m):
         if type(m) == nn.Linear:
             nn.init.kaiming_normal_(m.weight, a=0.0, nonlinearity='relu', mode='fan_in')
 
-    def forward(self, x):
-        if self.nerfpos is not None:
-            x = torch.cat([x, self.nerfpos(x)], -1)
-        return self.net(x)
-
 
 class HyperImplicitField(nn.Module):
 
-    def __init__(self, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, outmost_linear=False, pos_proj=0):
+    def __init__(self, hyper_in_dim, in_dim, out_dim, hidden_dim, num_layers, 
+                outmost_linear=False):
         super().__init__()
 
         self.hyper_in_dim = hyper_in_dim
         self.in_dim = in_dim
-
-        if pos_proj > 0:
-            new_in_dim = in_dim * 2 * pos_proj
-            self.nerfpos = NeRFPosEmbLinear(in_dim, new_in_dim, no_linear=True)
-            in_dim = new_in_dim + in_dim
-        else:
-            self.nerfpos = None
-
         self.net = HyperFC(
             hyper_in_dim,
             1, 256, 
@@ -110,20 +100,24 @@ class HyperImplicitField(nn.Module):
         return self.net(c)(x.unsqueeze(0)).squeeze(0)
 
 
-class SignedDistanceField(nn.Module):
-
-    def __init__(self, in_dim, hidden_dim, recurrent=False):
-        super().__init__()
+class SignedDistanceField(ImplicitField):
+    """
+    Predictor for density or SDF values.
+    """
+    def __init__(self, in_dim, hidden_dim, num_layers=1, 
+                recurrent=False, with_ln=True, spec_init=True):
+        super().__init__(in_dim, in_dim, in_dim, num_layers-1, with_ln=with_ln, spec_init=spec_init)
         self.recurrent = recurrent
-
         if recurrent:
+            assert num_layers > 1
             self.hidden_layer = nn.LSTMCell(input_size=in_dim, hidden_size=hidden_dim)
             self.hidden_layer.apply(init_recurrent_weights)
             lstm_forget_gate_init(self.hidden_layer)
         else:
-            self.hidden_layer = FCLayer(in_dim, hidden_dim)
-
-        self.output_layer = nn.Linear(hidden_dim, 1)
+            self.hidden_layer = FCLayer(in_dim, hidden_dim, with_ln) \
+                if num_layers > 0 else nn.Identity()
+        prev_dim = hidden_dim if num_layers > 0 else in_dim
+        self.output_layer = nn.Linear(prev_dim, 1)
 
     def forward(self, x, state=None):
         if self.recurrent:
@@ -131,11 +125,8 @@ class SignedDistanceField(nn.Module):
             state = self.hidden_layer(x.view(-1, shape[-1]), state)
             if state[0].requires_grad:
                 state[0].register_hook(lambda x: x.clamp(min=-5, max=5))
-            
             return self.output_layer(state[0].view(*shape[:-1], -1)).squeeze(-1), state
-
         else:
-            
             return self.output_layer(self.hidden_layer(x)).squeeze(-1), None
 
 
@@ -143,20 +134,11 @@ class TextureField(ImplicitField):
     """
     Pixel generator based on 1x1 conv networks
     """
-    def __init__(self, in_dim, hidden_dim, num_layers, with_alpha=False):
+    def __init__(self, in_dim, hidden_dim, num_layers, 
+                with_alpha=False, with_ln=True, spec_init=True):
         out_dim = 3 if not with_alpha else 4
-        super().__init__(in_dim, out_dim, hidden_dim, num_layers, outmost_linear=True)
-
-
-class OccupancyField(ImplicitField):
-    """
-    Occupancy Network which predicts 0~1 at every space
-    """
-    def __init__(self, in_dim, hidden_dim, num_layers):
-        super().__init__(in_dim, 1, hidden_dim, num_layers, outmost_linear=True)
-
-    def forward(self, x):
-        return torch.sigmoid(super().forward(x)).squeeze(-1)
+        super().__init__(in_dim, out_dim, hidden_dim, num_layers, 
+            outmost_linear=True, with_ln=with_ln, spec_init=spec_init)
 
 
 # ------------------ #

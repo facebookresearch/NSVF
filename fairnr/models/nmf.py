@@ -11,7 +11,7 @@ from fairseq.models import (
     register_model,
     register_model_architecture
 )
-from fairnr.models.nsvf import NSVFModel, MAX_DEPTH
+from fairnr.models.nsvf import NSVFModel
 
 
 @register_model('nmf')
@@ -27,9 +27,10 @@ class NMFModel(NSVFModel):
     
     @torch.no_grad()
     def split_voxels(self):
-        logger.info("half the global cage size {:.4f} -> {:.4f}".format(
-            self.encoder.cage_size.item(), self.encoder.cage_size.item() * .5))
-        self.encoder.cage_size *= .5
+        pass
+        # logger.info("half the global cage size {:.4f} -> {:.4f}".format(
+        #     self.encoder.cage_size.item(), self.encoder.cage_size.item() * .5))
+        # self.encoder.cage_size *= .5
 
 
 @register_model_architecture("nmf", "nmf_base")
@@ -54,9 +55,6 @@ def base_architecture(args):
     
     args.background_stop_gradient = getattr(args, "background_stop_gradient", False)
     args.background_depth = getattr(args, "background_depth", 5.0)
-
-    args.saperate_specular = getattr(args, "saperate_specular", False)
-    args.specular_dropout = getattr(args, "specular_dropout", 0.0)
     
     # raymarcher
     args.discrete_regularization = getattr(args, "discrete_regularization", False)
@@ -73,3 +71,13 @@ def base_architecture(args):
 
     # others
     args.chunk_size = getattr(args, "chunk_size", 64)
+
+
+@register_model_architecture("nmf", "nmf_nerf")
+def nerf_style_architecture(args):
+    args.inputs_to_texture = getattr(args, "inputs_to_texture", "feat:0:256, ray:4")
+    args.feature_layers = getattr(args, "feature_layers", 6)
+    args.texture_layers = getattr(args, "texture_layers", 0)
+    args.feature_field_skip_connect = getattr(args, "feature_field_skip_connect", 3)
+    args.no_layernorm_mlp = getattr(args, "no_layernorm_mlp", True)
+    base_architecture(args)

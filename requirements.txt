@@ -11,6 +11,5 @@ numpy==1.16.4
 mathutils==2.81.2
 tensorboardX==2.0
 imageio-ffmpeg==0.4.2
-git+https://github.com/pytorch/fairseq.git@8aa06aa03b596de58d106d3f55ff43e2b9aa0b80
-git+https://github.com/aliutkus/torchsearchsorted
+git+https://github.com/MultiPath/fairseq-stable.git
 git+https://github.com/MultiPath/lpips-pytorch.git

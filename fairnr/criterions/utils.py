@@ -21,7 +21,7 @@ def rgb_loss(predicts, rgbs, masks=None, L1=False, sum=False):
         loss = torch.abs(predicts - rgbs).sum(-1)
     else:
         loss = ((predicts - rgbs) ** 2).sum(-1)
-
+       
     return loss.mean() if not sum else loss.sum()
 
 
